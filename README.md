@@ -1,6 +1,6 @@
 # BigFix Patch Orchestrator — Frontend
 
-A modern **React + Vite** dashboard for orchestrating OS patch rollouts with **IBM BigFix**.  
+A modern **React + Vite** dashboard for orchestrating OS patch rollouts with **HCL BigFix**.  
 It helps operators move changes **Sandbox → Pilot → Production**, monitor real-time **KPIs**, and enforce promotion **gates** (thresholds + allowable health failures). The app also validates **ServiceNow** Change Requests (CHG) prior to Pilot.
 
 ---
