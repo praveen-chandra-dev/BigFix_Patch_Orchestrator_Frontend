@@ -11,6 +11,17 @@ async function getJSON(url, signal) {
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${t.slice(0, 400)}`);
   return JSON.parse(t);
 }
+async function postJSON(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  const t = await r.text();
+  let j; try { j = JSON.parse(t); } catch { throw new Error(`Unexpected response: ${t.slice(0, 400)}`); }
+  if (!r.ok || j?.ok === false) throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
+  return j;
+}
 async function getLatestActionId(signal) {
   const j = await getJSON(`${API_BASE}/api/actions/last`, signal);
   return j?.actionId ?? null;
@@ -74,7 +85,7 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
       window.__pilotCache.kpiCounts = { reboot, error1603 };
     };
     window.addEventListener("pilot:miscKpisUpdated", onCounts);
-    window.addEventListener("pilot:kpiCountsUpdated", onCounts); // alternate name
+    window.addEventListener("pilot:kpiCountsUpdated", onCounts);
     return () => {
       window.removeEventListener("pilot:miscKpisUpdated", onCounts);
       window.removeEventListener("pilot:kpiCountsUpdated", onCounts);
@@ -116,23 +127,16 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
       if (tot > 0) setTotalComputers(tot);
 
       // d) REBOOT / ERROR1603 COUNTS — prefer KPI → cache → inference
-      // 1) ask KPI widget for counts (it should reply via event)
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent("pilot:requestKpiCounts"));
       }, 0);
-
-      // 2) try cache now
       syncCountsFromCache();
-
-      // 3) if still zero, try a short soft-poll (gives KPI time to respond)
       let tries = 0;
       const timer = setInterval(() => {
         tries += 1;
         syncCountsFromCache();
-        if (tries >= 6) clearInterval(timer); // ~3s total (6 * 500ms)
+        if (tries >= 6) clearInterval(timer);
       }, 500);
-
-      // 4) final fallback: infer from sandbox rows if still zero after 3s
       setTimeout(() => {
         setCounts((prev) => {
           if (prev.reboot > 0 || prev.error1603 > 0) return prev;
@@ -179,7 +183,7 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     }
   }
 
-  /* ---------- derived KPI %s using your rules ---------- */
+  /* --------- derived KPI % using your rules --------- */
   const derived = useMemo(() => {
     const T = totalComputers > 0 ? totalComputers : Math.max(1, sandbox.total);
     const successPct = sandbox.total > 0 ? Math.round((sandbox.success / sandbox.total) * 100) : 0;
@@ -217,7 +221,7 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     }
   }
 
-  /* ---------- CHG flow (validated + ServiceNow check) ---------- */
+  /* ---------- CHG flow (validated + ServiceNow check + TRIGGER PILOT) ---------- */
   const chgUpper = (chgNumber || "").toUpperCase();
   const chgIsValid = /^CHG/.test(chgUpper) && chgUpper.length > 3;
 
@@ -232,6 +236,7 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
 
     try {
       setChgChecking(true);
+      // 1) Validate CHG
       const url = `${API_BASE}/api/sn/change/validate?number=${encodeURIComponent(cleaned)}`;
       const r = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
       const t = await r.text();
@@ -240,37 +245,46 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
 
       if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
 
-      // Strict success path
-      if (j.ok === true && j.implement === true) {
-        window.dispatchEvent(new CustomEvent("pilot:chgEntered", { detail: { chg: cleaned } }));
-        window.__pilotCache = window.__pilotCache || {};
-        window.__pilotCache.changeNo = cleaned;
-        setShowChg(false);
-        setEnableTriggerPilot(true);
-        setDecision(`PASS: ${cleaned} validated (Implement). You may proceed.`);
+      if (j.ok !== true || j.implement !== true) {
+        if (j?.code === "NOT_IMPLEMENT") {
+          const current = j?.record?.state ? ` (Current state: ${j.record.state})` : "";
+          setChgErr(`Change Request is not at Implement stage.${current}`);
+          return;
+        }
+        if (j?.code === "NOT_FOUND_OR_FORBIDDEN") {
+          setChgErr(j?.message || "Change Request doesn't exist or user doesn't have required privileges.");
+          return;
+        }
+        const st = j?.record?.state;
+        if (st && !/^implement$/i.test(String(st))) {
+          setChgErr(`Change Request is not at Implement stage. (Current state: ${st})`);
+          return;
+        }
+        setChgErr(j?.message || "Change validation failed.");
         return;
       }
 
-      // Known failure codes
-      if (j?.code === "NOT_IMPLEMENT") {
-        const current = j?.record?.state ? ` (Current state: ${j.record.state})` : "";
-        setChgErr(`Change Request is not at Implement stage.${current}`);
-        return;
-      }
-      if (j?.code === "NOT_FOUND_OR_FORBIDDEN") {
-        setChgErr(j?.message || "Change Request doesn't exist or user doesn't have required privileges.");
+      // 2) TRIGGER PILOT (with CHG)
+      const baselineName = env?.baselineName || env?.baseline || env?.baseline_title || "";
+      const pilotGroup   = env?.pilotGroup   || env?.groupName || env?.pilot_group || "";
+
+      if (!baselineName || !pilotGroup) {
+        setChgErr("Baseline or Pilot Group not configured in Environment.");
         return;
       }
 
-      // If backend included a record but forgot a code, infer from state
-      const st = j?.record?.state;
-      if (st && !/^implement$/i.test(String(st))) {
-        setChgErr(`Change Request is not at Implement stage. (Current state: ${st})`);
-        return;
-      }
+      const trig = await postJSON(`${API_BASE}/api/pilot/actions`, {
+        baselineName,
+        groupName: pilotGroup,
+        chgNumber: cleaned,
+        requireChg: true,
+      });
 
-      // Fallback unknown failure
-      setChgErr(j?.message || "Change validation failed.");
+      // Refresh + close
+      window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
+      setShowChg(false);
+      setEnableTriggerPilot(false);
+      setDecision(`Pilot triggered (Action ${trig?.actionId || "?"}) with ${cleaned}.`);
     } catch (err) {
       setChgErr(err?.message || String(err));
     } finally {
@@ -278,12 +292,29 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     }
   }
 
+  /* ---------- FORCE trigger when evaluation failed ---------- */
   async function triggerPilot() {
     if (!enableTriggerPilot || busy) return;
     setBusy(true);
     try {
-      console.log("Trigger Pilot (sim). CHG:", (chgUpper || "(none)"));
-      // TODO: call your backend to actually trigger
+      const baselineName = env?.baselineName || env?.baseline || env?.baseline_title || "";
+      const pilotGroup   = env?.pilotGroup   || env?.groupName || env?.pilot_group || "";
+
+      if (!baselineName || !pilotGroup) {
+        setDecision("Baseline or Pilot Group not configured in Environment.");
+        return;
+      }
+
+      const trig = await postJSON(`${API_BASE}/api/pilot/actions/force`, {
+        baselineName,
+        groupName: pilotGroup,
+      });
+
+      window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
+      setEnableTriggerPilot(false);
+      setDecision(`Pilot triggered (forced). Action ${trig?.actionId || "?"}.`);
+    } catch (e) {
+      setDecision(`Trigger Pilot failed: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
@@ -334,7 +365,7 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         Success: <b>{derived.successPct}%</b>, Reboot: <b>{derived.rebootPct}%</b>, Error 1603: <b>{derived.errorPct}%</b>, Health: <b>{derived.healthPct}%</b> (Total Computers used: <b>{derived.T}</b>)
       </div>
 
-      {/* CHG modal (validated + ServiceNow check) */}
+      {/* CHG modal */}
       {showChg && (
         <div className="modal show" role="dialog" aria-modal="true">
           <div className="box" style={{ maxWidth: 520 }}>
