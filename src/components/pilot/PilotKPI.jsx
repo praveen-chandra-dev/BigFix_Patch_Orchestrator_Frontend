@@ -74,7 +74,7 @@ function arcPath(cx, cy, r, startDeg, endDeg, innerR = 0) {
 }
 
 /* -------------------------------- component -------------------------------- */
-export default function PilotKPI() {
+export default function PilotKPI({title = "Pilot KPI"}) {
   // KPI counters
   const [kpi, setKpi] = useState({
     rebootPending: 2,
@@ -324,7 +324,7 @@ export default function PilotKPI() {
 
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
-      <h2>Pilot KPI</h2>
+      <h2>{title}</h2>
 
       <div className="row" style={{ gap: 16, alignItems: "center" }}>
         {/* right side only */}

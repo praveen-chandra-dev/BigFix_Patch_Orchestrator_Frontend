@@ -15,7 +15,12 @@ const fmtTime = (s) => {
   return m ? m[1] : s;
 };
 
-export default function PilotSandboxResult() {
+export default function PilotSandboxResult({
+  /** Title shown at the top of the card. Default stays as-is for Pilot. */
+  title = "Sandbox Result",
+  /** Title for the modal header. By default it mirrors `title`. */
+  detailTitle,
+}) {
   const [lastId, setLastId] = useState(null);
   const [summary, setSummary] = useState({ success: 0, total: 0 });
   const [loadingSummary, setLoadingSummary] = useState(true);
@@ -52,13 +57,13 @@ export default function PilotSandboxResult() {
     return () => controller.abort();
   }, []);
 
-  // 👂 Listen for Refresh KPIs broadcasts to update the UI live
+  // Listen for Refresh KPIs broadcasts to update the UI live
   useEffect(() => {
     function onSandbox(e) {
       const { actionId, total, success, rows: newRows } = e.detail || {};
       if (actionId != null) setLastId(actionId);
       setSummary({ success: Number(success || 0), total: Number(total || 0) });
-      if (open && Array.isArray(newRows)) setRows(newRows); // if modal is open, update its table too
+      if (open && Array.isArray(newRows)) setRows(newRows); // keep modal in sync
     }
     window.addEventListener("pilot:sandboxResultsUpdated", onSandbox);
 
@@ -101,7 +106,8 @@ export default function PilotSandboxResult() {
 
   return (
     <section className="card reveal" data-reveal>
-      <h2>Sandbox Result</h2>
+      <h2>{title}</h2>
+
       {loadingSummary ? (
         <div className="sub">Loading...</div>
       ) : err ? (
@@ -121,7 +127,7 @@ export default function PilotSandboxResult() {
       {open && (
         <div className="modal show" role="dialog" aria-modal="true">
           <div className="box">
-            <h3>Sandbox Result Details</h3>
+            <h3>{detailTitle || `${title} Details`}</h3>
             <div className="toolbar-mini">
               <span className="pill green">{`Success: ${summary.success}/${summary.total} (${pct}%)`}</span>
               <span className="count">Rows: {rows.length}</span>

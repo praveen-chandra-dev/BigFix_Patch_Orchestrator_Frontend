@@ -2,7 +2,7 @@
 import { useState, useMemo, useCallback, Suspense, lazy } from "react";
 
 // If your stylesheet path is different, adjust this line accordingly.
- import "./styles/Style.css";
+import "./styles/Style.css";
 
 // ===== Existing components (Sandbox flow) =====
 import FlowCard, { Stage } from "./components/FlowCard.jsx";
@@ -41,7 +41,6 @@ function Main() {
 
   // Called after Sandbox trigger completes successfully
   const handleSandboxDone = useCallback((result) => {
-    // keep your existing checks if needed
     if (!result || result.ok) {
       setSandboxTriggered(true);
       setCurrentStage(Stage.PILOT);
@@ -79,32 +78,40 @@ function Main() {
         </>
       )}
 
-      {/* -------- PILOT VIEW (new UI only) -------- */}
+      {/* -------- PILOT VIEW -------- */}
       {currentStage === Stage.PILOT && (
         <Suspense fallback={<div className="sub" style={{ padding: 16 }}>Loading pilot view…</div>}>
           <div className="grid g-3">
             <PilotEnvironment />
-            <PilotSandboxResult />
-            <PilotKPI />
+            {/* keep original pilot naming; pass an explicit title if you prefer */}
+            <PilotSandboxResult title="Sandbox Result" />
+            <PilotKPI title="Pilot KPI" />
           </div>
 
           <div className="two-up-cards">
-            {/* 👇 pass sandboxTriggered */}
             <PilotDecisionEngine sbxDone={sandboxTriggered} />
             <PilotReports />
           </div>
         </Suspense>
       )}
 
-      {/* -------- PRODUCTION VIEW (placeholder; keep as you had) -------- */}
+      {/* -------- PRODUCTION VIEW (reuse pilot components; only labels change) -------- */}
       {currentStage === Stage.PRODUCTION && (
-        <>
-          <Environment />
-          <div className="two-up-cards">
-            <DecisionEngine apiBase={apiBase} disabled />
-            <ReportNotification />
+        <Suspense fallback={<div className="sub" style={{ padding: 16 }}>Loading production view…</div>}>
+          <div className="grid g-3">
+            <PilotEnvironment />
+            {/* exact same component & data; just a new label */}
+            <PilotSandboxResult title="Pilot Result" />
+            {/* rename KPI card for production */}
+            <PilotKPI title="Production KPI" />
           </div>
-        </>
+
+          <div className="two-up-cards">
+            {/* Decision engine can be reused as-is; if you need prod-specific logic later, add props */}
+            <PilotDecisionEngine sbxDone={sandboxTriggered} />
+            <PilotReports />
+          </div>
+        </Suspense>
       )}
     </>
   );
@@ -113,7 +120,6 @@ function Main() {
 export default function App() {
   return (
     <EnvironmentProvider>
-      {/* Restored header so your top bar appears exactly as before */}
       <Suspense fallback={null}>
         <Header />
       </Suspense>
