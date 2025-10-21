@@ -1,22 +1,13 @@
-// App.jsx
-import { useState, useMemo, useCallback, Suspense, lazy } from "react";
-
-// If your stylesheet path is different, adjust this line accordingly.
+import { useState, useMemo, useCallback, useEffect, Suspense, lazy } from "react";
 import "./styles/Style.css";
 
-// ===== Existing components (Sandbox flow) =====
 import FlowCard, { Stage } from "./components/FlowCard.jsx";
-import Environment, {
-  EnvironmentProvider,
-  useEnvironment,
-} from "./components/Environment.jsx";
+import Environment, { EnvironmentProvider, useEnvironment } from "./components/Environment.jsx";
 import DecisionEngine from "./components/DecisionEngine.jsx";
 import ReportNotification from "./components/ReportNotification.jsx";
 
-// ===== Restore the Header (so the top bar shows again) =====
 const Header = lazy(() => import("./components/Header.jsx"));
 
-// ===== Pilot components (lazy so missing files won't crash Sandbox) =====
 const PilotEnvironment    = lazy(() => import("./components/pilot/PilotEnvironment.jsx"));
 const PilotSandboxResult  = lazy(() => import("./components/pilot/PilotSandboxResult.jsx"));
 const PilotKPI            = lazy(() => import("./components/pilot/PilotKPI.jsx"));
@@ -26,9 +17,15 @@ const PilotReports        = lazy(() => import("./components/pilot/PilotReports.j
 function Main() {
   const { env } = useEnvironment();
 
-  // Preserve your original stage flow
   const [currentStage, setCurrentStage] = useState(Stage.SANDBOX);
+
+  // progress flags (as before)
   const [sandboxTriggered, setSandboxTriggered] = useState(false);
+  const [pilotTriggered,   setPilotTriggered]   = useState(false);
+
+  // 🔒 locks to keep earlier stages view-only after advancing
+  const [sandboxLocked, setSandboxLocked] = useState(false);
+  const [pilotLocked,   setPilotLocked]   = useState(false);
 
   const apiBase = useMemo(
     () => import.meta.env.VITE_API_BASE || "http://localhost:5174",
@@ -39,24 +36,81 @@ function Main() {
     setCurrentStage(next);
   }, []);
 
-  // Called after Sandbox trigger completes successfully
+  // When Sandbox completes: mark triggered, lock Sandbox, move to Pilot
   const handleSandboxDone = useCallback((result) => {
     if (!result || result.ok) {
       setSandboxTriggered(true);
+      setSandboxLocked(true);
       setCurrentStage(Stage.PILOT);
     }
   }, []);
 
+  // Pilot fired: lock pilot and move to Production
+  useEffect(() => {
+    const onPilotTriggered = () => {
+      setPilotTriggered(true);
+      setPilotLocked(true);
+      setCurrentStage(Stage.PRODUCTION);
+    };
+    window.addEventListener("pilot:triggered", onPilotTriggered);
+    return () => window.removeEventListener("pilot:triggered", onPilotTriggered);
+  }, []);
+
+  // Be safe: whenever we land in Production (via nav), lock Pilot
+  useEffect(() => {
+    if (currentStage === Stage.PRODUCTION) {
+      setPilotLocked(true);
+    }
+  }, [currentStage]);
+
+  // Global navigation hooks (unchanged)
+  useEffect(() => {
+    window.__flow = window.__flow || {};
+    window.__flow.goto = (stage) => {
+      const s = String(stage || "").toLowerCase();
+      if (s === "sandbox") setCurrentStage(Stage.SANDBOX);
+      else if (s === "pilot") setCurrentStage(Stage.PILOT);
+      else if (s === "production") setCurrentStage(Stage.PRODUCTION);
+    };
+    const onNavigate = (e) => {
+      const s = String(e?.detail?.stage || "").toLowerCase();
+      if (!s) return;
+      if (s === "sandbox") setCurrentStage(Stage.SANDBOX);
+      if (s === "pilot") setCurrentStage(Stage.PILOT);
+      if (s === "production") setCurrentStage(Stage.PRODUCTION);
+    };
+    window.addEventListener("pilot:navigate", onNavigate);
+    window.addEventListener("flow:navigate", onNavigate);
+    window.addEventListener("orchestrator:navigate", onNavigate);
+    return () => {
+      window.removeEventListener("pilot:navigate", onNavigate);
+      window.removeEventListener("flow:navigate", onNavigate);
+      window.removeEventListener("orchestrator:navigate", onNavigate);
+    };
+  }, []);
+
+  // ✅ Reset wiring: DecisionEngine emits "orchestrator:resetToSandbox"
+  useEffect(() => {
+    const onReset = () => {
+      // clear all run flags & locks so a fresh pass can begin
+      setSandboxTriggered(false);
+      setPilotTriggered(false);
+      setSandboxLocked(false);
+      setPilotLocked(false);
+      setCurrentStage(Stage.SANDBOX);
+    };
+    window.addEventListener("orchestrator:resetToSandbox", onReset);
+    return () => window.removeEventListener("orchestrator:resetToSandbox", onReset);
+  }, []);
+
   return (
     <>
-      {/* Stage rail */}
       <FlowCard
         activeStage={currentStage}
         viewStage={currentStage}
         gotoStage={handleStageChange}
       />
 
-      {/* -------- SANDBOX VIEW (unchanged behavior) -------- */}
       {currentStage === Stage.SANDBOX && (
         <>
           <Environment />
@@ -67,7 +121,7 @@ function Main() {
               group={env.sbxGroup}
               autoMail={env.autoMail}
               onDone={handleSandboxDone}
-              disabled={currentStage !== Stage.SANDBOX || sandboxTriggered}
+              disabled={currentStage !== Stage.SANDBOX || sandboxLocked}
             />
             <ReportNotification
               onExportCSV={() => console.log("Export Sandbox CSV")}
@@ -78,37 +132,38 @@ function Main() {
         </>
       )}
 
-      {/* -------- PILOT VIEW -------- */}
       {currentStage === Stage.PILOT && (
         <Suspense fallback={<div className="sub" style={{ padding: 16 }}>Loading pilot view…</div>}>
           <div className="grid g-3">
             <PilotEnvironment />
-            {/* keep original pilot naming; pass an explicit title if you prefer */}
             <PilotSandboxResult title="Sandbox Result" />
             <PilotKPI title="Pilot KPI" />
           </div>
-
           <div className="two-up-cards">
-            <PilotDecisionEngine sbxDone={sandboxTriggered} />
+            <PilotDecisionEngine
+              sbxDone={sandboxTriggered}
+              mode="pilot"
+              readOnly={pilotLocked}   // 🔒 makes Pilot view-only after you move to Production
+            />
             <PilotReports />
           </div>
         </Suspense>
       )}
 
-      {/* -------- PRODUCTION VIEW (reuse pilot components; only labels change) -------- */}
       {currentStage === Stage.PRODUCTION && (
         <Suspense fallback={<div className="sub" style={{ padding: 16 }}>Loading production view…</div>}>
           <div className="grid g-3">
             <PilotEnvironment />
-            {/* exact same component & data; just a new label */}
             <PilotSandboxResult title="Pilot Result" />
-            {/* rename KPI card for production */}
             <PilotKPI title="Production KPI" />
           </div>
 
           <div className="two-up-cards">
-            {/* Decision engine can be reused as-is; if you need prod-specific logic later, add props */}
-            <PilotDecisionEngine sbxDone={sandboxTriggered} />
+            <PilotDecisionEngine
+              sbxDone={true}
+              pilotDone={pilotTriggered}
+              mode="production"
+            />
             <PilotReports />
           </div>
         </Suspense>
@@ -123,7 +178,6 @@ export default function App() {
       <Suspense fallback={null}>
         <Header />
       </Suspense>
-
       <Main />
     </EnvironmentProvider>
   );

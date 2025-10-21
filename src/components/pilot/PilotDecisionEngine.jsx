@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useEnvironment } from "../Environment.jsx";
 
-/* ---------------- API helpers ---------------- */
+/* ---------------- API helpers (unchanged) ---------------- */
 const API_BASE =
   (import.meta.env && import.meta.env.VITE_API_BASE) || "http://localhost:5174";
 
@@ -46,40 +46,47 @@ async function getTotalComputersMaybe(signal) {
 const num = (v, d=0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const pick = (o, k, d=undefined) => (o && o[k] !== undefined ? o[k] : d);
 
-/* --------------- component ------------------- */
-export default function PilotDecisionEngine({ sbxDone = false }) {
-  const { env } = useEnvironment(); // live values from Environment & Baseline
+/**
+ * Props:
+ * - sbxDone   : boolean — Sandbox completed (required for Pilot)
+ * - pilotDone : boolean — Pilot completed (required for Production)
+ * - mode      : "pilot" | "production" (default "pilot")
+ * - readOnly  : boolean — when true, all action buttons are disabled (view-only)
+ */
+export default function PilotDecisionEngine({ sbxDone = false, pilotDone = false, mode = "pilot", readOnly = false }) {
+  const { env } = useEnvironment();
+
+  const inProduction = String(mode).toLowerCase() === "production";
+  const gateSatisfied = inProduction ? !!pilotDone : !!sbxDone;
 
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // gating states
   const [enableEvaluate, setEnableEvaluate] = useState(false);
   const [enableTriggerPilot, setEnableTriggerPilot] = useState(false);
 
-  // decision/readout
   const [evaluated, setEvaluated] = useState(false);
   const [decision, setDecision] = useState("Evaluate to see gate status…");
 
-  // CHG modal
   const [showChg, setShowChg] = useState(false);
   const [chgNumber, setChgNumber] = useState("CHG");
   const [chgErr, setChgErr] = useState("");
   const [chgChecking, setChgChecking] = useState(false);
 
-  // data we evaluate
   const [sandbox, setSandbox] = useState({ success: 0, total: 0, rows: [] });
   const [counts, setCounts]   = useState({ reboot: 0, error1603: 0, critical: 0 });
   const [totalComputers, setTotalComputers] = useState(0);
 
-  /* ---------- accept KPI counts from other widgets (preferred) ---------- */
+  // Track when production has actually been triggered to enable Reset button
+  const [prodTriggered, setProdTriggered] = useState(false);
+
+  /* ---------- accept KPI counts from other widgets ---------- */
   useEffect(() => {
     const onCounts = (e) => {
       const d = e.detail || {};
       const reboot = num(d.reboot, counts.reboot);
       const error1603 = num(d.error1603, counts.error1603);
       setCounts((c) => ({ ...c, reboot, error1603 }));
-      // cache for everyone
       window.__pilotCache = window.__pilotCache || {};
       window.__pilotCache.miscKpis = { reboot, error1603 };
       window.__pilotCache.kpiCounts = { reboot, error1603 };
@@ -92,7 +99,6 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     };
   }, [counts.reboot, counts.error1603]);
 
-  /* ---------- helper: try to pull counts from cache immediately ---------- */
   function syncCountsFromCache() {
     const cache = window.__pilotCache || {};
     const src = cache.miscKpis || cache.kpiCounts || {};
@@ -108,7 +114,6 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     const ab = new AbortController();
 
     try {
-      // a) latest sandbox results
       const actionId = await getLatestActionId(ab.signal);
       const results = await getActionResults(actionId, ab.signal);
       const rows = Array.isArray(results?.rows) ? results.rows : [];
@@ -117,16 +122,13 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
       const sandboxPayload = { actionId: results?.actionId ?? actionId ?? null, total, success, rows };
       setSandbox({ success, total, rows });
 
-      // b) critical health
       const ch = await getCriticalHealth(ab.signal);
       const healthPayload = { count: num(ch?.count, 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
       setCounts((c) => ({ ...c, critical: healthPayload.count }));
 
-      // c) total computers
       const tot = await getTotalComputersMaybe(ab.signal);
       if (tot > 0) setTotalComputers(tot);
 
-      // d) REBOOT / ERROR1603 COUNTS — prefer KPI → cache → inference
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent("pilot:requestKpiCounts"));
       }, 0);
@@ -156,7 +158,6 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         });
       }, 3200);
 
-      // e) cache + broadcast
       window.__pilotCache = window.__pilotCache || {};
       window.__pilotCache.sandboxResults = sandboxPayload;
       window.__pilotCache.criticalHealth = healthPayload;
@@ -169,9 +170,13 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
       }
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
 
-      // f) In Pilot: enable only Evaluate
-      if (sbxDone) {
+      if (gateSatisfied) {
         setEnableEvaluate(true);
+        setEnableTriggerPilot(false);
+        setEvaluated(false);
+        setDecision("Evaluate to see gate status…");
+      } else {
+        setEnableEvaluate(false);
         setEnableTriggerPilot(false);
         setEvaluated(false);
         setDecision("Evaluate to see gate status…");
@@ -183,7 +188,7 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     }
   }
 
-  /* --------- derived KPI % using your rules --------- */
+  /* --------- derived KPI % using your rules (unchanged) --------- */
   const derived = useMemo(() => {
     const T = totalComputers > 0 ? totalComputers : Math.max(1, sandbox.total);
     const successPct = sandbox.total > 0 ? Math.round((sandbox.success / sandbox.total) * 100) : 0;
@@ -193,9 +198,10 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     return { T, successPct, rebootPct, errorPct, healthPct };
   }, [sandbox.success, sandbox.total, totalComputers, counts.reboot, counts.error1603, counts.critical]);
 
-  /* ---------- evaluate & decide ---------- */
+  /* ---------- evaluate & decide (unchanged) ---------- */
   function evaluateAndDecide() {
-    if (!sbxDone || !enableEvaluate) return;
+    if (!gateSatisfied || !enableEvaluate || readOnly) return;
+
     const threshold = num(env?.successThreshold, 90);
     const allowableCHF = num(env?.allowableCriticalHF, 0);
 
@@ -213,15 +219,15 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
       setDecision("PASS: Meets thresholds. Please enter CHG Number to proceed.");
       setShowChg(true);
       setChgErr("");
-      if (!chgNumber) setChgNumber("CHG"); // prefill if empty
+      if (!chgNumber) setChgNumber("CHG");
       setEnableTriggerPilot(false);
     } else {
-      setDecision("FAIL: One or more thresholds not met. You may trigger Pilot manually.");
+      setDecision(`FAIL: One or more thresholds not met. You may trigger ${inProduction ? "Production" : "Pilot"} manually.`);
       setEnableTriggerPilot(true);
     }
   }
 
-  /* ---------- CHG flow (validated + ServiceNow check + TRIGGER PILOT) ---------- */
+  /* ---------- CHG flow (validate + TRIGGER) (APIs unchanged) ---------- */
   const chgUpper = (chgNumber || "").toUpperCase();
   const chgIsValid = /^CHG/.test(chgUpper) && chgUpper.length > 3;
 
@@ -236,13 +242,11 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
 
     try {
       setChgChecking(true);
-      // 1) Validate CHG
       const url = `${API_BASE}/api/sn/change/validate?number=${encodeURIComponent(cleaned)}`;
       const r = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
       const t = await r.text();
       let j;
       try { j = JSON.parse(t); } catch { throw new Error(`Unexpected response: ${t.slice(0, 400)}`); }
-
       if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
 
       if (j.ok !== true || j.implement !== true) {
@@ -264,10 +268,8 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         return;
       }
 
-      // 2) TRIGGER PILOT (with CHG)
       const baselineName = env?.baselineName || env?.baseline || env?.baseline_title || "";
       const pilotGroup   = env?.pilotGroup   || env?.groupName || env?.pilot_group || "";
-
       if (!baselineName || !pilotGroup) {
         setChgErr("Baseline or Pilot Group not configured in Environment.");
         return;
@@ -280,11 +282,21 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         requireChg: true,
       });
 
-      // Refresh + close
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
       setShowChg(false);
       setEnableTriggerPilot(false);
-      setDecision(`Pilot triggered (Action ${trig?.actionId || "?"}) with ${cleaned}.`);
+      setDecision(`${inProduction ? "Production" : "Pilot"} triggered (Action ${trig?.actionId || "?"}) with ${cleaned}.`);
+
+      // announce transitions
+      if (!inProduction) {
+        // Moving Pilot -> Production
+        window.dispatchEvent(new CustomEvent("pilot:triggered"));
+        window.dispatchEvent(new CustomEvent("flow:navigate", { detail: { stage: "production" } }));
+      } else {
+        // Production actually triggered; allow reset
+        setProdTriggered(true);
+        window.dispatchEvent(new CustomEvent("production:triggered"));
+      }
     } catch (err) {
       setChgErr(err?.message || String(err));
     } finally {
@@ -292,9 +304,9 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
     }
   }
 
-  /* ---------- FORCE trigger when evaluation failed ---------- */
+  /* ---------- FORCE trigger when evaluation failed (APIs unchanged) ---------- */
   async function triggerPilot() {
-    if (!enableTriggerPilot || busy) return;
+    if (!enableTriggerPilot || busy || readOnly) return;
     setBusy(true);
     try {
       const baselineName = env?.baselineName || env?.baseline || env?.baseline_title || "";
@@ -312,21 +324,45 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
 
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
       setEnableTriggerPilot(false);
-      setDecision(`Pilot triggered (forced). Action ${trig?.actionId || "?"}.`);
+      setDecision(`${inProduction ? "Production" : "Pilot"} triggered (forced). Action ${trig?.actionId || "?"}.`);
+
+      if (!inProduction) {
+        window.dispatchEvent(new CustomEvent("pilot:triggered"));
+        window.dispatchEvent(new CustomEvent("flow:navigate", { detail: { stage: "production" } }));
+      } else {
+        setProdTriggered(true);
+        window.dispatchEvent(new CustomEvent("production:triggered"));
+      }
     } catch (e) {
-      setDecision(`Trigger Pilot failed: ${e?.message || e}`);
+      setDecision(`Trigger ${inProduction ? "Production" : "Pilot"} failed: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
   }
 
+  /* ---------- Reset to Sandbox (Production only, enabled after trigger) ---------- */
+  function resetToSandbox() {
+    if (!inProduction || !prodTriggered) return;
+    // Ask App to fully reset locks + navigate
+    window.dispatchEvent(new CustomEvent("orchestrator:resetToSandbox"));
+  }
+
+  const triggerLabel = inProduction ? "Trigger Production" : "Trigger Pilot";
+
   return (
     <section className="card reveal" data-reveal>
       <h2>Decision Engine</h2>
 
-      {!sbxDone && (
+      {!gateSatisfied && (
         <div className="sub" style={{ marginBottom: 10, color: "#8a8fa3" }}>
-          🔒 Complete Sandbox stage to enable Pilot actions
+          {inProduction
+            ? "🔒 Pilot stage must be triggered before Production."
+            : "🔒 Complete Sandbox stage to enable Pilot actions"}
+        </div>
+      )}
+      {readOnly && (
+        <div className="sub" style={{ marginBottom: 10, color: "#8a8fa3" }}>
+          View-only: this stage has already advanced.
         </div>
       )}
 
@@ -343,8 +379,12 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         <button
           className="btn ok"
           onClick={evaluateAndDecide}
-          disabled={!sbxDone || !enableEvaluate}
-          title={!sbxDone ? "Complete Sandbox first" : (!enableEvaluate ? "Refresh KPIs first" : "")}
+          disabled={!gateSatisfied || !enableEvaluate || readOnly}
+          title={
+            !gateSatisfied
+              ? (inProduction ? "Trigger Pilot first" : "Complete Sandbox first")
+              : (readOnly ? "Stage is view-only" : (!enableEvaluate ? "Refresh KPIs first" : ""))
+          }
         >
           Evaluate &amp; Decide
         </button>
@@ -352,11 +392,27 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         <button
           className="btn pri"
           onClick={triggerPilot}
-          disabled={!enableTriggerPilot || busy}
-          title={!enableTriggerPilot ? "Complete evaluation (or provide CHG) to enable" : ""}
+          disabled={!gateSatisfied || !enableTriggerPilot || busy || readOnly}
+          title={
+            !gateSatisfied
+              ? (inProduction ? "Trigger Pilot first" : "Complete Sandbox first")
+              : (readOnly ? "Stage is view-only" : (!enableTriggerPilot ? "Complete evaluation (or provide CHG) to enable" : ""))
+          }
         >
-          {busy ? "Triggering…" : "Trigger Pilot"}
+          {busy ? "Triggering…" : triggerLabel}
         </button>
+
+        {/* Production-only Reset (red), enabled only after Production is triggered */}
+        {inProduction && (
+          <button
+            className="btn danger"
+            onClick={resetToSandbox}
+            disabled={!prodTriggered}
+            title={!prodTriggered ? "Available after Production is triggered" : "Reset to Sandbox"}
+          >
+            Reset to Sandbox
+          </button>
+        )}
       </div>
 
       <div className="sub" style={{ marginTop: 10, lineHeight: 1.6 }}>
@@ -365,7 +421,6 @@ export default function PilotDecisionEngine({ sbxDone = false }) {
         Success: <b>{derived.successPct}%</b>, Reboot: <b>{derived.rebootPct}%</b>, Error 1603: <b>{derived.errorPct}%</b>, Health: <b>{derived.healthPct}%</b> (Total Computers used: <b>{derived.T}</b>)
       </div>
 
-      {/* CHG modal */}
       {showChg && (
         <div className="modal show" role="dialog" aria-modal="true">
           <div className="box" style={{ maxWidth: 520 }}>
