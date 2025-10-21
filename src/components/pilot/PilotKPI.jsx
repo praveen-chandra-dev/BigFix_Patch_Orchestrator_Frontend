@@ -259,6 +259,69 @@ export default function PilotKPI() {
     }
   }
 
+  /* -------------------- AUTO REFRESH every 30 seconds -------------------- */
+  useEffect(() => {
+    let timer;
+    const ab = new AbortController();
+
+    async function tick() {
+      try {
+        // A) Latest sandbox results
+        const last = await getJson(`${API_BASE}/api/actions/last`, ab.signal);
+        const actionId = last?.actionId;
+        if (actionId) {
+          const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
+          const rows = Array.isArray(res?.rows) ? res.rows : [];
+          const success = Number(res?.success ?? rows.filter(r => /success/i.test(r?.status || "")).length);
+          const total   = Number(res?.total   ?? rows.length);
+          const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+
+          // local state
+          setKpi(p => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
+
+          // cache + broadcast
+          const sandboxPayload = { actionId, success, total, rows };
+          window.__pilotCache = window.__pilotCache || {};
+          window.__pilotCache.sandboxResults = sandboxPayload;
+          window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: sandboxPayload }));
+        }
+
+        // B) Critical Health
+        const ch = await getJson(`${API_BASE}/api/health/critical`, ab.signal);
+        const healthPayload = { count: Number(ch?.count || 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
+        setKpi(p => ({ ...p, critHealthFails: healthPayload.count }));
+        window.__pilotCache = window.__pilotCache || {};
+        window.__pilotCache.criticalHealth = healthPayload;
+        window.dispatchEvent(new CustomEvent("pilot:criticalHealthUpdated", { detail: healthPayload }));
+
+        // C) Total computers
+        try {
+          const tot = await getJson(`${API_BASE}/api/infra/total-computers`, ab.signal);
+          if (typeof tot?.total === "number") {
+            setTotalComputers(Number(tot.total) || 0);
+            window.__pilotCache.totals = { ...(window.__pilotCache.totals || {}), computers: Number(tot.total) || 0 };
+            window.dispatchEvent(new CustomEvent("pilot:totalsUpdated", { detail: { totalComputers: Number(tot.total) || 0 } }));
+          }
+        } catch { /* ignore if endpoint missing */ }
+
+        // D) notify others a refresh happened
+        window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
+      } catch (err) {
+        // swallow occasional polling errors
+        console.warn("Auto-refresh tick failed:", err?.message || err);
+      }
+    }
+
+    // immediate, then every 30s
+    tick();
+    timer = setInterval(tick, 30000);
+
+    return () => {
+      clearInterval(timer);
+      ab.abort();
+    };
+  }, []);
+
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
       <h2>Pilot KPI</h2>
@@ -298,165 +361,30 @@ export default function PilotKPI() {
           <div className="sep"></div>
 
           {/* Donut with hover explode + legend; center shows % per rules above */}
-          <div className="chart">
-            <svg viewBox="0 0 120 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pilot distribution">
-              {/* Donut center at (30,32) */}
-              <g transform="translate(0,0)">
-                {donut.map((s, i) => {
-                  const mid = (s.start + s.end) / 2;
-                  const rad = (mid - 90) * Math.PI / 180;
-                  const explode = hoverKey === s.key ? 3 : 0;
-                  const dx = explode * Math.cos(rad);
-                  const dy = explode * Math.sin(rad);
-                  return (
-                    <path
-                      key={i}
-                      d={arcPath(30, 32, 26, s.start, s.end, 16)}
-                      fill={s.fill}
-                      stroke="var(--panel-1)"
-                      strokeWidth="0.2"
-                      transform={`translate(${dx},${dy})`}
-                      style={{ transition: "transform 180ms ease, filter 180ms ease", filter: hoverKey === s.key ? "brightness(1.05)" : "none", cursor: "pointer" }}
-                      onMouseEnter={() => setHoverKey(s.key)}
-                      onMouseLeave={() => setHoverKey(null)}
-                    />
-                  );
-                })}
-                {/* Center readout */}
-                <text x="30" y="29" textAnchor="middle" fontSize="9" fontWeight="800" fill="var(--text)">
-                  {center.pct}%
-                </text>
-                <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)">
-                  {center.label}
-                </text>
-              </g>
-
-              {/* Legend box (hover syncs with slices) */}
-              <g transform="translate(64,10)" fontSize="6">
-                {[
-                  { key: "Success",    fill: "var(--success)", y: -3 },
-                  { key: "Reboot",     fill: "var(--warn)",    y: 10 },
-                  { key: "Error 1603", fill: "var(--info)",    y: 23 },
-                  { key: "Health",     fill: "var(--danger)",  y: 37 },
-                ].map((l) => (
-                  <g key={l.key}
-                     transform={`translate(6,${l.y})`}
-                     onMouseEnter={() => setHoverKey(l.key)}
-                     onMouseLeave={() => setHoverKey(null)}
-                     style={{ cursor: "pointer", opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
-                    <circle cx="4" cy="4" r="3" fill={l.fill} />
-                    <text x="12" y="6">{l.key}</text>
-                  </g>
-                ))}
-              </g>
-            </svg>
-          </div>
+          <DonutChart
+            donut={donut}
+            center={center}
+            hoverKey={hoverKey}
+            setHoverKey={setHoverKey}
+          />
         </div>
       </div>
 
-      {/* Success modal */}
-      {openSuccess && (
-        <div className="modal show" role="dialog" aria-modal="true">
-          <div className="box">
-            <h3>Success — Pilot</h3>
-            <div className="toolbar-mini">
-              <span className="pill green">Success</span>
-              <span className="count">Rows: {successRows.length}</span>
-              <span className="spacer"></span>
-              <button className="btn" onClick={() => setOpenSuccess(false)}>Close</button>
-            </div>
+      <SuccessModal
+        open={openSuccess}
+        rows={successRows}
+        loading={successLoading}
+        error={successErr}
+        onClose={() => setOpenSuccess(false)}
+      />
 
-            {successLoading && <div className="loading">Loading…</div>}
-            {successErr && <div className="sub" style={{ color: "var(--danger)" }}>{successErr}</div>}
-
-            {!successLoading && !successErr && (
-              <div className="tableWrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ minWidth: 220 }}>Server Name</th>
-                      <th style={{ minWidth: 160 }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {successRows.length === 0 ? (
-                      <tr><td colSpan={2} className="sub">No success rows.</td></tr>
-                    ) : (
-                      successRows.map((r, i) => (
-                        <tr key={i}>
-                          <td>{r.server || "—"}</td>
-                          <td>Success</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Critical Health modal */}
-      {openHealth && (
-        <div className="modal show" role="dialog" aria-modal="true">
-          <div className="box">
-            <h3>Critical Health — Pilot</h3>
-            <div className="toolbar-mini">
-              <span className="pill amber">Health</span>
-              <span className="count">Rows: {healthRows.length}</span>
-              <span className="spacer"></span>
-              <button className="btn" onClick={() => setOpenHealth(false)}>Close</button>
-            </div>
-
-            {healthLoading && <div className="loading">Loading…</div>}
-            {healthErr && <div className="sub" style={{ color: "var(--danger)" }}>{healthErr}</div>}
-
-            {!healthLoading && !healthErr && (
-              <div className="tableWrap chf">
-                <table className="tight">
-                  <thead>
-                    <tr>
-                      <th>Server</th>
-                      <th>RAM %</th>
-                      <th>CPU %</th>
-                      <th>Disk</th>
-                      <th>IP</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {healthRows.length === 0 ? (
-                      <tr><td colSpan={5} className="sub">No rows.</td></tr>
-                    ) : (
-                      healthRows.map((r, i) => (
-                        <tr key={i}>
-                          <td>{r.server || "N/A"}</td>
-                          <td>{r.ramPct ?? "N/A"}</td>
-                          <td>{r.cpuPct ?? "N/A"}</td>
-                          <td>{r.disk || "N/A"}</td>
-                          <td>{r.ip || "N/A"}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* no horizontal scroll */}
-          <style>{`
-            .tableWrap.chf { overflow-x: hidden; }
-            .tableWrap.chf table.tight { table-layout: fixed; width: 100%; }
-            .tableWrap.chf th:nth-child(1), .tableWrap.chf td:nth-child(1) { width: 22%; }
-            .tableWrap.chf th:nth-child(2), .tableWrap.chf td:nth-child(2) { width: 10%; }
-            .tableWrap.chf th:nth-child(3), .tableWrap.chf td:nth-child(3) { width: 10%; }
-            .tableWrap.chf th:nth-child(4), .tableWrap.chf td:nth-child(4) { width: 18%; }
-            .tableWrap.chf th:nth-child(5), .tableWrap.chf td:nth-child(5) { width: 40%; }
-            .tableWrap.chf td { word-break: break-word; white-space: normal; }
-          `}</style>
-        </div>
-      )}
+      <HealthModal
+        open={openHealth}
+        rows={healthRows}
+        loading={healthLoading}
+        error={healthErr}
+        onClose={() => setOpenHealth(false)}
+      />
 
       {/* pop animation keyframes (scoped) */}
       <style>{`
@@ -467,5 +395,166 @@ export default function PilotKPI() {
         }
       `}</style>
     </section>
+  );
+}
+
+/* -------- small presentational subcomponents to keep main tidy -------- */
+
+function DonutChart({ donut, center, hoverKey, setHoverKey }) {
+  return (
+    <div className="chart">
+      <svg viewBox="0 0 120 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pilot distribution">
+        <g transform="translate(0,0)">
+          {donut.map((s, i) => {
+            const mid = (s.start + s.end) / 2;
+            const rad = (mid - 90) * Math.PI / 180;
+            const explode = hoverKey === s.key ? 3 : 0;
+            const dx = explode * Math.cos(rad);
+            const dy = explode * Math.sin(rad);
+            return (
+              <path
+                key={i}
+                d={arcPath(30, 32, 26, s.start, s.end, 16)}
+                fill={s.fill}
+                stroke="var(--panel-1)"
+                strokeWidth="0.2"
+                transform={`translate(${dx},${dy})`}
+                style={{ transition: "transform 180ms ease, filter 180ms ease", filter: hoverKey === s.key ? "brightness(1.05)" : "none", cursor: "pointer" }}
+                onMouseEnter={() => setHoverKey(s.key)}
+                onMouseLeave={() => setHoverKey(null)}
+              />
+            );
+          })}
+          <text x="30" y="29" textAnchor="middle" fontSize="9" fontWeight="800" fill="var(--text)">{center.pct}%</text>
+          <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)">{center.label}</text>
+        </g>
+
+        <g transform="translate(64,10)" fontSize="6">
+          {[
+            { key: "Success",    fill: "var(--success)", y: -3 },
+            { key: "Reboot",     fill: "var(--warn)",    y: 10 },
+            { key: "Error 1603", fill: "var(--info)",    y: 23 },
+            { key: "Health",     fill: "var(--danger)",  y: 37 },
+          ].map((l) => (
+            <g key={l.key}
+               transform={`translate(6,${l.y})`}
+               onMouseEnter={() => setHoverKey(l.key)}
+               onMouseLeave={() => setHoverKey(null)}
+               style={{ cursor: "pointer", opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
+              <circle cx="4" cy="4" r="3" fill={l.fill} />
+              <text x="12" y="6">{l.key}</text>
+            </g>
+          ))}
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function SuccessModal({ open, rows, loading, error, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal show" role="dialog" aria-modal="true">
+      <div className="box">
+        <h3>Success — Pilot</h3>
+        <div className="toolbar-mini">
+          <span className="pill green">Success</span>
+          <span className="count">Rows: {rows.length}</span>
+          <span className="spacer"></span>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+
+        {loading && <div className="loading">Loading…</div>}
+        {error && <div className="sub" style={{ color: "var(--danger)" }}>{error}</div>}
+
+        {!loading && !error && (
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 220 }}>Server Name</th>
+                  <th style={{ minWidth: 160 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td colSpan={2} className="sub">No success rows.</td></tr>
+                ) : (
+                  rows.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.server || "—"}</td>
+                      <td>Success</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HealthModal({ open, rows, loading, error, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal show" role="dialog" aria-modal="true">
+      <div className="box">
+        <h3>Critical Health — Pilot</h3>
+        <div className="toolbar-mini">
+          <span className="pill amber">Health</span>
+          <span className="count">Rows: {rows.length}</span>
+          <span className="spacer"></span>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+
+        {loading && <div className="loading">Loading…</div>}
+        {error && <div className="sub" style={{ color: "var(--danger)" }}>{error}</div>}
+
+        {!loading && !error && (
+          <div className="tableWrap chf">
+            <table className="tight">
+              <thead>
+                <tr>
+                  <th>Server</th>
+                  <th>RAM %</th>
+                  <th>CPU %</th>
+                  <th>Disk</th>
+                  <th>IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td colSpan={5} className="sub">No rows.</td></tr>
+                ) : (
+                  rows.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.server || "N/A"}</td>
+                      <td>{r.ramPct ?? "N/A"}</td>
+                      <td>{r.cpuPct ?? "N/A"}</td>
+                      <td>{r.disk || "N/A"}</td>
+                      <td>{r.ip || "N/A"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* no horizontal scroll */}
+      <style>{`
+        .tableWrap.chf { overflow-x: hidden; }
+        .tableWrap.chf table.tight { table-layout: fixed; width: 100%; }
+        .tableWrap.chf th:nth-child(1), .tableWrap.chf td:nth-child(1) { width: 22%; }
+        .tableWrap.chf th:nth-child(2), .tableWrap.chf td:nth-child(2) { width: 10%; }
+        .tableWrap.chf th:nth-child(3), .tableWrap.chf td:nth-child(3) { width: 10%; }
+        .tableWrap.chf th:nth-child(4), .tableWrap.chf td:nth-child(4) { width: 18%; }
+        .tableWrap.chf th:nth-child(5), .tableWrap.chf td:nth-child(5) { width: 40%; }
+        .tableWrap.chf td { word-break: break-word; white-space: normal; }
+      `}</style>
+    </div>
   );
 }
