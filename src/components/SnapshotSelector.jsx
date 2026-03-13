@@ -1,4 +1,4 @@
-// vite-project/src/components/SnapshotSelector.jsx
+// src/components/SnapshotSelector.jsx
 import { useState, useEffect, useRef, useCallback } from "react";
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
@@ -24,23 +24,25 @@ const FancyDropdown = ({ options, value, onChange, placeholder, disabled }) => {
   const selectedLabel = options.find((o) => o.value === value)?.label || placeholder;
   return (
     <div className="field flex-1" ref={ref}>
-      <label className="label">Select Group</label>
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`}>
-        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} disabled={disabled}>
-          <span className="fx-value">{selectedLabel}</span>
-          <span className="fx-chevron">▾</span>
-        </button>
-        {open && (
-          <div className="fx-menu">
-            {options.length === 0 ? (
-              <div className="fx-item empty">No Groups Found</div>
-            ) : (
-              options.map((opt) => (
-                <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>{opt.label}</div>
-              ))
+      <div className="meta"><label>Select Group</label></div>
+      <div className="inputwrap">
+          <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`}>
+            <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} disabled={disabled}>
+              <span className="fx-value">{selectedLabel}</span>
+              <span className="fx-chevron">▾</span>
+            </button>
+            {open && (
+              <div className="fx-menu">
+                {options.length === 0 ? (
+                  <div className="fx-item empty">No Groups Found</div>
+                ) : (
+                  options.map((opt) => (
+                    <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>{opt.label}</div>
+                  ))
+                )}
+              </div>
             )}
           </div>
-        )}
       </div>
     </div>
   );
@@ -194,7 +196,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   };
 
   return (
-    <div className="mgmt">
+    <div className="mgmtenv">
       <div className="topbar">
         <div className="flex-row gap-10 items-center">
            <h2>Take Snapshot</h2>
@@ -222,7 +224,9 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                 <FancyDropdown options={groups} value={selectedGroupId} onChange={setSelectedGroupId} placeholder="-- Select Group --" disabled={processing} />
               ) : (
                 <div className="field w-full">
-                   <input className="control" placeholder="Search Servers..." value={search} onChange={e => setSearch(e.target.value)} />
+                   <div className="inputwrap">
+                     <input className="control" placeholder="Search Servers..." value={search} onChange={e => setSearch(e.target.value)} />
+                   </div>
                 </div>
               )}
             </div>
@@ -259,7 +263,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
             </div>
           </div>
           <div className="action-bar">
-             <button className="btn pri" onClick={() => setActiveTab("SETTINGS")} disabled={selectedIds.size === 0}>Next: Settings</button>
+             <button className="btn pri min-w-140" onClick={() => setActiveTab("SETTINGS")} disabled={selectedIds.size === 0}>Next</button>
           </div>
         </>
       )}
@@ -268,29 +272,33 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
         <>
           <div className="section">
             <div className="section-head"><span className="title">Snapshot Configuration</span></div>
-            <div className="controls-grid">
+            <div className="grid">
               <div className="field">
-                <label className="label">Snapshot Name</label>
-                <input className="control" value={snapName} onChange={(e) => setSnapName(e.target.value)} disabled={processing} />
+                <div className="meta"><label>Snapshot Name</label></div>
+                <div className="inputwrap">
+                    <input className="control" value={snapName} onChange={(e) => setSnapName(e.target.value)} disabled={processing} />
+                </div>
               </div>
               <div className="field">
-                <label className="label">Description</label>
-                <input className="control" value={description} onChange={(e) => setDescription(e.target.value)} disabled={processing} />
+                <div className="meta"><label>Description</label></div>
+                <div className="inputwrap">
+                    <input className="control" value={description} onChange={(e) => setDescription(e.target.value)} disabled={processing} />
+                </div>
               </div>
-              <div className="field w-full flex-row gap-20 mt-10">
-                <label className="checkbox-label">
-                  <input type="checkbox" className="custom-checkbox" checked={includeMemory} onChange={(e) => setIncludeMemory(e.target.checked)} disabled={processing} /> Include Memory
+              <div className="field w-full flex-row gap-20 mt-10" style={{ alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" className="custom-checkbox" checked={includeMemory} onChange={(e) => setIncludeMemory(e.target.checked)} disabled={processing} /> <span style={{ fontWeight: 500, color: 'var(--text)' }}>Include Memory</span>
                 </label>
-                <label className="checkbox-label">
-                  <input type="checkbox" className="custom-checkbox" checked={quiesce} onChange={(e) => setQuiesce(e.target.checked)} disabled={processing} /> Quiesce Filesystem
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" className="custom-checkbox" checked={quiesce} onChange={(e) => setQuiesce(e.target.checked)} disabled={processing} /> <span style={{ fontWeight: 500, color: 'var(--text)' }}>Quiesce Filesystem</span>
                 </label>
               </div>
             </div>
           </div>
           {error && <div className="banner error">{error}</div>}
           <div className="action-bar justify-between">
-             <button className="btn" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button>
-             <button className="btn pri" onClick={handleExecute} disabled={processing || selectedIds.size === 0}>{processing ? "Starting..." : "Take Snapshot"}</button>
+             <button className="btn outline" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button>
+             <button className="btn pri min-w-140" onClick={handleExecute} disabled={processing || selectedIds.size === 0}>{processing ? "Starting..." : "Take Snapshot"}</button>
           </div>
         </>
       )}
@@ -299,7 +307,9 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
         <div className="section">
           <div className="section-head">
             <span className="title">Execution History (Snapshots)</span>
-            <button className="btn small" onClick={refreshHistory} disabled={processing}>Refresh</button>
+            <button className="iconbtn" onClick={refreshHistory} disabled={processing} title="Refresh">
+               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            </button>
           </div>
           <div className="tableWrap">
             <table>

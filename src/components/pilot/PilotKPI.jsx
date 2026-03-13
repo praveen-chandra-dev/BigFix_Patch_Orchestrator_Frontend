@@ -267,30 +267,35 @@ function DonutChart({ donut, center, hoverKey, setHoverKey }) {
     <div className="chart">
       <svg viewBox="0 0 120 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pilot distribution">
         <g transform="translate(0,0)">
-          {donut.map((s, i) => {
-            const mid = (s.start + s.end) / 2;
-            const rad = ((mid - 90) * Math.PI) / 180;
-            const explode = hoverKey === s.key ? 3 : 0;
-            const dx = explode * Math.cos(rad);
-            const dy = explode * Math.sin(rad);
-            const d = arcPath(30, 32, 26, s.start, s.end, 16);
-            
-            // We keep the dynamic translation and filter inline
-            const activeStyle = { cursor: "pointer", transition: "transform 180ms ease, filter 180ms ease", filter: hoverKey === s.key ? "brightness(1.05)" : "none" };
-            
-            if (d === null) {
-                return (
-                    <g key={i} transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle}>
-                       {fullRingPaths(30, 32, 26, 16).map((path, idx) => (
-                           <path key={idx} d={path} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
-                       ))}
-                    </g>
-                );
-            }
-            return (
-              <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} style={activeStyle} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} />
-            );
-          })}
+          {donut.length === 0 ? (
+            fullRingPaths(30, 32, 26, 16).map((path, idx) => (
+                <path key={idx} d={path} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" />
+            ))
+          ) : (
+            donut.map((s, i) => {
+              const mid = (s.start + s.end) / 2;
+              const rad = ((mid - 90) * Math.PI) / 180;
+              const explode = hoverKey === s.key ? 3 : 0;
+              const dx = explode * Math.cos(rad);
+              const dy = explode * Math.sin(rad);
+              const d = arcPath(30, 32, 26, s.start, s.end, 16);
+              
+              const activeStyle = { cursor: "pointer", transition: "transform 180ms ease, filter 180ms ease", filter: hoverKey === s.key ? "brightness(1.05)" : "none" };
+              
+              if (d === null) {
+                  return (
+                      <g key={i} transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle}>
+                         {fullRingPaths(30, 32, 26, 16).map((path, idx) => (
+                             <path key={idx} d={path} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
+                         ))}
+                      </g>
+                  );
+              }
+              return (
+                <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} style={activeStyle} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} />
+              );
+            })
+          )}
           <text x="30" y="29" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text)">{center.pct}%</text>
           <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)">{center.label}</text>
         </g>
@@ -323,7 +328,7 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
   );
 }
 
-export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
+export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiClick }) {
   const mode = /production/i.test(title) ? "production" : "pilot";
   const getPinnedActionId = useCallback(() => {
     try {
@@ -612,10 +617,10 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
         <div className="flex-1 min-w-220">
           <div className="kpis kpi-row-wrap">
             {!isEUC && (
-              <MetricTile label="Success Rate" value={`${kpi.successRate}%`} tone={toneForSuccess(kpi.successRate)} onClick={openSuccessModal} />
+              <MetricTile label="Success Rate" value={`${kpi.successRate}%`} tone={toneForSuccess(kpi.successRate)} onClick={() => onKpiClick ? onKpiClick('success') : openSuccessModal()} />
             )}
-            <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={openHealthModal} />
-            <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={openRebootModal} />
+            <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => onKpiClick ? onKpiClick('health') : openHealthModal()} />
+            <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => onKpiClick ? onKpiClick('reboot') : openRebootModal()} />
           </div>
           <div className="sep"></div>
           <DonutChart donut={donut} center={center} hoverKey={hoverKey} setHoverKey={setHoverKey} />

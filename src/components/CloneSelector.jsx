@@ -26,25 +26,29 @@ const FancySelect = ({ label, options, value, onChange, placeholder, disabled, i
   const selectedLabel = options.find((o) => o.value === value)?.label || placeholder;
   return (
     <div className="field flex-1 min-w-200" ref={ref}>
-      {label && <label className="label">{label}</label>}
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`}>
-        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} disabled={disabled || isLoading}>
-          <span className="fx-value">{isLoading ? "Loading..." : selectedLabel}</span>
-          <span className="fx-chevron">▾</span>
-        </button>
-        {open && (
-          <div className="fx-menu">
-            {options.length === 0 ? (
-              <div className="fx-item empty">No Options Found</div>
-            ) : (
-              options.map((opt) => (
-                <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>
-                  {opt.label}
+      {label && <div className="meta"><label>{label}</label></div>}
+      <div className="inputwrap">
+          <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`}>
+            <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} disabled={disabled || isLoading}>
+              <span className="fx-value">{isLoading ? "Loading..." : selectedLabel}</span>
+              <span className="fx-chevron">▾</span>
+            </button>
+            {open && (
+              <div className="fx-menu">
+                <div className="fx-menu-inner">
+                    {options.length === 0 ? (
+                    <div className="fx-item empty">No Options Found</div>
+                    ) : (
+                    options.map((opt) => (
+                        <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>
+                        {opt.label}
+                        </div>
+                    ))
+                    )}
                 </div>
-              ))
+              </div>
             )}
           </div>
-        )}
       </div>
     </div>
   );
@@ -254,7 +258,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   };
 
   return (
-    <div className="mgmt">
+    <div className="mgmtenv">
       <div className="topbar">
         <div className="flex-row gap-10 items-center">
            <h2>Clone Manager</h2>
@@ -279,7 +283,10 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               {mode === "GROUP" ? (
                 <FancySelect label="Select Group" options={groups} value={selectedGroupId} onChange={setSelectedGroupId} placeholder="-- Select Group --" disabled={processing} />
               ) : (
-                <div className="field w-full"><label className="label">Search</label><input className="control" value={search} onChange={e => setSearch(e.target.value)} /></div>
+                <div className="field w-full">
+                    <div className="meta"><label>Search</label></div>
+                    <div className="inputwrap"><input className="control" value={search} onChange={e => setSearch(e.target.value)} /></div>
+                </div>
               )}
             </div>
           </div>
@@ -300,7 +307,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               </table>
             </div>
           </div>
-          <div className="action-bar"><button className="btn pri" onClick={() => setActiveTab("SETTINGS")} disabled={!selectedIds.size}>Next</button></div>
+          <div className="action-bar"><button className="btn pri min-w-140" onClick={() => setActiveTab("SETTINGS")} disabled={!selectedIds.size}>Next</button></div>
         </>
       )}
 
@@ -308,7 +315,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
         <>
           <div className="section overflow-visible">
             <div className="section-head"><span className="title">1. Destination (Global)</span></div>
-            <div className="controls-grid cs-settings-grid">
+            <div className="controls-grid">
                <FancySelect label="Datacenter" options={inventory.datacenters} value={globalDest.datacenter} onChange={v=>setGlobalDest(p=>({...p,datacenter:v}))} placeholder="Select DC" isLoading={invLoading} />
                <FancySelect label="Cluster/Host" options={inventory.hosts} value={globalDest.host} onChange={v=>setGlobalDest(p=>({...p,host:v}))} placeholder="Select Host" isLoading={invLoading} />
                <FancySelect label="Datastore" options={inventory.datastores} value={globalDest.datastore} onChange={v=>setGlobalDest(p=>({...p,datastore:v}))} placeholder="Select DS" isLoading={invLoading} />
@@ -318,12 +325,26 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
           </div>
           <div className="section">
             <div className="section-head"><span className="title">2. Network Configuration</span></div>
-            <div className="cs-network-bar">
-               <div className="cs-network-item"><span className="label">Start IP</span><input className="control small" value={bulkIp} onChange={e=>setBulkIp(e.target.value)} placeholder="10.1.x.x" /></div>
-               <div className="cs-network-item"><span className="label">Subnet</span><input className="control small" value={bulkSubnet} onChange={e=>setBulkSubnet(e.target.value)} /></div>
-               <div className="cs-network-item"><span className="label">Gateway</span><input className="control small" value={bulkGateway} onChange={e=>setBulkGateway(e.target.value)} /></div>
-               <div className="cs-network-item"><span className="label">DNS</span><input className="control small" value={bulkDns} onChange={e=>setBulkDns(e.target.value)} /></div>
-               <button className="btn pri small pb-2" onClick={applyBulkSettings}>Apply to All Rows</button>
+            <div className="grid">
+               <div className="field">
+                   <div className="meta"><label>Start IP</label></div>
+                   <div className="inputwrap"><input className="control" value={bulkIp} onChange={e=>setBulkIp(e.target.value)} placeholder="10.1.x.x" /></div>
+               </div>
+               <div className="field">
+                   <div className="meta"><label>Subnet</label></div>
+                   <div className="inputwrap"><input className="control" value={bulkSubnet} onChange={e=>setBulkSubnet(e.target.value)} /></div>
+               </div>
+               <div className="field">
+                   <div className="meta"><label>Gateway</label></div>
+                   <div className="inputwrap"><input className="control" value={bulkGateway} onChange={e=>setBulkGateway(e.target.value)} /></div>
+               </div>
+               <div className="field">
+                   <div className="meta"><label>DNS</label></div>
+                   <div className="inputwrap"><input className="control" value={bulkDns} onChange={e=>setBulkDns(e.target.value)} /></div>
+               </div>
+            </div>
+            <div className="action-bar" style={{borderTop: 'none', paddingTop: 0, paddingBottom: '20px', justifyContent: 'flex-start', background: 'transparent'}}>
+                <button className="btn outline" onClick={applyBulkSettings}>Apply to All Rows</button>
             </div>
             <div className="tableWrap h-400">
               <table>
@@ -347,13 +368,21 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
             </div>
           </div>
           {error && <div className="banner error">{error}</div>}
-          <div className="action-bar justify-between"><button className="btn" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button><button className="btn pri" onClick={handleExecute} disabled={processing || !globalDest.datacenter}>{processing ? "Cloning..." : `Start Cloning (${selectedIds.size} VMs)`}</button></div>
+          <div className="action-bar justify-between">
+              <button className="btn outline" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button>
+              <button className="btn pri min-w-140" onClick={handleExecute} disabled={processing || !globalDest.datacenter}>{processing ? "Cloning..." : `Start Cloning (${selectedIds.size} VMs)`}</button>
+          </div>
         </>
       )}
 
       {activeTab === "EXECUTION" && (
         <div className="section">
-          <div className="section-head"><span className="title">Execution History (Clones)</span><button className="btn small" onClick={() => refreshHistory()}>Refresh</button></div>
+          <div className="section-head">
+              <span className="title">Execution History (Clones)</span>
+              <button className="iconbtn" onClick={() => refreshHistory()} disabled={processing} title="Refresh">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              </button>
+          </div>
           <div className="tableWrap">
             <table>
               <thead className="kpi-th-sticky"><tr><th>Original</th><th>Clone Name</th><th>Time</th><th>Status</th></tr></thead>

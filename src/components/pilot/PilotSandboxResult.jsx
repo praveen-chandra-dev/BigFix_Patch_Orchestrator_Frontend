@@ -1,4 +1,6 @@
+// src/components/pilot/PilotSandboxResult.jsx
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import FilterDrawer from "../FilterDrawer";
 
 const API_BASE = window.env.VITE_API_BASE;
 
@@ -143,7 +145,7 @@ function rowsToHTML(rows, title = "Results") {
   return `<!doctype html><html><head>${head}</head><body><h1>${safeTitle}</h1><table><thead><tr><th>Server Name</th><th>Patch Name</th><th>Start Time</th><th>End Time</th><th>Status</th><th>Issuer</th></tr></thead><tbody>${rowsHtml || `<tr><td colspan="6">No rows.</td></tr>`}</tbody></table></body></html>`;
 }
 
-export default function PilotSandboxResult({ title = "Sandbox Result", detailTitle, actionId }) {
+export default function PilotSandboxResult({ title = "Sandbox Result", detailTitle, actionId, onViewDetails }) {
   const [lockedId, setLockedId] = useState(null);
   const [summary, setSummary] = useState({ success: 0, total: 0 });
   const [counts, setCounts] = useState(new Map());
@@ -248,38 +250,44 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   return (
     <>
       <section className="card reveal" data-reveal>
-        <div className="row items-center justify-between">
+        <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
-          <button className="btn" onClick={() => refresh(null)} disabled={loading}>{loading ? "..." : "Refresh"}</button>
+          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "..." : "Refresh"}</button>
         </div>
         {err ? <div className="sub error">{err}</div> : !lockedId ? <div className="sub">No data</div> : (
           <>
-            <div className="toolbar-mini mt-10">
-              <span className="pill green">{`Success: ${summary.success}/${summary.total}`}</span>
-              <span className="spacer"></span>
-              <span className="count ml-10">ID: {lockedId}</span>
-              <span className="spacer"></span>
-              <a className="link cursor-pointer" onClick={openDetails}>View Details</a>
+            <div className="flex-row items-center justify-between w-full mb-16 wrap gap-12">
+              <div className="flex-row items-center gap-12">
+                <span className="pill green fw-600">{`Success: ${summary.success}/${summary.total}`}</span>
+                <span className="muted-text fw-600 text-13">ID: {lockedId}</span>
+              </div>
+              <button className="btn pri small" onClick={() => onViewDetails ? onViewDetails(lockedId) : openDetails()}>View Details</button>
             </div>
+            
             {statusBanner && (<div className={`status-banner ${statusBanner.type}`}>{statusBanner.type === 'running' && <span className="pulse-dot"></span>}{statusBanner.msg}</div>)}
+            
             <div className="donut-wrap">
-              <div className="donut-cell">
+              <div className="donut-cell" style={{ display: 'flex', justifyContent: 'center' }}>
                 <svg viewBox="0 0 120 120" role="img" className="donut-svg">
                   <g transform="translate(60,60)">
-                    {donut.map((s, i) => {
-                      const mid = (s.start + s.end) / 2;
-                      const rad = ((mid - 90) * Math.PI) / 180;
-                      const explode = hoverKey === s.key ? 3 : 0;
-                      const dx = explode * Math.cos(rad);
-                      const dy = explode * Math.sin(rad);
-                      const d = arcPath(0, 0, 48, s.start, s.end, 30);
-                      const isFull = d === null;
-                      
-                      const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: "pointer" };
-                      
-                      if (isFull) { return ( <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> ); }
-                      return ( <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle} /> );
-                    })}
+                    {donut.length === 0 ? (
+                      fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" /> ))
+                    ) : (
+                      donut.map((s, i) => {
+                        const mid = (s.start + s.end) / 2;
+                        const rad = ((mid - 90) * Math.PI) / 180;
+                        const explode = hoverKey === s.key ? 3 : 0;
+                        const dx = explode * Math.cos(rad);
+                        const dy = explode * Math.sin(rad);
+                        const d = arcPath(0, 0, 48, s.start, s.end, 30);
+                        const isFull = d === null;
+                        
+                        const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: "pointer" };
+                        
+                        if (isFull) { return ( <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> ); }
+                        return ( <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle} /> );
+                      })
+                    )}
                     <text x="0" y="-4" textAnchor="middle" fontSize="12" fontWeight="800" fill="var(--text)">{center.pct}%</text>
                     <text x="0" y="10" textAnchor="middle" fontSize="7" fill="var(--muted)">{center.label}</text>
                   </g>
@@ -299,57 +307,153 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
 }
 
 function DetailsModal({ open, onClose, title, rows, loading }) {
-  const [filter, setFilter] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "status", dir: "asc" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [showMenu, setShowMenu] = useState(false);
   const btnRef = useRef(null);
 
-  useEffect(() => setPage(1), [filter, pageSize]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [globalLogic, setGlobalLogic] = useState("AND");
+  const [filters, setFilters] = useState([]);
+  const propertyOptions = [
+    { value: "server", label: "Server Name" },
+    { value: "patch", label: "Patch Name" },
+    { value: "status", label: "Status" }
+  ];
+
+  useEffect(() => setPage(1), [filters, pageSize]);
   useEffect(() => {
     function onDocClick(e) { if (!showMenu) return; if (btnRef.current && !btnRef.current.contains(e.target)) setShowMenu(false); }
     document.addEventListener("mousedown", onDocClick); return () => document.removeEventListener("mousedown", onDocClick);
   }, [showMenu]);
 
-  const filtered = useMemo(() => { if (!filter) return rows; const q = filter.toLowerCase(); return rows.filter(r => (r.server && r.server.toLowerCase().includes(q)) || (r.patch && r.patch.toLowerCase().includes(q)) || (r.status && r.status.toLowerCase().includes(q))); }, [rows, filter]);
-  const sorted = useMemo(() => { if (!sortConfig.key) return filtered; return [...filtered].sort((a, b) => { const valA = sortConfig.key === 'status' ? classify(a.status).toLowerCase() : String(a[sortConfig.key] || "").toLowerCase(); const valB = sortConfig.key === 'status' ? classify(b.status).toLowerCase() : String(b[sortConfig.key] || "").toLowerCase(); if (valA < valB) return sortConfig.dir === "asc" ? -1 : 1; if (valA > valB) return sortConfig.dir === "asc" ? 1 : -1; return 0; }); }, [filtered, sortConfig]);
+  const applyFilters = (row) => {
+    if (!filters.length) return true;
+    let globalMatch = globalLogic === "OR" ? false : true;
+    let validBlocks = 0;
+
+    for (let b of filters) {
+      let blockMatch = true;
+      let validConds = 0;
+
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase();
+        const field = String(row[c.column] || "").toLowerCase();
+
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+        
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) {
+        validBlocks++;
+        globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      }
+    }
+    return validBlocks === 0 ? true : globalMatch;
+  };
+
+  const filtered = useMemo(() => rows.filter(applyFilters), [rows, filters, globalLogic]);
+
+  const sorted = useMemo(() => { 
+    if (!sortConfig.key) return filtered; 
+    return [...filtered].sort((a, b) => { 
+        const valA = sortConfig.key === 'status' ? classify(a.status).toLowerCase() : String(a[sortConfig.key] || "").toLowerCase(); 
+        const valB = sortConfig.key === 'status' ? classify(b.status).toLowerCase() : String(b[sortConfig.key] || "").toLowerCase(); 
+        if (valA < valB) return sortConfig.dir === "asc" ? -1 : 1; 
+        if (valA > valB) return sortConfig.dir === "asc" ? 1 : -1; 
+        return 0; 
+    }); 
+  }, [filtered, sortConfig]);
+
   const totalPages = Math.ceil(sorted.length / pageSize);
   const paginated = useMemo(() => { const start = (page - 1) * pageSize; return sorted.slice(start, start + pageSize); }, [sorted, page, pageSize]);
   const handleSort = (key) => { setSortConfig(current => ({ key, dir: current.key === key && current.dir === "asc" ? "desc" : "asc" })); };
   const getSortIcon = (key) => { if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>; return <span className="ml-6">{sortConfig.dir === "asc" ? "↑" : "↓"}</span>; };
+  
   const doExport = (type) => { setShowMenu(false); const safeTitle = (title || "Report").replace(/[^\w.-]+/g, "_"); if (type === 'csv') { const csv = rowsToCSV(sorted); downloadBlob(new Blob([csv], { type: "text/csv" }), `${safeTitle}.csv`); } else if (type === 'html') { const html = rowsToHTML(sorted, title); downloadBlob(new Blob([html], { type: "text/html" }), `${safeTitle}.html`); } else if (type === 'pdf') { const html = rowsToHTML(sorted, title); const blob = new Blob([html], { type: "text/html" }); const url = URL.createObjectURL(blob); const iframe = document.createElement("iframe"); iframe.className = "d-none"; iframe.src = url; iframe.onload = () => { try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch {} setTimeout(() => { URL.revokeObjectURL(url); iframe.remove(); }, 2000); }; document.body.appendChild(iframe); } };
 
   if (!open) return null;
+  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+
   return (
     <div className="modal show" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="box action-modal-box" onClick={e => e.stopPropagation()}>
-        <div className="action-modal-header"><h3>{title}</h3><button className="btn" onClick={onClose}>Close</button></div>
-        <div className="action-modal-search">
-          <input type="text" className="control action-modal-search-input" placeholder="Search Server, Patch, or Status..." value={filter} onChange={e => setFilter(e.target.value)} />
-          <div className="dropdown" ref={btnRef}><button className="btn" onClick={() => setShowMenu(s => !s)}>Export<svg width="14" height="14" viewBox="0 0 24 24" className="ml-6"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></button>{showMenu && (<div className="menu"><button className="item" onClick={() => doExport('csv')}>Export to CSV</button><button className="item" onClick={() => doExport('pdf')}>Export to PDF</button><button className="item" onClick={() => doExport('html')}>Export to HTML</button></div>)}</div>
+      <div className="box action-modal-box" style={{ padding: 0 }} onClick={e => e.stopPropagation()}>
+        
+        <div className="action-modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', marginBottom: 0 }}>
+            <h3 className="modal-title" style={{ margin: 0, fontSize: "18px", color: "var(--text)" }}>{title}</h3>
+            <button className="btn btn-outline" style={{ height: '32px' }} onClick={onClose}>Close</button>
         </div>
-        <div className="tableWrap action-modal-body">
-          {loading ? (<div className="action-modal-loading text-center muted-text">Loading records...</div>) : (
-            <table className="action-modal-table">
-              <thead className="kpi-th-sticky">
-                <tr><th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th><th onClick={() => handleSort('patch')} className="cursor-pointer">Patch {getSortIcon('patch')}</th><th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th><th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th><th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th><th className="w-15p">Issuer</th></tr>
-              </thead>
-              <tbody>
-                {paginated.length === 0 ? (<tr><td colSpan={6} className="text-center p-20">No results found.</td></tr>) : (paginated.map((r, i) => { const shortStatus = classify(r.status); const isSuccess = shortStatus === 'Success'; const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'Error'; const isRunning = shortStatus === 'Running'; return (<tr key={i}><td>{r.server}</td><td>{r.patch}</td><td className="whitespace-nowrap">{fmtTime(r.start)}</td><td className="whitespace-nowrap">{fmtTime(r.end)}</td><td><span className={`status-pill ${isSuccess ? 'status-green' : isFail ? 'status-red' : isRunning ? 'status-blue' : 'status-amber'}`} title={r.status}>{shortStatus}</span></td><td>{r.issuer}</td></tr>); }))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <div className="action-modal-footer">
-          <div className="muted-text">Showing {sorted.length === 0 ? 0 : (page - 1) * pageSize + 1} to {Math.min(page * pageSize, sorted.length)} of {sorted.length} entries</div>
-          <div className="action-modal-nav">
-            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} className="control h-32 px-10 w-auto min-w-auto"><option value={10}>10 / page</option><option value={25}>25 / page</option><option value={50}>50 / page</option><option value={100}>100 / page</option></select>
-            <button className="btn h-32 px-10" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-            <span className="fw-600">Page {page} of {totalPages || 1}</span>
-            <button className="btn h-32 px-10" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
+        
+        <div style={{ padding: '20px 24px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          
+          <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
+            <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
+              Showing {filtered.length} Servers {activeFilterCount > 0 && <span className="pill blue ml-10">Filtered</span>}
+            </div>
+            <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+              <button className="btn pri" onClick={() => setDrawerOpen(true)}>
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+              </button>
+              <div className="dropdown" ref={btnRef}>
+                 <button className="btn pri" onClick={() => setShowMenu(s => !s)}>Export<svg width="14" height="14" viewBox="0 0 24 24" className="ml-6"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></button>
+                 {showMenu && (
+                   <div className="menu">
+                     <button className="item" onClick={() => doExport('csv')}>Export to CSV</button>
+                     <button className="item" onClick={() => doExport('pdf')}>Export to PDF</button>
+                     <button className="item" onClick={() => doExport('html')}>Export to HTML</button>
+                   </div>
+                 )}
+              </div>
+            </div>
+          </div>
+
+          <div className="tableWrap action-modal-body">
+            {loading ? (<div className="action-modal-loading text-center muted-text">Loading records...</div>) : (
+              <table className="action-modal-table">
+                <thead className="kpi-th-sticky">
+                  <tr><th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th><th onClick={() => handleSort('patch')} className="cursor-pointer">Patch {getSortIcon('patch')}</th><th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th><th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th><th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th><th className="w-15p">Issuer</th></tr>
+                </thead>
+                <tbody>
+                  {paginated.length === 0 ? (<tr><td colSpan={6} className="text-center p-20">No results found.</td></tr>) : (paginated.map((r, i) => { const shortStatus = classify(r.status); const isSuccess = shortStatus === 'Success'; const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'Error'; const isRunning = shortStatus === 'Running'; return (<tr key={i}><td>{r.server}</td><td>{r.patch}</td><td className="whitespace-nowrap">{fmtTime(r.start)}</td><td className="whitespace-nowrap">{fmtTime(r.end)}</td><td><span className={`status-pill ${isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber'}`} title={r.status}>{shortStatus}</span></td><td>{r.issuer}</td></tr>); }))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
+
+        <div className="pagination">
+            <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                <span className="pager-info">Rows per page:</span>
+                <select className="control" style={{ width: "75px", padding: "6px 10px", height: "32px", minWidth: 0 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option>
+                </select>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+                <div className="pager-info">
+                  {sorted.length > 0 ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, sorted.length)} of {sorted.length}
+                </div>
+                <div className="pager-btns">
+                    <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt; Prev</button>
+                    <button className="pager-btn" disabled={page >= totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>Next &gt;</button>
+                </div>
+            </div>
+        </div>
+
+        <FilterDrawer 
+          isOpen={drawerOpen} 
+          onClose={() => setDrawerOpen(false)} 
+          filters={filters} 
+          setFilters={setFilters} 
+          globalLogic={globalLogic} 
+          setGlobalLogic={setGlobalLogic} 
+          propertyOptions={propertyOptions} 
+        />
       </div>
     </div>
   );

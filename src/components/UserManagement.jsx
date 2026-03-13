@@ -28,25 +28,27 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder })
   const isPlaceholder = !selectedOption;
 
   return (
-    <div className="field">
-      {label && <span className="label">{label}</span>}
-      <div className={`fx-wrap ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef}>
-        <button type="button" className="fx-trigger" onClick={() => setOpen(!open)}>
-          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`}>{displayText}</span>
-          <span className="fx-chevron">▾</span>
-        </button>
-        {open && (
-          <div className="fx-menu">
-            <div className="fx-menu-inner">
-              {options.map((opt) => (
-                <div key={opt} className={`fx-item ${opt === value ? "fx-active" : ""}`} onClick={() => { onChange(opt); setOpen(false); }}>
-                  <span className="fx-label">{opt}</span>
-                  {opt === value && <span className="fx-tick">✓</span>}
-                </div>
-              ))}
+    <div className="field w-full">
+      {label && <div className="meta"><label>{label}</label></div>}
+      <div className="inputwrap">
+        <div className={`fx-wrap ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef}>
+          <button type="button" className="fx-trigger" onClick={() => setOpen(!open)}>
+            <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`}>{displayText}</span>
+            <span className="fx-chevron">▾</span>
+          </button>
+          {open && (
+            <div className="fx-menu">
+              <div className="fx-menu-inner">
+                {options.map((opt) => (
+                  <div key={opt} className={`fx-item ${opt === value ? "fx-active" : ""}`} onClick={() => { onChange(opt); setOpen(false); }}>
+                    <span className="fx-label">{opt}</span>
+                    {opt === value && <span className="fx-tick">✓</span>}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -133,7 +135,7 @@ export default function UserManagement({ onClose, currentUserId }) {
   };
 
   return (
-    <div className="mgmt">
+    <div className="mgmtenv">
       <div className="topbar">
         <div className="left"><h2 className="clickable" onClick={onClose} title="Go back">User Management</h2></div>
         <div className="right"><button className="btn" onClick={onClose}>Close</button></div>
@@ -148,33 +150,42 @@ export default function UserManagement({ onClose, currentUserId }) {
       {isAdmin && (
         <div className="section overflow-visible">
           <div className="section-head"><span className="title">Create New User</span></div>
-          <form className="grid-create" onSubmit={handleCreateUser}>
-            <div className="field">
-              <label htmlFor="new_username">Username</label>
-              <input id="new_username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username" autoComplete="off" className="control" />
+          <form onSubmit={handleCreateUser}>
+            <div className="grid">
+              <div className="field">
+                <div className="meta"><label htmlFor="new_username">Username</label></div>
+                <div className="inputwrap">
+                  <input id="new_username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username" autoComplete="off" />
+                </div>
+              </div>
+              <FancySelect label="Role" options={roleOptions} value={role} onChange={setRole} placeholder="Select Role" />
+              <div className="field">
+                <div className="meta"><label htmlFor="new_password">Password</label></div>
+                <div className="inputwrap">
+                  <input id="new_password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter new password" autoComplete="new-password" />
+                </div>
+              </div>
+              <div className="field">
+                <div className="meta"><label htmlFor="confirm_password">Confirm Password</label></div>
+                <div className="inputwrap">
+                  <input id="confirm_password" type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Confirm new password" autoComplete="new-password" />
+                </div>
+              </div>
             </div>
-            <FancySelect label="Role" options={roleOptions} value={role} onChange={setRole} placeholder="Select Role" />
-            <div className="field">
-              <label htmlFor="new_password">Password</label>
-              <input id="new_password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter new password" autoComplete="new-password" className="control" />
-            </div>
-            <div className="field">
-              <label htmlFor="confirm_password">Confirm Password</label>
-              <input id="confirm_password" type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Confirm new password" autoComplete="new-password" className="control" />
-            </div>
-            <div className="field-action-bottom">
-              <button type="submit" className="btn primary btn-full-height" disabled={formBusy}>
+            {formError && <div className="alert error small" style={{ margin: '0 20px 20px' }}>{formError}</div>}
+            <div className="action-bar">
+              <div className="spacer"></div>
+              <button type="submit" className="btn pri min-w-140" disabled={formBusy}>
                 {formBusy ? "Creating..." : "Create User"}
               </button>
             </div>
-            {formError && <div className="alert error small">{formError}</div>}
           </form>
         </div>
       )}
 
       <div className="section">
         <div className="section-head"><span className="title">Existing Users</span></div>
-        <div className="grid">
+        <div className="gridusr">
           {loading ? (
             <p className="sub mgmt-loading">Loading users...</p>
           ) : (
@@ -192,7 +203,9 @@ export default function UserManagement({ onClose, currentUserId }) {
                         <td>{user.LoginName}{isSelf && <span className="you-pill"> (You)</span>}</td>
                         <td className="min-w-140">
                           {isEditing ? (
-                            <FancySelect options={roleOptions} value={editRole} onChange={setEditRole} placeholder="Select Role" disabled={editBusy} />
+                            <div style={{width: 140}}>
+                              <FancySelect options={roleOptions} value={editRole} onChange={setEditRole} placeholder="Select Role" disabled={editBusy} />
+                            </div>
                           ) : (
                             <span className={`pill ${getPillClass(user.Role)}`}>{user.Role || 'Windows'}</span>
                           )}
@@ -202,7 +215,7 @@ export default function UserManagement({ onClose, currentUserId }) {
                           <div className="action-btns-center">
                             {isEditing ? (
                               <>
-                                <button className="btn-icon save" title="Save Role" onClick={() => saveRole(user.UserID)} disabled={editBusy}>💾</button>
+                                <button className="btn-icon save" title="Save Role" onClick={() => saveRole(user.UserID)} disabled={editBusy}>✓</button>
                                 <button className="btn-icon cancel" title="Cancel" onClick={cancelEditing} disabled={editBusy}>✕</button>
                               </>
                             ) : (

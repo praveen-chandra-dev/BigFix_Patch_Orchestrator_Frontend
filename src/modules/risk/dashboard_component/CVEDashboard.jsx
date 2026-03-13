@@ -1,295 +1,163 @@
 import { useEffect, useState, useMemo } from "react";
 import api from "../../../api/api";
-import "./cve.css";
+import FilterDrawer from "../../../components/FilterDrawer";
 
-export default function CveDashboard() {
+export default function CVEDashboard() {
   const [patches, setPatches] = useState([]);
   const [cves, setCves] = useState([]);
   const [loading, setLoading] = useState(true);
-
   const [modalData, setModalData] = useState(null);
 
-  const [filters, setFilters] = useState([
-    { column: "cve_id", operator: "contains", value: "", logic: "AND" },
-  ]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [globalLogic, setGlobalLogic] = useState("AND");
+  const [filters, setFilters] = useState([]);
+  const propertyOptions = [
+    { value: "cve_id", label: "CVE ID" },
+    { value: "patch_id", label: "Patch ID" },
+    { value: "device_name", label: "Device Name" },
+    { value: "kev", label: "KEV" }
+  ];
 
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10;
-
-  // =============================
-  // LOAD DATA
-  // =============================
+  const [rowsPerPage, setRowsPerPage] = useState(20);
 
   useEffect(() => {
     const load = async () => {
       try {
         const patchRes = await api.get("/patches");
-
-        const patchData = Array.isArray(patchRes.data)
-          ? patchRes.data
-          : patchRes.data?.data || [];
-
+        const patchData = Array.isArray(patchRes.data) ? patchRes.data : patchRes.data?.data || [];
         setPatches(patchData);
-
         const cveRes = await api.get("/cves");
         setCves(cveRes.data?.data || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+      } catch (err) { console.error(err); } finally { setLoading(false); }
     };
-
     load();
   }, []);
 
-  // =============================
-  // PATCH → DEVICE MAP
-  // =============================
-
   const patchDeviceMap = useMemo(() => {
     const map = {};
-
-    patches.forEach((p) => {
-      map[p.patch_id] = p.applicable_computers || [];
-    });
-
+    patches.forEach((p) => { map[p.patch_id] = p.applicable_computers || []; });
     return map;
   }, [patches]);
 
-  // =============================
-  // CVE EXPOSURE MAP
-  // =============================
-
   const cveExposure = useMemo(() => {
     const map = {};
-
     cves.forEach((c) => {
       if (!map[c.cve_id]) {
-        map[c.cve_id] = {
-          cve_id: c.cve_id,
-          patches: new Set(),
-          devices: new Set(),
-          severity: c.cvss_severity || "UNKNOWN",
-          kev: c.has_kev ? "YES" : "NO",
-        };
+        map[c.cve_id] = { cve_id: c.cve_id, patches: new Set(), devices: new Set(), severity: c.cvss_severity || "UNKNOWN", kev: c.has_kev ? "YES" : "NO" };
       }
-
       map[c.cve_id].patches.add(c.patch_id);
-
       const devices = patchDeviceMap[c.patch_id] || [];
-
-      devices.forEach((d) => {
-        map[c.cve_id].devices.add(d);
-      });
+      devices.forEach((d) => { map[c.cve_id].devices.add(d); });
     });
-
     return Object.values(map).map((c) => ({
-      cve_id: c.cve_id,
-      severity: c.severity,
-      kev: c.kev,
-      patch_count: c.patches.size,
-      device_count: c.devices.size,
-      patches: Array.from(c.patches),
-      devices: Array.from(c.devices),
+      cve_id: c.cve_id, severity: c.severity, kev: c.kev, patch_count: c.patches.size, device_count: c.devices.size, patches: Array.from(c.patches), devices: Array.from(c.devices),
     }));
   }, [cves, patchDeviceMap]);
 
-  // =============================
-  // FILTER LOGIC
-  // =============================
-
   const applyFilters = (cve) => {
-    return filters.reduce((result, filter, index) => {
-      let condition = true;
+    if (!filters.length) return true;
+    let globalMatch = globalLogic === "OR" ? false : true;
+    let validBlocks = 0;
 
-      const search = filter.value.toLowerCase();
+    for (let b of filters) {
+      let blockMatch = true;
+      let validConds = 0;
 
-      if (filter.column === "cve_id") {
-        const field = cve.cve_id.toLowerCase();
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase();
 
-        if (filter.operator === "contains") condition = field.includes(search);
-        if (filter.operator === "=") condition = field === search;
+        if (c.column === "cve_id") {
+          const field = cve.cve_id.toLowerCase();
+          if (c.operator === "contains") condition = field.includes(search);
+          else if (c.operator === "=") condition = field === search;
+          else if (c.operator === "!=") condition = field !== search;
+        } else if (c.column === "patch_id") {
+          condition = (cve.patches || []).some(x => x.toLowerCase().includes(search));
+        } else if (c.column === "device_name") {
+          condition = (cve.devices || []).some(x => x.toLowerCase().includes(search));
+        } else if (c.column === "kev") {
+          condition = cve.kev.toLowerCase() === search;
+        }
+        
+        blockMatch = blockMatch && condition;
       }
-
-      if (filter.column === "patch_id") {
-        const list = cve.patches || [];
-
-        if (filter.operator === "contains")
-          condition = list.some((p) => p.toLowerCase().includes(search));
-
-        if (filter.operator === "=")
-          condition = list.some((p) => p.toLowerCase() === search);
+      if (validConds > 0) {
+        validBlocks++;
+        globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
       }
-
-      if (filter.column === "device_name") {
-        const list = cve.devices || [];
-
-        if (filter.operator === "contains")
-          condition = list.some((d) => d.toLowerCase().includes(search));
-
-        if (filter.operator === "=")
-          condition = list.some((d) => d.toLowerCase() === search);
-      }
-
-      if (filter.column === "kev") {
-        const field = cve.kev.toLowerCase();
-        condition = field === search;
-      }
-
-      if (index === 0) return condition;
-
-      if (filter.logic === "AND") return result && condition;
-      if (filter.logic === "OR") return result || condition;
-
-      return result;
-    }, true);
+    }
+    return validBlocks === 0 ? true : globalMatch;
   };
 
   const filteredCVEs = cveExposure.filter(applyFilters);
-
   const totalPages = Math.ceil(filteredCVEs.length / rowsPerPage);
+  const paginatedCVEs = filteredCVEs.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
-  const paginatedCVEs = filteredCVEs.slice(
-    (currentPage - 1) * rowsPerPage,
-    currentPage * rowsPerPage,
-  );
-
-  // =============================
-  // CSV EXPORT
-  // =============================
+  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
   const exportCSV = () => {
     const header = ["CVE", "KEV", "Patch IDs", "Devices"];
-
-    const rows = filteredCVEs.map((c) => {
-      const patchList = `[${c.patches.join(",")}]`;
-      const deviceList = `[${c.devices.join(",")}]`;
-
-      return [c.cve_id, c.kev, `"${patchList}"`, `"${deviceList}"`];
-    });
-
-    const csv =
-      header.join(",") + "\n" + rows.map((r) => r.join(",")).join("\n");
-
+    const rows = filteredCVEs.map((c) => [c.cve_id, c.kev, `"[${c.patches.join(",")}]"`, `"[${c.devices.join(",")}]"`]);
+    const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: "text/csv" });
-
-    const url = window.URL.createObjectURL(blob);
-
     const a = document.createElement("a");
-
-    a.href = url;
-    a.download = "cve_exposure.csv";
-
-    a.click();
+    a.href = URL.createObjectURL(blob); a.download = "cve_exposure.csv"; a.click();
   };
 
-  // =============================
-  // FILTER FUNCTIONS
-  // =============================
-
-  const updateFilter = (index, key, value) => {
-    const updated = [...filters];
-    updated[index][key] = value;
-    setFilters(updated);
+  const renderPageBtns = () => {
+    const btns = [];
+    for(let i=1; i<=totalPages; i++) {
+      if(i===1 || i===totalPages || Math.abs(i-currentPage)<=1) btns.push(<button key={i} className={`pager-btn ${i===currentPage?'active':''}`} onClick={() => setCurrentPage(i)}>{i}</button>);
+      else if(i===2 || i===totalPages-1) btns.push(<span key={`dots-${i}`} style={{padding:"0 4px", color:"var(--muted)"}}>..</span>);
+    }
+    return btns.filter((b, idx, arr) => !(b.props?.children === '..' && arr[idx-1]?.props?.children === '..'));
   };
 
-  const addFilterRow = () => {
-    setFilters((prev) => [
-      ...prev,
-      { column: "cve_id", operator: "contains", value: "", logic: "AND" },
-    ]);
-  };
-
-  const removeFilterRow = (index) => {
-    if (filters.length === 1) return;
-    setFilters(filters.filter((_, i) => i !== index));
-  };
-
-  const resetFilters = () => {
-    setFilters([
-      { column: "cve_id", operator: "contains", value: "", logic: "AND" },
-    ]);
-  };
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filters]);
-
-  if (loading) return <div className="cve-loading">Loading CVEs...</div>;
+  if (loading) return <div className="app-loading-content">Loading CVEs...</div>;
 
   return (
-    <div className="cve-dashboard">
-      <h2 className="cve-dashboard-title">CVE Exposure</h2>
-
-      {/* FILTER HEADER */}
-
-      <div className="cve-filter-header">
-        <div className="cve-filter-left">
-          {filters.map((filter, index) => (
-            <div key={index} className="risk-filter-row">
-              {index > 0 && (
-                <select
-                  value={filter.logic}
-                  onChange={(e) => updateFilter(index, "logic", e.target.value)}
-                >
-                  <option value="AND">AND</option>
-                  <option value="OR">OR</option>
-                </select>
-              )}
-
-              <select
-                value={filter.column}
-                onChange={(e) => updateFilter(index, "column", e.target.value)}
-              >
-                <option value="cve_id">CVE ID</option>
-                <option value="patch_id">Patch ID</option>
-                <option value="device_name">Device</option>
-                <option value="kev">KEV</option>
-              </select>
-
-              <select
-                value={filter.operator}
-                onChange={(e) =>
-                  updateFilter(index, "operator", e.target.value)
-                }
-              >
-                <option value="contains">contains</option>
-                <option value="=">equals</option>
-              </select>
-
-              <input
-                value={filter.value}
-                onChange={(e) => updateFilter(index, "value", e.target.value)}
-                placeholder="Enter value"
-              />
-
-              {index === filters.length - 1 && (
-                <button onClick={addFilterRow}>+</button>
-              )}
-
-              {filters.length > 1 && (
-                <button onClick={() => removeFilterRow(index)}>−</button>
-              )}
-            </div>
-          ))}
+    <div>
+      {activeFilterCount > 0 && (
+        <div className="active-filter-banner active">
+          <div className="filter-tags">
+            {filters.map((b, bIdx) => {
+              const validConds = b.conds.filter(c => c.value);
+              if (!validConds.length) return null;
+              return (
+                <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                  {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                  {validConds.map((c, cIdx) => (
+                    <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                      {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                      <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+          <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
         </div>
+      )}
 
-        <div className="cve-filter-right">
-          <button className="cve-export-btn" onClick={exportCSV}>
-            Export CSV
+      <div className="grid-toolbar">
+        <div className="grid-toolbar-left">Showing {filteredCVEs.length} CVEs</div>
+        <div className="grid-toolbar-right">
+          <button className="btn outline" onClick={() => setDrawerOpen(true)}>
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ margin: 0, marginRight: "6px", width: "16px", height: "16px" }}><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+          </button>
+          <button className="btn outline" onClick={exportCSV}>
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ margin: 0, marginRight: "6px", width: "16px", height: "16px" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
           </button>
         </div>
       </div>
 
-      <button className="risk-reset-btn" onClick={resetFilters}>
-        Reset Filters
-      </button>
-
-      {/* TABLE */}
-
-      <div className="cve-table-container">
-        <table className="cve-table">
+      <div className="tableWrap">
+        <table>
           <thead>
             <tr>
               <th>CVE</th>
@@ -298,92 +166,47 @@ export default function CveDashboard() {
               <th style={{ textAlign: "center" }}>Devices</th>
             </tr>
           </thead>
-
           <tbody>
-            {paginatedCVEs.map((c) => (
+            {paginatedCVEs.length === 0 ? <tr><td colSpan="4" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>No CVEs found.</td></tr> : paginatedCVEs.map((c) => (
               <tr key={c.cve_id}>
-                <td>{c.cve_id}</td>
-
-                <td style={{ textAlign: "center" }}>
-                  {c.kev === "YES" ? (
-                    <span className="kev-badge">YES</span>
-                  ) : (
-                    <span className="kev-none">NO</span>
-                  )}
-                </td>
-
-                <td
-                  className="cve-link cve-count"
-                  onClick={() =>
-                    setModalData({
-                      title: "Patches",
-                      items: c.patches,
-                    })
-                  }
-                >
-                  {c.patch_count}
-                </td>
-
-                <td
-                  className="cve-link cve-count"
-                  onClick={() =>
-                    setModalData({
-                      title: "Devices",
-                      items: c.devices,
-                    })
-                  }
-                >
-                  {c.device_count}
-                </td>
+                <td className="cve-id-cell">{c.cve_id}</td>
+                <td style={{ textAlign: "center" }}>{c.kev === "YES" ? <span className="kev-yes-badge">YES</span> : <span className="kev-no-badge">NO</span>}</td>
+                <td style={{ textAlign: "center" }}><span className="cell-link" onClick={() => setModalData({ title: "Patches", items: c.patches })}>{c.patch_count}</span></td>
+                <td style={{ textAlign: "center" }}><span className="cell-link" onClick={() => setModalData({ title: "Devices", items: c.devices })}>{c.device_count}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
-
-        <div className="pagination-container">
-          <button
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(currentPage - 1)}
-          >
-            Previous
-          </button>
-
-          <span className="pagination-info">
-            Page {currentPage} of {totalPages}
-          </span>
-
-          <button
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(currentPage + 1)}
-          >
-            Next
-          </button>
+        
+        <div className="pagination">
+          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+            <span className="pager-info">Rows per page:</span>
+            <select className="control" style={{ width: "75px", padding: "6px 10px", minWidth: 0, height: "32px" }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+              <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option>
+            </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+            <div className="pager-info">{filteredCVEs.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredCVEs.length)} of {filteredCVEs.length}</div>
+            <div className="pager-btns">{renderPageBtns()}</div>
+          </div>
         </div>
       </div>
 
+      <FilterDrawer 
+        isOpen={drawerOpen} 
+        onClose={() => setDrawerOpen(false)} 
+        filters={filters} 
+        setFilters={setFilters} 
+        globalLogic={globalLogic} 
+        setGlobalLogic={setGlobalLogic} 
+        propertyOptions={propertyOptions} 
+      />
+
       {modalData && (
-        <div className="cve-modal-overlay" onClick={() => setModalData(null)}>
-          <div className="cve-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="cve-modal-header">
-              <h3>
-                {modalData.title} ({modalData.items.length})
-              </h3>
-
-              <button
-                className="cve-modal-close"
-                onClick={() => setModalData(null)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="cve-modal-body">
-              <ul>
-                {modalData.items.map((item, i) => (
-                  <li key={i}>{item}</li>
-                ))}
-              </ul>
-            </div>
+        <div className="risk-modal-overlay" onClick={() => setModalData(null)}>
+          <div className="risk-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="risk-modal-header"><h3>{modalData.title} ({modalData.items.length})</h3><button className="risk-modal-close" onClick={() => setModalData(null)}>✕</button></div>
+            <div className="risk-modal-body"><ul>{modalData.items.map((item, i) => <li key={i}>{item}</li>)}</ul></div>
           </div>
         </div>
       )}
