@@ -221,7 +221,9 @@ export default function BaselineManager({ onClose }) {
           <div className="controls-grid">
             <div className="field flex-1">
               <span className="label">Baseline Name</span>
-              <input type="text" className="control" placeholder="e.g., Nov 2025 Security Updates" value={baselineName} onChange={(e) => { setBaselineName(e.target.value); clearMessages(); }} disabled={creating} />
+              <div className="inputwrap">
+                <input type="text" className="control" placeholder="e.g., Nov 2025 Security Updates" value={baselineName} onChange={(e) => { setBaselineName(e.target.value); clearMessages(); }} disabled={creating} />
+              </div>
             </div>
             <div className="flex-1">
               <FancySelect label="Target Custom Site" options={targetSites} value={selectedTargetSite} onChange={(v) => { setSelectedTargetSite(v); clearMessages(); }} placeholder="— Select Target Site —" isLoading={loadingSites} disabled={creating} />
@@ -229,7 +231,7 @@ export default function BaselineManager({ onClose }) {
           </div>
           <div className="action-bar">
             <div className="spacer"></div>
-            <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating}>{creating ? "Creating..." : "Create Baseline"}</button>
+            <button className="btn outline small" onClick={handleCreate} disabled={creating}>{creating ? "Creating..." : "Create Baseline"}</button>
           </div>
         </div>
       )}

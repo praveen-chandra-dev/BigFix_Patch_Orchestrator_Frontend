@@ -250,13 +250,14 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('orchestration'); 
+  const [riskTab, setRiskTab] = useState('patches');
+  const [riskSubTab, setRiskSubTab] = useState('overview');
   const [navHistory, setNavHistory] = useState(['orchestration']);
   const [historyIdx, setHistoryIdx] = useState(0);
   const [kpiContext, setKpiContext] = useState(null);
 
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-
   const [flowState, setFlowState] = useState({ current: 'CONFIG', completed: [], accessible: ['CONFIG'] });
 
   const handleNavigate = (route, context = null) => {
@@ -304,21 +305,43 @@ export default function App() {
           onNavigate={handleNavigate}
           flowState={flowState}
           role={session?.role} 
+          riskTab={riskTab}
+          setRiskTab={setRiskTab}
+          riskSubTab={riskSubTab}
+          setRiskSubTab={setRiskSubTab}
         />
         
         <div className="main-wrapper">
-          <Topbar onNavHistory={handleHistory} username={session?.username} role={session?.role} onLogout={handleLogout} />
+          <Topbar 
+            onNavHistory={handleHistory} 
+            canGoBack={historyIdx > 0}
+            canGoForward={historyIdx < navHistory.length - 1}
+            username={session?.username} 
+            role={session?.role} 
+            onLogout={handleLogout} 
+          />
 
           <div className="app-content">
-            {activeMenu === 'baseline' ? <Suspense fallback={null}><BaselineManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
+            {activeMenu === 'risk' ? (
+                <Suspense fallback={null}>
+                    <RiskModule 
+                        onClose={()=>handleNavigate('orchestration')} 
+                        activeTab={riskTab} 
+                        activeSubTab={riskSubTab}
+                        setRiskTab={setRiskTab}
+                        setRiskSubTab={setRiskSubTab}
+                        onSetPending={() => setRiskTab('baseline')}
+                    />
+                </Suspense>
+            ) :
+             activeMenu === 'baseline' ? <Suspense fallback={null}><BaselineManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'group' ? <Suspense fallback={null}><GroupManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'snapshot' ? <Suspense fallback={null}><SnapshotManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
              activeMenu === 'clone' ? <Suspense fallback={null}><CloneManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
              activeMenu === 'calendar' ? <Suspense fallback={null}><PatchCalendar onClose={()=>handleNavigate('orchestration')} userRole={session?.role} /></Suspense> :
-             activeMenu === 'risk' ? <Suspense fallback={null}><RiskModule onClose={()=>handleNavigate('orchestration')} /></Suspense> :
              activeMenu === 'settings' ? <Suspense fallback={null}><Management onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'users' ? <Suspense fallback={null}><UserManagement onClose={()=>handleNavigate('orchestration')} currentUserId={session?.userId}/></Suspense> :
-             activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} onBack={()=>handleNavigate('orchestration')} /></Suspense> :
+             activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} /></Suspense> :
              activeMenu === 'orchestration' ? <Main userId={session?.userId} username={session?.username} role={session?.role} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> : null
             }
           </div>

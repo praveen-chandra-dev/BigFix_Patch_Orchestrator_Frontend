@@ -252,7 +252,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       <section className="card reveal" data-reveal>
         <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
-          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "..." : "Refresh"}</button>
+          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "" : ""}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>          </button>
         </div>
         {err ? <div className="sub error">{err}</div> : !lockedId ? <div className="sub">No data</div> : (
           <>
@@ -261,7 +262,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                 <span className="pill green fw-600">{`Success: ${summary.success}/${summary.total}`}</span>
                 <span className="muted-text fw-600 text-13">ID: {lockedId}</span>
               </div>
-              <button className="btn pri small" onClick={() => onViewDetails ? onViewDetails(lockedId) : openDetails()}>View Details</button>
+              <button className="btn outline small" onClick={() => onViewDetails ? onViewDetails(lockedId) : openDetails()}>View Details</button>
             </div>
             
             {statusBanner && (<div className={`status-banner ${statusBanner.type}`}>{statusBanner.type === 'running' && <span className="pulse-dot"></span>}{statusBanner.msg}</div>)}

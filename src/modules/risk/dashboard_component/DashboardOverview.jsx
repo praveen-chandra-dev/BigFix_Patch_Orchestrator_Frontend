@@ -201,7 +201,6 @@ export default function DashboardOverview({ navigate }) {
 
   return (
     <div className="dashboard-overview">
-      <h1 className="dashboard-title">Risk Inventory Dashboard</h1>
 
       {/* =====================================
           KPI ROW

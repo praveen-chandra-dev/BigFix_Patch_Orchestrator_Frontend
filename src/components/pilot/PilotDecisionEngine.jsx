@@ -376,8 +376,8 @@ export default function PilotDecisionEngine({
       {!isEUC && (
         <div style={{background:"#f8fafc", padding:12, borderRadius:8, marginBottom:16, display:"flex", flexWrap: "wrap", gap:12, alignItems:"center", border:"1px solid #e2e8f0"}}>
           <strong style={{color:"#64748b", fontSize:13, textTransform:"uppercase"}}>VM Actions:</strong>
-          <button className="btn" onClick={handleSnapshotClick} disabled={!env.snapshotVM || !isGateSatisfied}>{snapshotDone ? "Snapshot Done ✓" : "Take Snapshot"}</button>
-          <button className="btn" onClick={handleCloneClick} disabled={!env.cloneVM || !isGateSatisfied}>{cloneDone ? "Clone Done ✓" : "Clone VMs"}</button>
+          <button className="btn outline small" onClick={handleSnapshotClick} disabled={!env.snapshotVM || !isGateSatisfied}>{snapshotDone ? "Snapshot Done ✓" : "Take Snapshot"}</button>
+          <button className="btn outline small" onClick={handleCloneClick} disabled={!env.cloneVM || !isGateSatisfied}>{cloneDone ? "Clone Done ✓" : "Clone VMs"}</button>
           <span style={{fontSize:12, color:"#888", marginLeft:"auto"}}>Target: <strong>{targetGroup || "None"}</strong></span>
         </div>
       )}
@@ -385,14 +385,16 @@ export default function PilotDecisionEngine({
       {needsBackup && isGateSatisfied && <ValidationGate targetGroupName={targetGroup} onValidationChange={handleValidationChange} />}
 
       <div className="row" style={{ gap: 8, flexWrap: "wrap", display: 'flex' }}>
-        <button className="btn" onClick={refreshKpis} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh KPIs"}</button>
+        <button className="btn outline small" onClick={refreshKpis} disabled={refreshing}>{refreshing ? "Refreshing…" : ""}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>
+        </button>
         
         {!isEUC && (
-          <button className="btn ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>
+          <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>
         )}
 
         <button 
-            className="btn pri" 
+            className="btn outline small" 
             onClick={handleTriggerClick} 
             disabled={isTriggerDisabled} 
             title={isTriggerBlocked ? "Complete Validation first" : "Trigger"}
@@ -403,7 +405,7 @@ export default function PilotDecisionEngine({
         {/* --- EUC Reset Button nicely placed right next to Trigger --- */}
         {isEUC && (
           <button 
-              className="btn danger" 
+              className="btn outline dan" 
               onClick={() => window.dispatchEvent(new CustomEvent("orchestrator:resetAll"))}
               title="Reset the entire flow back to Configuration"
           >
@@ -412,12 +414,12 @@ export default function PilotDecisionEngine({
         )}
 
         {/* Conditionally render admin reset buttons so we don't present blocked paths */}
-        {!inProduction && showResetToSandbox && <button className="btn danger" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
+        {!inProduction && showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
         
         {inProduction && (
           <>
-            {showResetToPilot && <button className="btn" onClick={resetToPilot} disabled={!isPrevStageComplete}>Reset to Pilot</button>}
-            {showResetToSandbox && <button className="btn danger" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
+            {showResetToPilot && <button className="btn outline small" onClick={resetToPilot} disabled={!isPrevStageComplete}>Reset to Pilot</button>}
+            {showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
           </>
         )}
       </div>

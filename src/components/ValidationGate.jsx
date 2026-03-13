@@ -47,7 +47,7 @@ export default function ValidationGate({ targetGroupName, onValidationChange }) 
         </div>
 
         {status === "idle" && (
-           <button className="btn px-12 pb-2" onClick={handleValidate} disabled={!targetGroupName}>Validate</button>
+           <button className="btn outline small" onClick={handleValidate} disabled={!targetGroupName}>Validate</button>
         )}
         {status === "checking" && <span className="val-gate-pill blue">Checking...</span>}
         {status === "success" && <span className="val-gate-pill green">✓ All {data?.total || 0} Protected</span>}

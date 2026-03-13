@@ -1,3 +1,4 @@
+// src/modules/risk/DashboardTab.jsx
 import { useState, useEffect } from "react";
 import api from "../../api/api";
 
@@ -9,152 +10,87 @@ import BaselineDashboard from "./dashboard_component/BaselineDashboard";
 
 import "./dashboard.css";
 
-export default function DashboardTab({ baselines }) {
-
-  const [activeSection, setActiveSection] = useState("overview");
-
+export default function DashboardTab({ baselines, activeSection, onNavigateSubTab, parentFilters, parentLogic, refreshTrigger, onDataLoaded }) {
   const [patches, setPatches] = useState([]);
   const [cves, setCves] = useState([]);
-
   const [loading, setLoading] = useState(true);
 
-  /* =========================================
-     LOAD PATCHES + CVES (FROM BACKEND CACHE)
-  ========================================= */
-
   useEffect(() => {
-
     const loadDashboardData = async () => {
-
       try {
-
         const [patchRes, cveRes] = await Promise.all([
           api.get("/patches"),
           api.get("/cves")
         ]);
-
         setPatches(patchRes.data || []);
         setCves(cveRes.data?.data || []);
-
       } catch (err) {
-
         console.error("Dashboard load failed:", err);
-
       } finally {
-
         setLoading(false);
-
       }
-
     };
-
     loadDashboardData();
-
-  }, []);
+  }, [refreshTrigger]);
 
   return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {loading && (
+        <div className="app-loading-content">
+          Loading dashboard...
+        </div>
+      )}
 
-    <div className="dashboard-container">
+      {!loading && activeSection === "overview" &&
+        <DashboardOverview
+          navigate={onNavigateSubTab}
+          patches={patches}
+          cves={cves}
+          baselines={baselines}
+          onDataLoaded={onDataLoaded}
+        />
+      }
 
-      {/* DASHBOARD NAVIGATION */}
+      {!loading && activeSection === "cve" &&
+        <CVEDashboard
+          patches={patches}
+          cves={cves}
+          parentFilters={parentFilters}
+          parentLogic={parentLogic}
+          onDataLoaded={onDataLoaded}
+        />
+      }
 
-      <div className="dashboard-tabs">
+      {!loading && activeSection === "patch" &&
+        <PatchDashboard
+          patches={patches}
+          cves={cves}
+          parentFilters={parentFilters}
+          parentLogic={parentLogic}
+          onDataLoaded={onDataLoaded}
+        />
+      }
 
-        <button
-          className={activeSection === "overview" ? "active" : ""}
-          onClick={() => setActiveSection("overview")}
-        >
-          Overview
-        </button>
+      {!loading && activeSection === "computer" &&
+        <ComputerDashboard
+          patches={patches}
+          cves={cves}
+          parentFilters={parentFilters}
+          parentLogic={parentLogic}
+          onDataLoaded={onDataLoaded}
+        />
+      }
 
-        <button
-          className={activeSection === "cve" ? "active" : ""}
-          onClick={() => setActiveSection("cve")}
-        >
-          CVEs
-        </button>
-
-        <button
-          className={activeSection === "patch" ? "active" : ""}
-          onClick={() => setActiveSection("patch")}
-        >
-          Patches
-        </button>
-
-        <button
-          className={activeSection === "computer" ? "active" : ""}
-          onClick={() => setActiveSection("computer")}
-        >
-          Computers
-        </button>
-
-        <button
-          className={activeSection === "baseline" ? "active" : ""}
-          onClick={() => setActiveSection("baseline")}
-        >
-          Baselines
-        </button>
-
-      </div>
-
-      {/* DASHBOARD CONTENT */}
-
-      <div className="dashboard-content">
-
-        {loading && (
-          <div className="dashboard-loading">
-            Loading dashboard...
-          </div>
-        )}
-
-        {!loading && activeSection === "overview" &&
-          <DashboardOverview
-            navigate={setActiveSection}
-            patches={patches}
-            cves={cves}
-            baselines={baselines}
-          />
-        }
-
-        {!loading && activeSection === "cve" &&
-          <CVEDashboard
-            navigate={setActiveSection}
-            patches={patches}
-            cves={cves}
-            baselines={baselines}
-          />
-        }
-
-        {!loading && activeSection === "patch" &&
-          <PatchDashboard
-            navigate={setActiveSection}
-            patches={patches}
-            cves={cves}
-            baselines={baselines}
-          />
-        }
-
-        {!loading && activeSection === "computer" &&
-          <ComputerDashboard
-            navigate={setActiveSection}
-            patches={patches}
-            cves={cves}
-            baselines={baselines}
-          />
-        }
-
-        {!loading && activeSection === "baseline" &&
-          <BaselineDashboard
-            navigate={setActiveSection}
-            patches={patches}
-            cves={cves}
-            baselines={baselines}
-          />
-        }
-
-      </div>
-
+      {!loading && activeSection === "baseline" &&
+        <BaselineDashboard
+          patches={patches}
+          cves={cves}
+          baselines={baselines}
+          parentFilters={parentFilters}
+          parentLogic={parentLogic}
+          onDataLoaded={onDataLoaded}
+        />
+      }
     </div>
-
   );
 }

@@ -175,7 +175,7 @@ export default function UserManagement({ onClose, currentUserId }) {
             {formError && <div className="alert error small" style={{ margin: '0 20px 20px' }}>{formError}</div>}
             <div className="action-bar">
               <div className="spacer"></div>
-              <button type="submit" className="btn pri min-w-140" disabled={formBusy}>
+              <button type="submit" className="btn outline small" disabled={formBusy}>
                 {formBusy ? "Creating..." : "Create User"}
               </button>
             </div>

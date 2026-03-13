@@ -205,7 +205,7 @@ export default function GroupManager({ onClose }) {
 
       <div className="section overflow-visible">
         <div className="section-head"><span className="title">1. Group Settings</span></div>
-        <div className="controls-grid auto-1fr">
+        <div className="controls-grid">
           <div className="field min-w-200">
             <span className="label">Group Type</span>
             <div className="toggle-bg">
@@ -215,7 +215,9 @@ export default function GroupManager({ onClose }) {
           </div>
           <div className="field">
             <span className="label">Group Name</span>
-            <input type="text" className="control" placeholder="e.g., Windows 10 Patch Group" value={groupName} onChange={(e) => { setGroupName(e.target.value); clearMessages(); }} disabled={creating} />
+            <div className="inputwrap">
+              <input type="text" className="control" placeholder="e.g., Windows 10 Patch Group" value={groupName} onChange={(e) => { setGroupName(e.target.value); clearMessages(); }} disabled={creating} />
+            </div>
           </div>
         </div>
       </div>
@@ -226,8 +228,13 @@ export default function GroupManager({ onClose }) {
           <div className="flex-row items-end p-20 gap-16 wrap">
             <div className="flex-1 min-w-200"><FancySelect label="Property" options={properties} value={selectedProperty} onChange={setSelectedProperty} placeholder="— Select Property —" isLoading={loadingProps} /></div>
             <div style={{ flex: 0.7, minWidth: 140 }}><FancySelect label="Comparison" options={operators} value={selectedOperator} onChange={setSelectedOperator} placeholder="Contains" /></div>
-            <div className="field flex-1 min-w-200"><span className="label">Search Text</span><input type="text" className="control" placeholder="e.g., rhel" value={valueInput} onChange={(e) => setValueInput(e.target.value)} /></div>
-            <div className="pb-0"><button className="btn pri btn-full-height" onClick={addCondition}>Add</button></div>
+            <div className="field flex-1 min-w-200">
+              <span className="label">Search Text</span>
+              <div className="inputwrap">
+                <input type="text" className="control" placeholder="e.g., rhel" value={valueInput} onChange={(e) => setValueInput(e.target.value)} />
+              </div>
+            </div>
+            <div className="pb-0"><button className="btn outline small" style={{ height: '40px' }} onClick={addCondition}>Add</button></div>
           </div>
           <div className="flex-row p-0-20-20">
              <div className="flex-1"><FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} /></div>
@@ -247,7 +254,12 @@ export default function GroupManager({ onClose }) {
         <div className="section overflow-visible">
           <div className="section-head"><span className="title">2. Select Computers</span></div>
           <div className="flex-row items-end p-0-20-10 gap-16 wrap" style={{ paddingTop: 20 }}>
-            <div className="field flex-1"><span className="label">Search Computers</span><input type="text" className="control" placeholder="Search by Name or IP..." value={compSearch} onChange={e => { setCompSearch(e.target.value); setCompPage(1); setAllComputers([]); }} /></div>
+            <div className="field flex-1">
+              <span className="label">Search Computers</span>
+              <div className="inputwrap">
+                <input type="text" className="control" placeholder="Search by Name or IP..." value={compSearch} onChange={e => { setCompSearch(e.target.value); setCompPage(1); setAllComputers([]); }} />
+              </div>
+            </div>
             <div className="flex-1"><FancySelect label="Filter Loaded OS" options={osList} value={selectedOSs} onChange={setSelectedOSs} placeholder="— Show All —" multiSelect={true} /></div>
           </div>
           <div className="flex-row de-header-row p-0-20-10">
@@ -282,7 +294,7 @@ export default function GroupManager({ onClose }) {
 
       <div className="action-bar">
         <div className="spacer"></div>
-        <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating || !groupName || (groupType==='Automatic' && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}>
+        <button className="btn outline small" onClick={handleCreate} disabled={creating || !groupName || (groupType==='Automatic' && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}>
           {creating ? "Creating..." : "Create Group"}
         </button>
       </div>
