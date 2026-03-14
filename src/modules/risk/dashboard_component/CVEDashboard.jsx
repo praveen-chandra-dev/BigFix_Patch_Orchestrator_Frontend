@@ -1,12 +1,12 @@
 // src/modules/risk/dashboard_component/CVEDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
-import api from "../../../api/api";
 
 export default function CVEDashboard({ patches = [], cves = [], parentFilters = [], parentLogic = "AND", onDataLoaded }) {
   const [modalData, setModalData] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
@@ -77,8 +77,31 @@ export default function CVEDashboard({ patches = [], cves = [], parentFilters = 
   };
 
   const filteredCVEs = cveExposure.filter(applyFilters);
-  const totalPages = Math.ceil(filteredCVEs.length / rowsPerPage);
-  const paginatedCVEs = filteredCVEs.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const sortedCVEs = useMemo(() => {
+    let sortable = [...filteredCVEs];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        if (['patch_count', 'device_count'].includes(sortConfig.key)) {
+          aVal = Number(aVal || 0); bVal = Number(bVal || 0);
+        } else {
+          aVal = String(aVal || "").toLowerCase(); bVal = String(bVal || "").toLowerCase();
+        }
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortable;
+  }, [filteredCVEs, sortConfig]);
+
+  const totalPages = Math.ceil(sortedCVEs.length / rowsPerPage);
+  const paginatedCVEs = sortedCVEs.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
 
   const handleExport = () => setShowExpDrop(false);
 
@@ -86,7 +109,8 @@ export default function CVEDashboard({ patches = [], cves = [], parentFilters = 
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
 
       <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
-       
+        <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
+        </div>
         <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
           <div className="dropdown" ref={colRef}>
             <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
@@ -132,10 +156,10 @@ export default function CVEDashboard({ patches = [], cves = [], parentFilters = 
         <table>
           <thead className="kpi-th-sticky">
             <tr>
-              {cols.find(c=>c.id==='cve_id')?.show && <th>CVE</th>}
-              {cols.find(c=>c.id==='kev')?.show && <th style={{ textAlign: "center" }}>KEV</th>}
-              {cols.find(c=>c.id==='patch_count')?.show && <th style={{ textAlign: "center" }}>Patches</th>}
-              {cols.find(c=>c.id==='device_count')?.show && <th style={{ textAlign: "center" }}>Devices</th>}
+              {cols.find(c=>c.id==='cve_id')?.show && <th className="cursor-pointer" onClick={() => handleSort('cve_id')}>CVE{getSortArrow('cve_id')}</th>}
+              {cols.find(c=>c.id==='kev')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('kev')}>KEV{getSortArrow('kev')}</th>}
+              {cols.find(c=>c.id==='patch_count')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('patch_count')}>Patches{getSortArrow('patch_count')}</th>}
+              {cols.find(c=>c.id==='device_count')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('device_count')}>Devices{getSortArrow('device_count')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -159,7 +183,7 @@ export default function CVEDashboard({ patches = [], cves = [], parentFilters = 
             </select>
         </div>
         <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-            {filteredCVEs.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredCVEs.length)} of {filteredCVEs.length}
+            {sortedCVEs.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedCVEs.length)} of {sortedCVEs.length}
         </span>
         <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
             <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>

@@ -34,7 +34,7 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
                 window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: stageCode } }));
             }
         }}>
-           <span className="dot" /> {label}
+            {label}
         </a>
     );
   };
@@ -57,7 +57,7 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
            <div className="sidebar-sub-menu">
                <a className={`menu-item sub-item step ${flowState?.current === 'HISTORY' ? 'hold' : ''}`} 
                   onClick={() => window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: 'HISTORY' } }))}>
-                   <span className="dot" style={{ background: flowState?.current === 'HISTORY' ? 'var(--primary)' : 'var(--muted)'}} /> Deployment History
+                  Deployment History
                </a>
                {renderStage('CONFIG', 'Configuration')}
                {env.enableSandbox && !isEUC && renderStage('SANDBOX', 'Sandbox')}
@@ -74,20 +74,19 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
         {activeMenu === 'risk' && (
            <div className="sidebar-sub-menu">
                <a className={`menu-item sub-item step ${riskTab === 'patches' ? 'hold' : 'pass'}`} onClick={() => setRiskTab('patches')}>
-                   <span className="dot" /> Patches
+                    Patches
                </a>
                <a className={`menu-item sub-item step ${riskTab === 'baseline' ? 'hold' : 'pass'}`} onClick={() => setRiskTab('baseline')}>
-                   <span className="dot" /> Baseline
+                    Baseline
                </a>
                <a className={`menu-item sub-item step ${riskTab === 'dashboard' ? 'hold' : 'pass'}`} onClick={() => { setRiskTab('dashboard'); setRiskSubTab('overview'); }}>
-                   <span className="dot" /> Dashboard
+                    Dashboard
                </a>
                {/* Nested Dashboard Tabs */}
                {riskTab === 'dashboard' && (
                    <div style={{ marginLeft: '24px', display: 'flex', flexDirection: 'column', marginTop: '4px' }}>
                        {['overview', 'cve', 'patch', 'computer', 'baseline'].map(sub => (
-                           <a key={sub} className={`menu-item sub-item step ${riskSubTab === sub ? 'hold' : 'pass'}`} style={{ padding: '6px 20px 6px 24px', fontSize: '13px' }} onClick={() => setRiskSubTab(sub)}>
-                               <span className="dot" style={{ width: '6px', height: '6px', background: riskSubTab === sub ? 'var(--primary)' : 'var(--muted)' }} /> 
+                           <a key={sub} className={`menu-item sub-item step ${riskSubTab === sub ? 'hold' : 'pass'}`} style={{ padding: '6px 20px 6px 24px', fontSize: '13px', borderLeft: 'none' }} onClick={() => setRiskSubTab(sub)}>
                                {sub === 'cve' ? 'CVEs' : sub === 'computer' ? 'Computers' : sub === 'patch' ? 'Patches' : sub === 'baseline' ? 'Baselines' : 'Overview'}
                            </a>
                        ))}

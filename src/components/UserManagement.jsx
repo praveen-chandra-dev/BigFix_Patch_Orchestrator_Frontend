@@ -1,5 +1,6 @@
 // src/components/UserManagement.jsx
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
+import FilterDrawer from "./FilterDrawer";
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
@@ -73,8 +74,41 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [editRole, setEditRole] = useState("");
   const [editBusy, setEditBusy] = useState(false);
 
+  // --- Toolbar, Pagination, Sorting & Filtering State ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  const [showColDrop, setShowColDrop] = useState(false);
+  const [showExpDrop, setShowExpDrop] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [globalLogic, setGlobalLogic] = useState("AND");
+  const [filters, setFilters] = useState([]);
+  
+  const colRef = useRef(null);
+  const expRef = useRef(null);
+
+  const [cols, setCols] = useState([
+    { id: 'LoginName', label: 'Username', show: true },
+    { id: 'Role', label: 'Role', show: true },
+    { id: 'CreatedAt', label: 'Created At', show: true }
+  ]);
+
+  const propertyOptions = [
+    { value: "LoginName", label: "Username" },
+    { value: "Role", label: "Role" },
+    { value: "CreatedAt", label: "Created At" }
+  ];
+
   const roleOptions = ["Windows", "Linux", "EUC", "Admin"];
-  const visibleUsers = users.filter(u => ![9002, 9003, 9004].includes(Number(u.UserID)));
+
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (colRef.current && !colRef.current.contains(e.target)) setShowColDrop(false);
+      if (expRef.current && !expRef.current.contains(e.target)) setShowExpDrop(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
 
   async function fetchUsers() {
     setLoading(true); setError("");
@@ -134,11 +168,92 @@ export default function UserManagement({ onClose, currentUserId }) {
       return 'green'; 
   };
 
+  // --- Data Processing (Filter, Sort, Paginate) ---
+  const visibleUsers = users.filter(u => ![9002, 9003, 9004].includes(Number(u.UserID)));
+
+  const applyFilters = (user) => {
+    if (!filters.length) return true;
+    let globalMatch = globalLogic === "OR" ? false : true;
+    for (let b of filters) {
+      let blockMatch = true; let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++; let condition = true;
+        const search = String(c.value).toLowerCase();
+        let field = String(user[c.column] || "").toLowerCase();
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+    }
+    return globalMatch;
+  };
+
+  const filteredUsers = useMemo(() => { 
+    return visibleUsers.filter(applyFilters); 
+  }, [visibleUsers, filters, globalLogic]);
+
+  const sortedUsers = useMemo(() => {
+    let sortableItems = [...filteredUsers];
+    if (sortConfig.key) {
+      sortableItems.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+
+        if (sortConfig.key === 'CreatedAt') {
+          aVal = new Date(aVal || 0).getTime();
+          bVal = new Date(bVal || 0).getTime();
+        } else {
+          aVal = String(aVal || "").toLowerCase();
+          bVal = String(bVal || "").toLowerCase();
+        }
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [filteredUsers, sortConfig]);
+
+  const totalPages = Math.ceil(sortedUsers.length / rowsPerPage);
+  const paginatedUsers = sortedUsers.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+
+  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+
+  const handleExport = (fmt) => { 
+    setShowExpDrop(false); 
+    if (fmt === 'CSV') {
+        const header = cols.filter(c => c.show).map(c => c.label);
+        const rows = sortedUsers.map(u => cols.filter(c => c.show).map(c => `"${u[c.id] || ""}"`));
+        const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "users_export.csv"; a.click();
+    }
+  };
+
   return (
     <div className="mgmtenv">
       <div className="topbar">
         <div className="left"><h2 className="clickable" onClick={onClose} title="Go back">User Management</h2></div>
-        <div className="right"><button className="btn" onClick={onClose}>Close</button></div>
+        <div className="right flex-row gap-12 items-center">
+            <div style={{ position: 'relative' }}>
+                <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                </button>
+                {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
+            </div>
+            <button className="iconbtn" onClick={fetchUsers} title="Refresh Data">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            </button>
+        </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
@@ -183,58 +298,173 @@ export default function UserManagement({ onClose, currentUserId }) {
         </div>
       )}
 
+      {activeFilterCount > 0 && (
+          <div className="p-0-20-20" style={{ padding: '0 20px 20px' }}>
+              <div className="active-filter-banner active">
+                <div className="filter-tags">
+                  {filters.map((b, bIdx) => {
+                    const validConds = b.conds.filter(c => c.value);
+                    if (!validConds.length) return null;
+                    return (
+                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                        {validConds.map((c, cIdx) => (
+                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+              </div>
+          </div>
+      )}
+
       <div className="section">
-        <div className="section-head"><span className="title">Existing Users</span></div>
+        <div className="section-head" style={{ paddingBottom: '16px' }}>
+          <span className="title">Existing Users</span>
+        </div>
+
+        <div className="grid-toolbar" style={{ padding: '16px 20px 16px 20px', margin: 0, borderBottom: 'none' }}>
+            <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
+            </div>
+            <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <div className="dropdown" ref={colRef}>
+                  <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                      &nbsp; Columns
+                  </button>
+                  {showColDrop && (
+                      <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                              {cols.map((col, i) => (
+                                  <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                      <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                          const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                      }} />
+                                      <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                  </label>
+                              ))}
+                          </div>
+                      </div>
+                  )}
+              </div>
+              <div className="dropdown" ref={expRef}>
+                  <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                      &nbsp; Export
+                  </button>
+                  {showExpDrop && (
+                      <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                              {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt)}>{fmt}</button>
+                              ))}
+                          </div>
+                          <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
+                          <button className="item" onClick={() => handleExport('CSV')}>Filtered Data</button>
+                      </div>
+                  )}
+              </div>
+            </div>
+        </div>
+
         <div className="gridusr">
           {loading ? (
             <p className="sub mgmt-loading">Loading users...</p>
           ) : (
-            <div className="tableWrap">
-              <table className="user-table">
-                <thead>
-                  <tr><th>Username</th><th>Role</th><th>Created At</th><th className="text-center w-100">Action</th></tr>
-                </thead>
-                <tbody>
-                  {visibleUsers.map(user => {
-                    const isEditing = editingId === user.UserID;
-                    const isSelf = user.UserID === currentUserId;
-                    return (
-                     <tr key={user.UserID}>
-                        <td>{user.LoginName}{isSelf && <span className="you-pill"> (You)</span>}</td>
-                        <td className="min-w-140">
-                          {isEditing ? (
-                            <div style={{width: 140}}>
-                              <FancySelect options={roleOptions} value={editRole} onChange={setEditRole} placeholder="Select Role" disabled={editBusy} />
-                            </div>
-                          ) : (
-                            <span className={`pill ${getPillClass(user.Role)}`}>{user.Role || 'Windows'}</span>
-                          )}
-                        </td>
-                        <td>{fmtDate(user.CreatedAt)}</td>
-                        <td className="text-center">
-                          <div className="action-btns-center">
-                            {isEditing ? (
-                              <>
-                                <button className="btn-icon save" title="Save Role" onClick={() => saveRole(user.UserID)} disabled={editBusy}>✓</button>
-                                <button className="btn-icon cancel" title="Cancel" onClick={cancelEditing} disabled={editBusy}>✕</button>
-                              </>
-                            ) : (
-                              <>
-                                <button className="btn-icon edit" title="Edit Role" onClick={() => startEditing(user)} disabled={!isAdmin}>✎</button>
-                                <button className="btn-icon delete" title="Delete User" onClick={() => handleDeleteUser(user.UserID)} disabled={isSelf || !isAdmin}>🗑</button>
-                              </>
-                            )}
-                          </div>
-                        </td>
+            <>
+              <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
+                {filteredUsers.length === 0 ? (
+                  <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No users found matching filters.</div>
+                ) : (
+                  <table className="user-table">
+                    <thead className="kpi-th-sticky">
+                      <tr>
+                        {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Username{getSortArrow('LoginName')}</th>}
+                        {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortArrow('Role')}</th>}
+                        {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortArrow('CreatedAt')}</th>}
+                        <th className="text-center w-100">Action</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {paginatedUsers.map(user => {
+                        const isEditing = editingId === user.UserID;
+                        const isSelf = user.UserID === currentUserId;
+                        return (
+                         <tr key={user.UserID}>
+                            {cols.find(c=>c.id==='LoginName')?.show && <td>{user.LoginName}{isSelf && <span className="you-pill"> (You)</span>}</td>}
+                            
+                            {cols.find(c=>c.id==='Role')?.show && (
+                              <td className="min-w-140">
+                                {isEditing ? (
+                                  <div style={{width: 140}}>
+                                    <FancySelect options={roleOptions} value={editRole} onChange={setEditRole} placeholder="Select Role" disabled={editBusy} />
+                                  </div>
+                                ) : (
+                                  <span className={`pill ${getPillClass(user.Role)}`}>{user.Role || 'Windows'}</span>
+                                )}
+                              </td>
+                            )}
+
+                            {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(user.CreatedAt)}</td>}
+                            
+                            <td className="text-center">
+                              <div className="action-btns-center">
+                                {isEditing ? (
+                                  <>
+                                    <button className="btn-icon save" title="Save Role" onClick={() => saveRole(user.UserID)} disabled={editBusy}>✓</button>
+                                    <button className="btn-icon cancel" title="Cancel" onClick={cancelEditing} disabled={editBusy}>✕</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button className="btn-icon edit" title="Edit Role" onClick={() => startEditing(user)} disabled={!isAdmin}>✎</button>
+                                    <button className="btn-icon delete" title="Delete User" onClick={() => handleDeleteUser(user.UserID)} disabled={isSelf || !isAdmin}>🗑</button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {filteredUsers.length > 0 && (
+                <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                        <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                        </select>
+                    </div>
+                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                        {filteredUsers.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredUsers.length)} of {filteredUsers.length}
+                    </span>
+                    <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                        <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
+                        <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
+                        {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
+                        {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                        {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
+                        {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
+                        <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
+                    </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
+
+      <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 // src/modules/risk/dashboard_component/PatchDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
-import api from "../../../api/api";
 
 const getSeverityFromScore = (score) => {
   if (score >= 90) return "CRITICAL";
@@ -22,7 +21,8 @@ export default function PatchDashboard({ patches = [], cves = [], parentFilters 
   const [modalData, setModalData] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
@@ -109,16 +109,56 @@ export default function PatchDashboard({ patches = [], cves = [], parentFilters 
   };
 
   const filteredPatches = patchExposure.filter(applyFilters);
-  const totalPages = Math.ceil(filteredPatches.length / rowsPerPage);
-  const paginatedPatches = filteredPatches.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
-  const exportCSV = () => { setShowExpDrop(false); };
+  const sortedPatches = useMemo(() => {
+    let sortable = [...filteredPatches];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        if (['final_score', 'cve_count', 'device_count'].includes(sortConfig.key)) {
+          aVal = Number(aVal || 0); bVal = Number(bVal || 0);
+        } else {
+          aVal = String(aVal || "").toLowerCase(); bVal = String(bVal || "").toLowerCase();
+        }
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortable;
+  }, [filteredPatches, sortConfig]);
+
+  const totalPages = Math.ceil(sortedPatches.length / rowsPerPage);
+  const paginatedPatches = sortedPatches.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+
+  const exportCSV = () => {
+    const header = cols.filter(c => c.show).map(c => c.label);
+    const rows = sortedPatches.map(p => {
+      return cols.filter(c => c.show).map(c => {
+        if (c.id === 'patch_name') return `"${p.patch_name}"`;
+        if (c.id === 'cve_count') return `"[${p.cves.join(",")}]"`;
+        if (c.id === 'device_count') return `"[${p.devices.join(",")}]"`;
+        return p[c.id] || 0;
+      });
+    });
+    const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "patch_exposure.csv"; a.click();
+    setShowExpDrop(false); 
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
 
       <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
-        
+        <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
+        </div>
         <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
           <div className="dropdown" ref={colRef}>
             <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
@@ -161,12 +201,12 @@ export default function PatchDashboard({ patches = [], cves = [], parentFilters 
         <table>
           <thead className="kpi-th-sticky">
             <tr>
-              {cols.find(c=>c.id==='patch_id')?.show && <th>Patch ID</th>}
-              {cols.find(c=>c.id==='patch_name')?.show && <th>Name</th>}
-              {cols.find(c=>c.id==='final_score')?.show && <th style={{ textAlign: "center" }}>Score</th>}
-              {cols.find(c=>c.id==='severity')?.show && <th style={{ textAlign: "center" }}>Severity</th>}
-              {cols.find(c=>c.id==='cve_count')?.show && <th style={{ textAlign: "center" }}>CVEs</th>}
-              {cols.find(c=>c.id==='device_count')?.show && <th style={{ textAlign: "center" }}>Devices</th>}
+              {cols.find(c=>c.id==='patch_id')?.show && <th className="cursor-pointer" onClick={() => handleSort('patch_id')}>Patch ID{getSortArrow('patch_id')}</th>}
+              {cols.find(c=>c.id==='patch_name')?.show && <th className="cursor-pointer" onClick={() => handleSort('patch_name')}>Name{getSortArrow('patch_name')}</th>}
+              {cols.find(c=>c.id==='final_score')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('final_score')}>Score{getSortArrow('final_score')}</th>}
+              {cols.find(c=>c.id==='severity')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('severity')}>Severity{getSortArrow('severity')}</th>}
+              {cols.find(c=>c.id==='cve_count')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('cve_count')}>CVEs{getSortArrow('cve_count')}</th>}
+              {cols.find(c=>c.id==='device_count')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('device_count')}>Devices{getSortArrow('device_count')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -183,16 +223,16 @@ export default function PatchDashboard({ patches = [], cves = [], parentFilters 
           </tbody>
         </table>
       </div>
-
+      
       <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span className="pager-info">Rows per page:</span>
             <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option>
             </select>
         </div>
         <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-            {filteredPatches.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredPatches.length)} of {filteredPatches.length}
+            {sortedPatches.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedPatches.length)} of {sortedPatches.length}
         </span>
         <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
             <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>

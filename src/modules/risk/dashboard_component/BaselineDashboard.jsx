@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import api from "../../../api/api";
 
-export default function BaselineDashboard({ parentFilters = [], parentLogic = "AND" }) {
+export default function BaselineDashboard({ parentFilters = [], parentLogic = "AND", onDataLoaded }) {
   const [baselines, setBaselines] = useState([]);
   const [patches, setPatches] = useState([]);
   const [cves, setCves] = useState([]);
@@ -10,7 +10,8 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
   const [modalData, setModalData] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
@@ -32,24 +33,26 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const baselineRes = await api.get("/baselines");
-      const baselineData = Array.isArray(baselineRes.data) ? baselineRes.data : baselineRes.data?.data || [];
-      setBaselines(baselineData);
-      
-      const patchRes = await api.get("/patches");
-      const patchData = Array.isArray(patchRes.data) ? patchRes.data : patchRes.data?.data || [];
-      setPatches(patchData);
-      
-      const payload = patchData.map((p) => ({ patch_id: p.patch_id, site_name: p.site_name }));
-      const cveRes = await api.post("/cves/by-patches", { patches: payload });
-      setCves(cveRes.data?.data || []);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const baselineRes = await api.get("/baselines");
+        const baselineData = Array.isArray(baselineRes.data) ? baselineRes.data : baselineRes.data?.data || [];
+        setBaselines(baselineData);
+        
+        const patchRes = await api.get("/patches");
+        const patchData = Array.isArray(patchRes.data) ? patchRes.data : patchRes.data?.data || [];
+        setPatches(patchData);
+        
+        const payload = patchData.map((p) => ({ patch_id: p.patch_id, site_name: p.site_name }));
+        const cveRes = await api.post("/cves/by-patches", { patches: payload });
+        setCves(cveRes.data?.data || []);
+        onDataLoaded?.();
+      } catch (err) { console.error(err); } finally { setLoading(false); }
+    };
+    load();
+  }, []);
 
   const patchCveMap = useMemo(() => {
     const map = {};
@@ -67,8 +70,11 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
         cvesForPatch.forEach((c) => cveSet.add(c));
       });
       return {
-        baseline_name: b.baseline_name, patch_count: patchIds.length, cve_count: cveSet.size,
-        patches: patchIds.map((id) => `BIGFIX-${id}`), cves: Array.from(cveSet)
+        baseline_name: b.baseline_name || b.name || "Unknown Baseline",
+        patch_count: patchIds.length,
+        cve_count: cveSet.size,
+        patches: patchIds.map((id) => `BIGFIX-${id}`),
+        cves: Array.from(cveSet)
       };
     });
   }, [baselines, patchCveMap]);
@@ -97,17 +103,41 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
   };
 
   const filteredBaselines = baselineExposure.filter(applyFilters);
-  const totalPages = Math.ceil(filteredBaselines.length / rowsPerPage);
-  const paginatedBaselines = filteredBaselines.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const sortedBaselines = useMemo(() => {
+    let sortable = [...filteredBaselines];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        if (['patch_count', 'cve_count'].includes(sortConfig.key)) {
+          aVal = Number(aVal || 0); bVal = Number(bVal || 0);
+        } else {
+          aVal = String(aVal || "").toLowerCase(); bVal = String(bVal || "").toLowerCase();
+        }
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortable;
+  }, [filteredBaselines, sortConfig]);
+
+  const totalPages = Math.ceil(sortedBaselines.length / rowsPerPage);
+  const paginatedBaselines = sortedBaselines.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
 
   const handleExport = () => { setShowExpDrop(false); }
 
   if (loading) return <div className="app-loading-content">Loading baselines...</div>;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
-        
+        <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
+        </div>
         <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
           <div className="dropdown" ref={colRef}>
             <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
@@ -135,27 +165,27 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                      {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                       <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport()}>{fmt}</button>
+                       <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={handleExport}>{fmt}</button>
                      ))}
                   </div>
                   <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
-                  <button className="item" onClick={() => handleExport()}>Current Page</button>
-                  <button className="item" onClick={() => handleExport()}>Filtered Data</button>
-                  <button className="item" onClick={() => handleExport()}>All Data</button>
+                  <button className="item" onClick={handleExport}>Current Page</button>
+                  <button className="item" onClick={handleExport}>Filtered Data</button>
+                  <button className="item" onClick={handleExport}>All Data</button>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      <div className="tableWrap border-top" style={{ flex: 1 }}>
+      <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
         <table>
           <thead className="kpi-th-sticky">
             <tr>
-              {cols.find(c=>c.id==='baseline_name')?.show && <th>Baseline</th>}
-              {cols.find(c=>c.id==='patch_count')?.show && <th style={{ textAlign: "center" }}>Patches</th>}
-              {cols.find(c=>c.id==='cve_count')?.show && <th style={{ textAlign: "center" }}>CVEs</th>}
+              {cols.find(c=>c.id==='baseline_name')?.show && <th className="cursor-pointer" onClick={() => handleSort('baseline_name')}>Baseline{getSortArrow('baseline_name')}</th>}
+              {cols.find(c=>c.id==='patch_count')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('patch_count')}>Patches{getSortArrow('patch_count')}</th>}
+              {cols.find(c=>c.id==='cve_count')?.show && <th className="cursor-pointer" style={{ textAlign: "center" }} onClick={() => handleSort('cve_count')}>CVEs{getSortArrow('cve_count')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -170,7 +200,7 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
         </table>
       </div>
       
-      <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 0", gap: "24px" }}>
+      <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span className="pager-info">Rows per page:</span>
             <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
@@ -178,7 +208,7 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
             </select>
         </div>
         <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-            {filteredBaselines.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredBaselines.length)} of {filteredBaselines.length}
+            {sortedBaselines.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedBaselines.length)} of {sortedBaselines.length}
         </span>
         <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
             <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
@@ -190,6 +220,15 @@ export default function BaselineDashboard({ parentFilters = [], parentLogic = "A
             <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
         </div>
       </div>
+
+      {modalData && (
+        <div className="risk-modal-overlay" onClick={() => setModalData(null)}>
+          <div className="risk-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="risk-modal-header"><h3 style={{ margin: 0, fontSize: "16px", fontWeight: 600 }}>{modalData.title} ({modalData.items.length})</h3><button className="risk-modal-close" onClick={() => setModalData(null)}>✕</button></div>
+            <div className="risk-modal-body"><ul>{modalData.items.map((item, i) => <li key={i}>{item}</li>)}</ul></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

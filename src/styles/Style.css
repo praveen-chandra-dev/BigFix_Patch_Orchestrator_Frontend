@@ -223,7 +223,7 @@ h1, h2, h3, h4, .brand-text, .page-title, .modal-title, .dash-header-title {
 }
 .card.reveal { transform: none; opacity: 1; margin:10px; }
 .card h2 { margin: 0 0 16px; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--text); }
-.sub { font-size: 13px; color: var(--muted); }
+.sub { font-size: 13px; color: var(--muted); margin-bottom: 5px;}
 .row { display: flex; flex-wrap: wrap; gap: 16px; width: 100%; align-items: center; margin-top: 16px; } 
 .row-items-end { align-items: flex-end; }
 .sep { height: 1px; background: var(--border); margin: 20px 0; width: 100%; }

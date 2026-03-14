@@ -10,6 +10,8 @@ const SEVERITY_COLORS = {
   CRITICAL: "#dc2626",
   HIGH: "#ea580c",
   IMPORTANT: "#facc15",
+    MEDIUM: "#facc15", // Added professional color for MEDIUM
+
   MODERATE: "#22c55e",
   LOW: "#3b82f6",
   UNKNOWN: "#9ca3af",
