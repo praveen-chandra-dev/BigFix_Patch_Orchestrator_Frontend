@@ -435,7 +435,7 @@ export default function BaselineManager({ onClose }) {
           </div>
           <div className="action-bar" style={{ borderTop: '1px solid var(--border)' }}>
             <div className="spacer"></div>
-            <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating}>{creating ? "Creating..." : "Create Baseline"}</button>
+            <button className="btn outline small" onClick={handleCreate} disabled={creating}>{creating ? "Creating..." : "Create Baseline"}</button>
           </div>
         </div>
       )}

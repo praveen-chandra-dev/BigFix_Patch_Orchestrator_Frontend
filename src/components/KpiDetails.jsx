@@ -79,7 +79,7 @@ export default function KpiDetails({ context, onBack }) {
   const [sysConfig, setSysConfig] = useState(null);
   
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, dir: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);

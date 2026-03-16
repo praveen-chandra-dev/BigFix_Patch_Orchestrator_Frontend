@@ -99,7 +99,7 @@ export default function DecisionEngine({
           <h2>Decision Engine</h2>
           <button
             type="button"
-            className="btn pri"
+            className="btn outline small"
             onClick={handleTriggerClick}
             disabled={isDisabled || checkingBaseline}
             title={disabled ? "Sandbox completed - view only mode" : isDisabled ? "Select a baseline and group first" : "Trigger Sandbox"}

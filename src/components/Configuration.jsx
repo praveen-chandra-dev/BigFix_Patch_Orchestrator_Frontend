@@ -293,7 +293,7 @@ export default function Configuration({ onSaved, locked = false }) {
       </div>
       <div className="footer-actions">
         <button className="btn secondary" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(10); setLastReportUnit("days"); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
-        <button className="btn primary" onClick={save} disabled={busy || locked}>{busy ? "Saving Settings..." : "Save Configuration"}</button>
+        <button className="btn outline small" onClick={save} disabled={busy || locked}>{busy ? "Saving Settings..." : "Save Configuration"}</button>
       </div>
     </section>
   );

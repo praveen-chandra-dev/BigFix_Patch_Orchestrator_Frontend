@@ -93,6 +93,17 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     { value: "vcStatus", label: "Status" }
   ];
 
+  // Communicate with Header.jsx
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sync:snapshot_tab', { detail: activeTab }));
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handler = (e) => setActiveTab(e.detail);
+    window.addEventListener('nav:snapshot', handler);
+    return () => window.removeEventListener('nav:snapshot', handler);
+  }, []);
+
   useEffect(() => {
     const handleOutside = (e) => {
       if (colRef.current && !colRef.current.contains(e.target)) setShowColDrop(false);
@@ -316,12 +327,6 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
               </>
             )}
         </div>
-      </div>
-
-      <div className="tabs">
-        <button className={`tab ${activeTab === "TARGETS" ? "active" : ""}`} onClick={() => setActiveTab("TARGETS")}>1. Targets</button>
-        <button className={`tab ${activeTab === "SETTINGS" ? "active" : ""}`} onClick={() => setActiveTab("SETTINGS")}>2. Settings</button>
-        <button className={`tab ${activeTab === "EXECUTION" ? "active" : ""}`} onClick={() => setActiveTab("EXECUTION")}>3. Execution</button>
       </div>
 
       {activeTab === "TARGETS" && (

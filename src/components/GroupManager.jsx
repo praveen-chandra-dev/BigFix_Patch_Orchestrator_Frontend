@@ -102,7 +102,7 @@ export default function GroupManager({ onClose }) {
 
   // Toolbar, Pagination & Sorting State
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
@@ -332,7 +332,8 @@ export default function GroupManager({ onClose }) {
             </div>
             <div className="pb-0"><button className="btn outline small" style={{ height: '40px' }} onClick={addCondition}>Add</button></div>
           </div>
-          <div className="flex-row p-0-20-20">
+          {/* Target site wrapper updated to explicitly match the 20px left margin/padding */}
+          <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
              <div className="flex-1"><FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} /></div>
           </div>
           {conditions.length > 0 && (

@@ -17,19 +17,34 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
   const { env } = useEnvironment();
   const isEUC = role === 'EUC';
 
+  // State to track current active tabs in Clone/Snapshot modules
+  const [localSnapTab, setLocalSnapTab] = useState('TARGETS');
+  const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
+
+  // Listen to changes broadcasted by Clone/Snapshot components
+  useEffect(() => {
+    const handleSnap = (e) => setLocalSnapTab(e.detail);
+    const handleClone = (e) => setLocalCloneTab(e.detail);
+    window.addEventListener('sync:snapshot_tab', handleSnap);
+    window.addEventListener('sync:clone_tab', handleClone);
+    return () => {
+        window.removeEventListener('sync:snapshot_tab', handleSnap);
+        window.removeEventListener('sync:clone_tab', handleClone);
+    };
+  }, []);
+
   const renderStage = (stageCode, label) => {
     if (!flowState) return null;
     const isHold = flowState.current === stageCode;
-    const isPass = flowState.completed.includes(stageCode);
     const isAccessible = flowState.accessible.includes(stageCode);
 
     let cls = "menu-item sub-item step";
-    if (isHold) cls += " hold";
-    else if (isPass) cls += " pass";
     if (!isAccessible) cls += " disabled";
 
     return (
-        <a className={cls} onClick={() => {
+        <a className={cls} 
+           style={{ fontWeight: isHold ? 'bold' : 'normal', color: 'inherit' }}
+           onClick={() => {
             if (isAccessible) {
                 window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: stageCode } }));
             }
@@ -55,7 +70,8 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
         
         {activeMenu === 'orchestration' && (
            <div className="sidebar-sub-menu">
-               <a className={`menu-item sub-item step ${flowState?.current === 'HISTORY' ? 'hold' : ''}`} 
+               <a className="menu-item sub-item step" 
+                  style={{ fontWeight: flowState?.current === 'HISTORY' ? 'bold' : 'normal', color: 'inherit' }}
                   onClick={() => window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: 'HISTORY' } }))}>
                   Deployment History
                </a>
@@ -73,20 +89,19 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
 
         {activeMenu === 'risk' && (
            <div className="sidebar-sub-menu">
-               <a className={`menu-item sub-item step ${riskTab === 'patches' ? 'hold' : 'pass'}`} onClick={() => setRiskTab('patches')}>
+               <a className="menu-item sub-item step" style={{ fontWeight: riskTab === 'patches' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskTab('patches')}>
                     Patches
                </a>
-               <a className={`menu-item sub-item step ${riskTab === 'baseline' ? 'hold' : 'pass'}`} onClick={() => setRiskTab('baseline')}>
+               <a className="menu-item sub-item step" style={{ fontWeight: riskTab === 'baseline' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskTab('baseline')}>
                     Baseline
                </a>
-               <a className={`menu-item sub-item step ${riskTab === 'dashboard' ? 'hold' : 'pass'}`} onClick={() => { setRiskTab('dashboard'); setRiskSubTab('overview'); }}>
+               <a className="menu-item sub-item step" style={{ fontWeight: riskTab === 'dashboard' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { setRiskTab('dashboard'); setRiskSubTab('overview'); }}>
                     Dashboard
                </a>
-               {/* Nested Dashboard Tabs */}
                {riskTab === 'dashboard' && (
-                   <div style={{ marginLeft: '24px', display: 'flex', flexDirection: 'column', marginTop: '4px' }}>
+                   <div style={{ marginLeft: '40px', display: 'flex', flexDirection: 'column', }}>
                        {['overview', 'cve', 'patch', 'computer', 'baseline'].map(sub => (
-                           <a key={sub} className={`menu-item sub-item step ${riskSubTab === sub ? 'hold' : 'pass'}`} style={{ padding: '6px 20px 6px 24px', fontSize: '13px', borderLeft: 'none' }} onClick={() => setRiskSubTab(sub)}>
+                           <a key={sub} className="menu-item sub-item step" style={{ padding: '6px 20px 6px 24px', fontSize: '13px', borderLeft: 'none', fontWeight: riskSubTab === sub ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskSubTab(sub)}>
                                {sub === 'cve' ? 'CVEs' : sub === 'computer' ? 'Computers' : sub === 'patch' ? 'Patches' : sub === 'baseline' ? 'Baselines' : 'Overview'}
                            </a>
                        ))}
@@ -111,14 +126,44 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
         <a className={`menu-item ${activeMenu === 'group' ? 'active' : ''}`} onClick={() => onNavigate('group')}>
            <IconGroup /> Group Management
         </a>
+        
         {role !== 'EUC' && (
           <>
+            {/* Snapshot Menu & Vertical Tabs */}
             <a className={`menu-item ${activeMenu === 'snapshot' ? 'active' : ''}`} onClick={() => onNavigate('snapshot')}>
                <IconFolder /> Take Snapshot
             </a>
+            {activeMenu === 'snapshot' && (
+               <div className="sidebar-sub-menu">
+                   <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'TARGETS'}))}>
+                         Targets
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'SETTINGS'}))}>
+                        Settings
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'EXECUTION'}))}>
+                        Execution
+                   </a>
+               </div>
+            )}
+
+            {/* Clone Menu & Vertical Tabs */}
             <a className={`menu-item ${activeMenu === 'clone' ? 'active' : ''}`} onClick={() => onNavigate('clone')}>
                <IconFolder /> Clone VM
             </a>
+            {activeMenu === 'clone' && (
+               <div className="sidebar-sub-menu">
+                   <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'TARGETS'}))}>
+                         Targets
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'SETTINGS'}))}>
+                         Settings
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'EXECUTION'}))}>
+                         Execution
+                   </a>
+               </div>
+            )}
           </>
         )}
 

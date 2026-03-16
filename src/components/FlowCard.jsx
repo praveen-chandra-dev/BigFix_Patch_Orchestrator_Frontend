@@ -1,5 +1,5 @@
 // src/components/FlowCard.jsx
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import FilterDrawer from "./FilterDrawer";
 
 export const Stage = {
@@ -53,22 +53,51 @@ export default function DeploymentHistory() {
     { value: "issuer", label: "Issuer" }
   ];
 
+  // Toolbar, Pagination & Sorting State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  const [showColDrop, setShowColDrop] = useState(false);
+  const [showExpDrop, setShowExpDrop] = useState(false);
+  
+  const colRef = useRef(null);
+  const expRef = useRef(null);
+
+  const [cols, setCols] = useState([
+    { id: 'name', label: 'Action Name', show: true },
+    { id: 'id', label: 'ID', show: true },
+    { id: 'state', label: 'State', show: true },
+    { id: 'issued', label: 'Issued', show: true },
+    { id: 'stopped', label: 'Stopped', show: true },
+    { id: 'issuer', label: 'Issuer', show: true }
+  ]);
+
   useEffect(() => {
-    const fetchDeployments = async () => {
-      setLoading(true);
-      setErr("");
-      try {
-        const r = await fetch(`${API}/api/deployments/bps`, { headers: { Accept: "application/json" } });
-        const t = await r.text();
-        if (!r.ok) throw new Error(t);
-        const j = JSON.parse(t);
-        setItems(Array.isArray(j?.items) ? j.items : []);
-      } catch (e) {
-        setErr(e?.message || String(e));
-      } finally {
-        setLoading(false);
-      }
+    const handleOutside = (e) => {
+      if (colRef.current && !colRef.current.contains(e.target)) setShowColDrop(false);
+      if (expRef.current && !expRef.current.contains(e.target)) setShowExpDrop(false);
     };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  const fetchDeployments = async () => {
+    setLoading(true);
+    setErr("");
+    try {
+      const r = await fetch(`${API}/api/deployments/bps`, { headers: { Accept: "application/json" } });
+      const t = await r.text();
+      if (!r.ok) throw new Error(t);
+      const j = JSON.parse(t);
+      setItems(Array.isArray(j?.items) ? j.items : []);
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchDeployments();
   }, []);
 
@@ -122,24 +151,89 @@ export default function DeploymentHistory() {
     return validBlocks === 0 ? true : globalMatch;
   };
 
-  const filteredItems = items.filter(applyFilters);
+  const filteredItems = useMemo(() => items.filter(applyFilters), [items, filters, globalLogic]);
+
+  const sortedItems = useMemo(() => {
+    let sortableItems = [...filteredItems];
+    if (sortConfig.key) {
+      sortableItems.sort((a, b) => {
+        let aVal = a[sortConfig.key] || "";
+        let bVal = b[sortConfig.key] || "";
+        
+        if (sortConfig.key === 'id') {
+            aVal = Number(aVal) || 0;
+            bVal = Number(bVal) || 0;
+        } else {
+            aVal = String(aVal).toLowerCase();
+            bVal = String(bVal).toLowerCase();
+        }
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [filteredItems, sortConfig]);
+
+  const totalPages = Math.ceil(sortedItems.length / rowsPerPage);
+  const paginatedItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  useEffect(() => { setCurrentPage(1); }, [filters, rowsPerPage]);
+
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+
+  const handleExport = (fmt) => { 
+    setShowExpDrop(false); 
+    if (fmt === 'CSV') {
+        const header = cols.filter(c => c.show).map(c => c.label);
+        const rows = sortedItems.map(p => cols.filter(c => c.show).map(c => `"${p[c.id] || ""}"`));
+        const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "deployment_history.csv"; a.click();
+    }
+  };
+
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
   if (detailAction) {
-     return <ActionResultsView action={detailAction} loading={detailResults.loading} rows={detailResults.rows} error={detailResults.error} onBack={() => setDetailAction(null)} />
+     return <ActionResultsView 
+        action={detailAction} 
+        loading={detailResults.loading} 
+        rows={detailResults.rows} 
+        error={detailResults.error} 
+        onBack={() => setDetailAction(null)} 
+        onRefresh={() => openActionDetails(detailAction)}
+     />
   }
 
   return (
-    <>
-      <section className="card reveal" style={{ padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
-        
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-            <div>
-                <h2 style={{ margin: 0, fontSize: "24px", fontWeight: 500, color: "var(--text)" }}>Deployment History</h2>
-                <div className="sub mt-4" style={{ fontSize: "12px", color: "var(--muted)" }}>History of all BigFix Patch Setu actions executed.</div>
-            </div>
+    <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
+      
+      {/* KPI Details-style Sticky Header */}
+      <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Deployment History</h2>
+          <div className="text-13 muted-text" style={{ marginTop: '4px' }}>History of all BigFix Patch Setu actions executed.</div>
         </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ position: 'relative' }}>
+            <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+            </button>
+            {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
+          </div>
+          <button className="iconbtn" onClick={fetchDeployments} title="Refresh Data">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          </button>
+        </div>
+      </div>
 
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        
         {activeFilterCount > 0 && (
           <div className="active-filter-banner active">
             <div className="filter-tags">
@@ -163,89 +257,134 @@ export default function DeploymentHistory() {
           </div>
         )}
 
-        <div className="grid-toolbar" style={{ margin: '16px 0', padding: 0 }}>
-          <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-            Showing {filteredItems.length} Deployments
-          </div>
-          
-          <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
-            <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
-               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
-            </button>
-            <button className="iconbtn" onClick={() => { setFilters([]); window.location.reload(); }} title="Refresh">
-               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-            </button>
-          </div>
+        <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
+            <div className="grid-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}></div>
+            <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+                <div className="dropdown" ref={colRef}>
+                    <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        &nbsp; Columns
+                    </button>
+                    {showColDrop && (
+                        <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {cols.map((col, i) => (
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                            const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                        }} />
+                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="dropdown" ref={expRef}>
+                    <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                        &nbsp; Export
+                    </button>
+                    {showExpDrop && (
+                        <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                 <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={() => handleExport(fmt)}>{fmt}</button>
+                               ))}
+                            </div>
+                            <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                            <button className="item" onClick={() => handleExport('CSV')}>Filtered Data</button>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
 
-        {loading && <div className="app-loading-content">Loading history…</div>}
-        {err && !loading && <div className="banner error">{err}</div>}
-        
-        {!loading && !err && (
-          <div className="tableWrap" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: "40%" }}>Action Name</th>
-                  <th>ID</th>
-                  <th>State</th>
-                  <th>Issued</th>
-                  <th>Stopped</th>
-                  <th>Issuer</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredItems.length === 0 && (
-                  <tr><td colSpan="6" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>No actions found.</td></tr>
-                )}
-                {filteredItems.map((it) => (
-                  <tr
-                    key={it.id}
-                    onClick={() => openActionDetails(it)}
-                    tabIndex={0}
-                    style={{ cursor: 'pointer' }}
-                    title={`Click to view results for Action ${it.id}`}
-                  >
-                    <td>
-                      <button className="name-link" onClick={(e) => { e.stopPropagation(); openActionDetails(it); }}>
-                        {it.name}
-                      </button>
-                    </td>
-                    <td style={{ fontFamily: 'monospace', color: 'var(--muted)' }}>{it.id}</td>
-                    <td>
-                      <span className={`pill ${it.state.toLowerCase() === 'open' ? 'green' : 'amber'}`}>
-                        {it.state}
-                      </span>
-                    </td>
-                    <td>{it.issued}</td>
-                    <td>{it.stopped}</td>
-                    <td>{it.issuer}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+        <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
+            {loading ? (
+                <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading records...</div>
+            ) : err ? (
+                <div style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>{err}</div>
+            ) : (
+                <table>
+                    <thead className="kpi-th-sticky">
+                        <tr>
+                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Action Name{getSortArrow('name')}</th>}
+                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortArrow('id')}</th>}
+                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')}>State{getSortArrow('state')}</th>}
+                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')}>Issued{getSortArrow('issued')}</th>}
+                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')}>Stopped{getSortArrow('stopped')}</th>}
+                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')}>Issuer{getSortArrow('issuer')}</th>}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {paginatedItems.length === 0 ? (
+                            <tr><td colSpan="6" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No actions found.</td></tr>
+                        ) : (
+                            paginatedItems.map((it) => (
+                                <tr key={it.id} onClick={() => openActionDetails(it)} className="cursor-pointer">
+                                    {cols.find(c=>c.id==='name')?.show && <td><button className="name-link" onClick={(e) => { e.stopPropagation(); openActionDetails(it); }} style={{ display: 'inline-flex', alignItems: 'center', textAlign: 'left', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, font: 'inherit' }}>{it.name}</button></td>}
+                                    {cols.find(c=>c.id==='id')?.show && <td style={{ fontFamily: 'monospace', color: 'var(--muted)' }}>{it.id}</td>}
+                                    {cols.find(c=>c.id==='state')?.show && <td><span className={`pill ${it.state.toLowerCase() === 'open' ? 'green' : 'amber'}`}>{it.state}</span></td>}
+                                    {cols.find(c=>c.id==='issued')?.show && <td>{it.issued}</td>}
+                                    {cols.find(c=>c.id==='stopped')?.show && <td>{it.stopped}</td>}
+                                    {cols.find(c=>c.id==='issuer')?.show && <td>{it.issuer}</td>}
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            )}
+        </div>
 
-      <FilterDrawer 
-        isOpen={drawerOpen} 
-        onClose={() => setDrawerOpen(false)} 
-        filters={filters} 
-        setFilters={setFilters} 
-        globalLogic={globalLogic} 
-        setGlobalLogic={setGlobalLogic} 
-        propertyOptions={propertyOptions} 
-      />
-    </>
+        <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                </select>
+            </div>
+            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedItems.length)} of {sortedItems.length}
+            </span>
+            <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
+                <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
+                {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
+                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
+                {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
+                <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
+            </div>
+        </div>
+
+      </div>
+
+      <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
+
+    </div>
   );
 }
 
-function ActionResultsView({ action, loading, rows, error, onBack }) {
-    const [sortConfig, setSortConfig] = useState({ key: "status", dir: "asc" });
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(10);
+function ActionResultsView({ action, loading, rows, error, onBack, onRefresh }) {
     const title = action?.name || "Action Details";
+
+    const [currentPage, setCurrentPage] = useState(1);
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [sortConfig, setSortConfig] = useState({ key: "status", direction: "asc" });
+    const [showColDrop, setShowColDrop] = useState(false);
+    const [showExpDrop, setShowExpDrop] = useState(false);
+    
+    const colRef = useRef(null);
+    const expRef = useRef(null);
+
+    const [cols, setCols] = useState([
+        { id: 'server', label: 'Server Name', show: true },
+        { id: 'status', label: 'Status', show: true }
+    ]);
 
     const [drawerOpen, setDrawerOpen] = useState(false);
     const [globalLogic, setGlobalLogic] = useState("AND");
@@ -255,7 +394,16 @@ function ActionResultsView({ action, loading, rows, error, onBack }) {
       { value: "status", label: "Status" }
     ];
 
-    useEffect(() => setPage(1), [filters, pageSize, rows]);
+    useEffect(() => {
+        const handleOutside = (e) => {
+          if (colRef.current && !colRef.current.contains(e.target)) setShowColDrop(false);
+          if (expRef.current && !expRef.current.contains(e.target)) setShowExpDrop(false);
+        };
+        document.addEventListener("mousedown", handleOutside);
+        return () => document.removeEventListener("mousedown", handleOutside);
+    }, []);
+
+    useEffect(() => setCurrentPage(1), [filters, rowsPerPage, rows]);
 
     const applyFilters = (row) => {
       if (!filters.length) return true;
@@ -294,26 +442,17 @@ function ActionResultsView({ action, loading, rows, error, onBack }) {
         return [...filtered].sort((a, b) => {
             const valA = sortConfig.key === 'status' ? classify(a.status).toLowerCase() : String(a[sortConfig.key] || "").toLowerCase();
             const valB = sortConfig.key === 'status' ? classify(b.status).toLowerCase() : String(b[sortConfig.key] || "").toLowerCase();
-            if (valA < valB) return sortConfig.dir === "asc" ? -1 : 1;
-            if (valA > valB) return sortConfig.dir === "asc" ? 1 : -1;
+            if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
+            if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
             return 0;
         });
     }, [filtered, sortConfig]);
 
-    const totalPages = Math.ceil(sorted.length / pageSize);
-    const paginated = useMemo(() => {
-        const start = (page - 1) * pageSize;
-        return sorted.slice(start, start + pageSize);
-    }, [sorted, page, pageSize]);
+    const totalPages = Math.ceil(sorted.length / rowsPerPage);
+    const paginated = sorted.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
-    const handleSort = (key) => setSortConfig(c => ({ key, dir: c.key === key && c.dir === "asc" ? "desc" : "asc" }));
-
-    const getSortIndicator = (key) => {
-        if (sortConfig.key === key) {
-            return sortConfig.dir === 'asc' ? ' ↑' : ' ↓';
-        }
-        return '';
-    };
+    const handleSort = (key) => setSortConfig(c => ({ key, direction: c.key === key && c.direction === "asc" ? "desc" : "asc" }));
+    const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
 
     const getBadgeClass = (status) => {
       const s = classify(status);
@@ -323,120 +462,181 @@ function ActionResultsView({ action, loading, rows, error, onBack }) {
       return 'pill amber';
     };
     
+    const handleExport = (fmt) => { 
+        setShowExpDrop(false); 
+        if (fmt === 'CSV') {
+            const header = cols.filter(c => c.show).map(c => c.label);
+            const exportRows = sorted.map(p => cols.filter(c => c.show).map(c => `"${p[c.id] || ""}"`));
+            const csv = [header.join(','), ...exportRows.map(r => r.join(','))].join('\n');
+            const blob = new Blob([csv], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = "action_results.csv"; a.click();
+        }
+    };
+
     const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
     return (
-        <section className="card reveal" style={{ padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
+        <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
             
-            <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "20px" }}>
-                <button className="iconbtn" onClick={onBack} title="Back to History" style={{ background: "var(--panel)" }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-                </button>
-                <div>
-                    <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 500, color: "var(--text)" }}>{title}</h2>
-                    <div className="sub mt-4" style={{ fontSize: "12px", color: "var(--muted)" }}>Action Execution Details</div>
-                </div>
-            </div>
-
-            {activeFilterCount > 0 && (
-              <div className="active-filter-banner active">
-                <div className="filter-tags">
-                  {filters.map((b, bIdx) => {
-                    const validConds = b.conds.filter(c => c.value);
-                    if (!validConds.length) return null;
-                    return (
-                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
-                        {validConds.map((c, cIdx) => (
-                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
-              </div>
-            )}
-
-            <div className="grid-toolbar" style={{ margin: '16px 0', padding: 0 }}>
-              <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-                Showing {filtered.length} Servers
-              </div>
-              <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
-                <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
-                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
-                </button>
-              </div>
-            </div>
-
-            <div className="tableWrap" style={{ flex: 1 }}>
-                {loading ? <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading action results...</div> : error ? <div style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>{error}</div> : (
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style={{ cursor: "pointer", color: sortConfig.key === 'server' ? 'var(--primary)' : 'var(--text)' }} onClick={() => handleSort('server')}>
-                                  Server {getSortIndicator('server')}
-                                </th>
-                                <th style={{ cursor: "pointer", color: sortConfig.key === 'status' ? 'var(--primary)' : 'var(--text)' }} onClick={() => handleSort('status')}>
-                                  Status {getSortIndicator('status')}
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {paginated.length === 0 && (
-                              <tr><td colSpan="2" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>No results found.</td></tr>
-                            )}
-                            {paginated.map((r, i) => (
-                                <tr key={i}>
-                                    <td style={{ fontWeight: 500 }}>{r.server}</td>
-                                    <td>
-                                      <span className={getBadgeClass(r.status)}>
-                                        {classify(r.status)}
-                                      </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                )}
-            </div>
-
-            <div className="pagination">
+            <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <span className="pager-info">Rows per page:</span>
-                    <select className="control" style={{ width: "75px", padding: "6px 10px", height: "32px", minWidth: 0 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
-                        <option value={50}>50</option>
-                    </select>
+                    <button className="iconbtn" onClick={onBack} title="Back to History" style={{ background: "var(--panel)" }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
+                    </button>
+                    <div>
+                        <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{title}</h2>
+                        <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Action Execution Details</div>
+                    </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-                    <div className="pager-info">
-                      {sorted.length > 0 ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, sorted.length)} of {sorted.length}
-                    </div>
-                    <div className="pager-btns">
-                        <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-                          &lt; Prev
+                <div style={{ display: 'flex', gap: '12px' }}>
+                    <div style={{ position: 'relative' }}>
+                        <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
                         </button>
-                        <button className="pager-btn" disabled={page >= totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>
-                          Next &gt;
-                        </button>
+                        {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
                     </div>
+                    <button className="iconbtn" onClick={onRefresh} title="Refresh Data">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                    </button>
                 </div>
             </div>
 
-            <FilterDrawer 
-              isOpen={drawerOpen} 
-              onClose={() => setDrawerOpen(false)} 
-              filters={filters} 
-              setFilters={setFilters} 
-              globalLogic={globalLogic} 
-              setGlobalLogic={setGlobalLogic} 
-              propertyOptions={propertyOptions} 
-            />
-        </section>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+
+                {activeFilterCount > 0 && (
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {filters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+                  </div>
+                )}
+
+                <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
+                    <div className="grid-toolbar-left"></div>
+                    <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+                        <div className="dropdown" ref={colRef}>
+                            <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                                &nbsp; Columns
+                            </button>
+                            {showColDrop && (
+                                <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                        {cols.map((col, i) => (
+                                            <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                                <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                                    const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                                }} />
+                                                <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="dropdown" ref={expRef}>
+                            <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                                &nbsp; Export
+                            </button>
+                            {showExpDrop && (
+                                <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                                    <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                                       {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                         <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={() => handleExport(fmt)}>{fmt}</button>
+                                       ))}
+                                    </div>
+                                    <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                                    <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                                    <button className="item" onClick={() => handleExport('CSV')}>Filtered Data</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
+                    {loading ? (
+                        <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading records...</div>
+                    ) : error ? (
+                        <div style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>{error}</div>
+                    ) : (
+                        <table>
+                            <thead className="kpi-th-sticky">
+                                <tr>
+                                    {cols.find(c=>c.id==='server')?.show && (
+                                      <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortArrow('server')}</th>
+                                    )}
+                                    {cols.find(c=>c.id==='status')?.show && (
+                                      <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortArrow('status')}</th>
+                                    )}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {paginated.length === 0 ? (
+                                    <tr><td colSpan="2" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No results found.</td></tr>
+                                ) : (
+                                    paginated.map((r, i) => (
+                                        <tr key={i}>
+                                            {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 500 }}>{r.server}</td>}
+                                            {cols.find(c=>c.id==='status')?.show && (
+                                              <td>
+                                                <span className={getBadgeClass(r.status)}>
+                                                  {classify(r.status)}
+                                                </span>
+                                              </td>
+                                            )}
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                        <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                        </select>
+                    </div>
+                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                        {sorted.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sorted.length)} of {sorted.length}
+                    </span>
+                    <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                        <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
+                        <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
+                        {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
+                        {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                        {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
+                        {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
+                        <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
+                    </div>
+                </div>
+
+            </div>
+
+            <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
+        </div>
     );
 }

@@ -67,7 +67,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
 
   // Toolbar, Pagination & Sorting State
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
@@ -102,6 +102,17 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const [error, setError] = useState("");
   const [processing, setProcessing] = useState(false);
   const [executions, setExecutions] = useState([]); 
+
+  // Communicate with Header.jsx
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sync:clone_tab', { detail: activeTab }));
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handler = (e) => setActiveTab(e.detail);
+    window.addEventListener('nav:clone', handler);
+    return () => window.removeEventListener('nav:clone', handler);
+  }, []);
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -376,12 +387,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               </>
             )}
         </div>
-      </div>
-
-      <div className="tabs">
-        <button className={`tab ${activeTab === "TARGETS" ? "active" : ""}`} onClick={() => setActiveTab("TARGETS")}>1. Targets</button>
-        <button className={`tab ${activeTab === "SETTINGS" ? "active" : ""}`} onClick={() => setActiveTab("SETTINGS")}>2. Settings</button>
-        <button className={`tab ${activeTab === "EXECUTION" ? "active" : ""}`} onClick={() => setActiveTab("EXECUTION")}>3. Execution</button>
       </div>
       
       {activeTab === "TARGETS" && (
