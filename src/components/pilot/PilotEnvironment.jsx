@@ -71,7 +71,7 @@ function enhanceNativeSelect(selectEl) {
       it.setAttribute("aria-selected", option.selected);
       it.innerHTML = `
         <span class="fx-label">${option.textContent}</span>
-        ${option.selected ? "<span class='fx-tick'>✓</span>" : ""}
+        ${option.selected ? "" : ""}
       `;
       it.addEventListener("mouseenter", () => setHover(visibleIndex));
       it.addEventListener("mousedown", (e) => e.preventDefault());
@@ -240,8 +240,28 @@ export default function PilotEnvironment({ mode = "pilot" }) {
   useEffect(() => { loadOptions(); return () => abortRef.current?.abort(); }, [mode]); 
   useEffect(() => { if (!loading) { const t = setTimeout(() => enhanceNativeSelects(document), 100); return () => clearTimeout(t); } }, [baselines, groups, loading]);
 
-  const on = (k) => (e) => setEnv((f) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.type === "number" ? Number(e.target.value) : e.target.value }));
-  const onNumber = (k, min = 0, max = 999) => (e) => { let val = parseInt(e.target.value, 10); if (isNaN(val) || val < min) val = min; if (val > max) val = max; setEnv((f) => ({ ...f, [k]: val })); };
+  const on = (k) => (e) => {
+      const val = e.target.value;
+      setEnv((f) => ({
+        ...f,
+        [k]: e.target.type === "checkbox" ? e.target.checked : val,
+      }));
+  };
+
+  const handleNumChange = (k) => (e) => {
+      const val = e.target.value;
+      if (val === "") setEnv(f => ({ ...f, [k]: "" }));
+      else setEnv(f => ({ ...f, [k]: Number(val) }));
+  };
+
+  const handleBlur = (k, min = 0, max = 999) => () => {
+      setEnv(f => {
+          let num = Number(f[k]);
+          if (!Number.isFinite(num) || f[k] === "") num = min;
+          num = Math.min(max, Math.max(min, num));
+          return { ...f, [k]: num };
+      });
+  };
 
   const baselineOptions = useMemo(() => baselines.map((x) => <option key={x} value={x}>{x}</option>), [baselines]);
   const groupOptions = useMemo(() => groups.map((x) => <option key={x} value={x}>{x}</option>), [groups]);
@@ -252,7 +272,7 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       <div className="env-header-row">
         <h2>Environment &amp; Baseline</h2>
         <button type="button" onClick={loadOptions} disabled={loading} className="btn outline small" title="Reload">{loading ? "Loading…" : ""}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
         </button>
       </div>
 
@@ -283,18 +303,18 @@ export default function PilotEnvironment({ mode = "pilot" }) {
         <div className="row mt-14">
           <div className="field">
             <div className="label">Success Threshold (%)</div>
-            <input type="number" className="control" min={0} max={100} value={env.successThreshold ?? 90} onChange={on("successThreshold")} />
+            <input type="number" className="control" min={0} max={100} value={env.successThreshold ?? 90} onChange={handleNumChange("successThreshold")} onBlur={handleBlur("successThreshold", 0, 100)} />
           </div>
           <div className="field">
             <div className="label">Allowable Critical Health Failures</div>
-            <input type="number" className="control" min={0} value={env.allowableCriticalHF ?? 0} onChange={on("allowableCriticalHF")} />
+            <input type="number" className="control" min={0} value={env.allowableCriticalHF ?? 0} onChange={handleNumChange("allowableCriticalHF")} onBlur={handleBlur("allowableCriticalHF", 0, 999)} />
           </div>
           <div className="field flex-15">
             <span className="label">Patch Window (Days / Hours / Mins)</span>
             <div className="env-patch-window-inputs">
-              <input type="number" className="control env-patch-input" title="Days" min={0} value={env.patchWindowDays ?? 0} onChange={onNumber("patchWindowDays", 0)} disabled={loading} />
-              <input type="number" className="control env-patch-input" title="Hours" min={0} max={23} value={env.patchWindowHours ?? 0} onChange={onNumber("patchWindowHours", 0, 23)} disabled={loading} />
-              <input type="number" className="control env-patch-input" title="Minutes" min={0} max={59} value={env.patchWindowMinutes ?? 0} onChange={onNumber("patchWindowMinutes", 0, 59)} disabled={loading} />
+              <input type="number" className="control env-patch-input" title="Days" min={0} value={env.patchWindowDays ?? 0} onChange={handleNumChange("patchWindowDays")} onBlur={handleBlur("patchWindowDays", 0, 999)} disabled={loading} />
+              <input type="number" className="control env-patch-input" title="Hours" min={0} max={23} value={env.patchWindowHours ?? 0} onChange={handleNumChange("patchWindowHours")} onBlur={handleBlur("patchWindowHours", 0, 23)} disabled={loading} />
+              <input type="number" className="control env-patch-input" title="Minutes" min={0} max={59} value={env.patchWindowMinutes ?? 0} onChange={handleNumChange("patchWindowMinutes")} onBlur={handleBlur("patchWindowMinutes", 0, 59)} disabled={loading} />
             </div>
           </div>
         </div>

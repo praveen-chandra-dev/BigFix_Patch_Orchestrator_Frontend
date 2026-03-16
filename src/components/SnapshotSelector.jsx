@@ -54,7 +54,6 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const [activeTab, setActiveTab] = useState("TARGETS");
   const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
   const [items, setItems] = useState([]);
-  const [search, setSearch] = useState("");
   const [isFetching, setIsFetching] = useState(false);
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
@@ -67,6 +66,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const [quiesce, setQuiesce] = useState(false);
   const [executions, setExecutions] = useState([]); 
   const [lastUpdated, setLastUpdated] = useState("");
+  const [execLastUpdated, setExecLastUpdated] = useState("");
 
   // Toolbar, Pagination & Sorting State
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,6 +74,13 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
+  
+  const [execCurrentPage, setExecCurrentPage] = useState(1);
+  const [execRowsPerPage, setExecRowsPerPage] = useState(10);
+  const [execSortConfig, setExecSortConfig] = useState({ key: null, direction: "asc" });
+  const [showExecColDrop, setShowExecColDrop] = useState(false);
+  const [showExecExpDrop, setShowExecExpDrop] = useState(false);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
@@ -81,33 +88,51 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const colRef = useRef(null);
   const expRef = useRef(null);
 
+  const execColRef = useRef(null);
+  const execExpRef = useRef(null);
+
   const [cols, setCols] = useState([
     { id: 'name', label: 'Hostname', show: true },
     { id: 'ips', label: 'IP Address', show: true },
     { id: 'vcStatus', label: 'Status', show: true }
   ]);
 
-  const propertyOptions = [
+  const [execCols, setExecCols] = useState([
+    { id: 'name', label: 'Server Name', show: true },
+    { id: 'snapName', label: 'Snapshot Name', show: true },
+    { id: 'taskId', label: 'Task ID', show: true },
+    { id: 'createdAt', label: 'Started', show: true },
+    { id: 'status', label: 'Status', show: true }
+  ]);
+
+  const propertyOptions = activeTab === 'EXECUTION' ? [
+    { value: "name", label: "Server Name" },
+    { value: "snapName", label: "Snapshot Name" },
+    { value: "taskId", label: "Task ID" },
+    { value: "status", label: "Status" }
+  ] : [
     { value: "name", label: "Hostname" },
     { value: "ips", label: "IP Address" },
     { value: "vcStatus", label: "Status" }
   ];
 
   // Communicate with Header.jsx
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent('sync:snapshot_tab', { detail: activeTab }));
-  }, [activeTab]);
-
-  useEffect(() => {
-    const handler = (e) => setActiveTab(e.detail);
-    window.addEventListener('nav:snapshot', handler);
-    return () => window.removeEventListener('nav:snapshot', handler);
+  useEffect(() => { window.dispatchEvent(new CustomEvent('sync:snapshot_tab', { detail: activeTab })); }, [activeTab]);
+  useEffect(() => { 
+    const handler = (e) => {
+        setActiveTab(e.detail);
+        setFilters([]); // Clear filters when changing tabs
+    };
+    window.addEventListener('nav:snapshot', handler); 
+    return () => window.removeEventListener('nav:snapshot', handler); 
   }, []);
 
   useEffect(() => {
     const handleOutside = (e) => {
       if (colRef.current && !colRef.current.contains(e.target)) setShowColDrop(false);
       if (expRef.current && !expRef.current.contains(e.target)) setShowExpDrop(false);
+      if (execColRef.current && !execColRef.current.contains(e.target)) setShowExecColDrop(false);
+      if (execExpRef.current && !execExpRef.current.contains(e.target)) setShowExecExpDrop(false);
     };
     document.addEventListener("mousedown", handleOutside);
     return () => document.removeEventListener("mousedown", handleOutside);
@@ -189,6 +214,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   };
 
   const visibleItems = useMemo(() => items.filter(applyFilters), [items, filters, globalLogic]);
+  const visibleExecs = useMemo(() => executions.filter(applyFilters), [executions, filters, globalLogic]);
 
   const sortedItems = useMemo(() => {
     let sortableItems = [...visibleItems];
@@ -211,11 +237,33 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     return sortableItems;
   }, [visibleItems, sortConfig]);
 
+  const sortedExecs = useMemo(() => {
+    let sortableItems = [...visibleExecs];
+    if (execSortConfig.key) {
+      sortableItems.sort((a, b) => {
+        let aVal = String(a[execSortConfig.key] || "").toLowerCase();
+        let bVal = String(b[execSortConfig.key] || "").toLowerCase();
+        if (aVal < bVal) return execSortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return execSortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [visibleExecs, execSortConfig]);
+
   const totalPages = Math.ceil(sortedItems.length / rowsPerPage);
   const paginatedItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
+  const execTotalPages = Math.ceil(sortedExecs.length / execRowsPerPage);
+  const execPaginatedItems = sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage);
+
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const handleExecSort = (key) => setExecSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  
+  const getSortIcon = (key, config) => {
+    if (config.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{config.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const toggleRow = (vcId) => {
     if (!vcId || processing) return;
@@ -236,21 +284,23 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
-  const handleExport = (fmt) => { 
-    setShowExpDrop(false); 
+  const handleExport = (fmt, isExec) => { 
+    if (isExec) setShowExecExpDrop(false); else setShowExpDrop(false); 
     if (fmt === 'CSV') {
-        const header = cols.filter(c => c.show).map(c => c.label);
-        const rows = sortedItems.map(p => cols.filter(c => c.show).map(c => {
+        const columns = isExec ? execCols : cols;
+        const dataToExport = isExec ? sortedExecs : sortedItems;
+        const header = columns.filter(c => c.show).map(c => c.label);
+        const rows = dataToExport.map(p => columns.filter(c => c.show).map(c => {
            let val = p[c.id];
-           if (c.id === 'ips') val = Array.isArray(p.ips) ? p.ips.join(", ") : "";
-           if (c.id === 'vcStatus') val = p.vcStatus === 'ready' ? 'Ready' : p.vcStatus === 'resolving' ? 'Resolving' : p.vcStatus === 'not_found' ? 'Not Found' : 'Pending';
+           if (!isExec && c.id === 'ips') val = Array.isArray(p.ips) ? p.ips.join(", ") : "";
+           if (!isExec && c.id === 'vcStatus') val = p.vcStatus === 'ready' ? 'Ready' : p.vcStatus === 'resolving' ? 'Resolving' : p.vcStatus === 'not_found' ? 'Not Found' : 'Pending';
            return `"${val || ""}"`;
         }));
         const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
         const blob = new Blob([csv], { type: "text/csv" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = "snapshot_targets_export.csv"; a.click();
+        a.href = url; a.download = isExec ? "snapshot_history.csv" : "snapshot_targets.csv"; a.click();
     }
   };
 
@@ -273,6 +323,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     if (res.ok && Array.isArray(res.history)) {
         const mapped = res.history.filter(h => h.Type === 'Snapshot').map(h => ({ id: h.VmId, name: h.VmName, snapName: h.SnapshotName, taskId: h.TaskId, status: h.Status, error: h.Error, createdAt: new Date(h.CreatedAt).toLocaleString() }));
         setExecutions(mapped);
+        setExecLastUpdated(new Date().toLocaleString());
         return mapped;
     }
     return [];
@@ -307,13 +358,20 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
 
   return (
     <div className="mgmtenv">
-      <div className="topbar">
-        <div className="left flex-row items-center gap-10">
-           <h2 className="m-0">Take Snapshot</h2>
-           {environment && <span className="pill gray">{environment.toUpperCase()}</span>}
+      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+               <h2 className="m-0">Take Snapshot</h2>
+               {environment && <span className="pill gray">{environment.toUpperCase()}</span>}
+            </div>
+            {activeTab !== 'SETTINGS' && (
+                <div className="sub mt-4 text-13 muted-text">
+                   Updated: {activeTab === 'EXECUTION' ? execLastUpdated || "—" : lastUpdated || "—"}
+                </div>
+            )}
         </div>
         <div className="right flex-row gap-12 items-center">
-            {activeTab === 'TARGETS' && (
+            {(activeTab === 'TARGETS' || activeTab === 'EXECUTION') && (
               <>
                 <div style={{ position: 'relative' }}>
                     <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
@@ -321,13 +379,38 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                     </button>
                     {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
                 </div>
-                <button className="iconbtn" onClick={fetchData} title="Refresh Data">
+                <button className="iconbtn" onClick={activeTab === 'EXECUTION' ? refreshHistory : fetchData} disabled={processing || isFetching} title="Refresh Data">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                 </button>
               </>
             )}
         </div>
       </div>
+
+      {activeFilterCount > 0 && activeTab !== 'SETTINGS' && (
+          <div className="p-0-20-20">
+              <div className="active-filter-banner active">
+                <div className="filter-tags">
+                  {filters.map((b, bIdx) => {
+                    const validConds = b.conds.filter(c => c.value);
+                    if (!validConds.length) return null;
+                    return (
+                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                        {validConds.map((c, cIdx) => (
+                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+              </div>
+          </div>
+      )}
 
       {activeTab === "TARGETS" && (
         <>
@@ -344,43 +427,13 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
             </div>
           )}
 
-          {activeFilterCount > 0 && (
-              <div className="p-0-20-20">
-                  <div className="active-filter-banner active">
-                    <div className="filter-tags">
-                      {filters.map((b, bIdx) => {
-                        const validConds = b.conds.filter(c => c.value);
-                        if (!validConds.length) return null;
-                        return (
-                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
-                            {validConds.map((c, cIdx) => (
-                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                                <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
-                              </span>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
-                  </div>
-              </div>
-          )}
-
           <div className="section">
-            <div className="section-head" style={{ paddingBottom: '16px' }}>
+            <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span className="title">Select VMs</span> 
-                  <span className="pill green">Selected: {selectedIds.size}</span>
+                  <span className="pill soft">Selected: {selectedIds.size}</span>
                 </div>
-            </div>
-
-            <div className="grid-toolbar" style={{ padding: '16px 20px 16px 20px', margin: 0, borderBottom: 'none' }}>
-                 <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-                 </div>
-                 <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px' }}>
                     <div className="dropdown" ref={colRef}>
                         <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -411,16 +464,16 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                    {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                     <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt)}>{fmt}</button>
+                                     <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt, false)}>{fmt}</button>
                                    ))}
                                 </div>
                                 <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
-                                <button className="item" onClick={() => handleExport('CSV')}>Filtered Data</button>
+                                <button className="item" onClick={() => handleExport('CSV', false)}>Filtered Data</button>
                             </div>
                         )}
                     </div>
-                 </div>
+                </div>
             </div>
 
             <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
@@ -433,16 +486,16 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                   <thead className="kpi-th-sticky">
                     <tr>
                         <th className="w-40 text-center"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} disabled={!paginatedItems.length}/></th>
-                        {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Hostname{getSortArrow('name')}</th>}
-                        {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortArrow('ips')}</th>}
-                        {cols.find(c=>c.id==='vcStatus')?.show && <th className="cursor-pointer" onClick={() => handleSort('vcStatus')}>Status{getSortArrow('vcStatus')}</th>}
+                        {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Hostname{getSortIcon('name', sortConfig)}</th>}
+                        {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortIcon('ips', sortConfig)}</th>}
+                        {cols.find(c=>c.id==='vcStatus')?.show && <th className="cursor-pointer" onClick={() => handleSort('vcStatus')}>Status{getSortIcon('vcStatus', sortConfig)}</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedItems.map((row, i) => {
                         const isReady = row.vcStatus === 'ready';
                         return (
-                            <tr key={i} className={!isReady ? "disabled" : selectedIds.has(row.vcId) ? "selected-row" : ""} onClick={() => toggleRow(row.vcId)}>
+                            <tr key={i} className={!isReady ? "disabled" : selectedIds.has(row.vcId) ? "selected-row cursor-pointer" : "cursor-pointer"} onClick={() => toggleRow(row.vcId)}>
                               <td className="text-center"><input type="checkbox" className="custom-checkbox pointer-events-none" checked={selectedIds.has(row.vcId)} disabled={!isReady || processing} readOnly /></td>
                               {cols.find(c=>c.id==='name')?.show && <td>{row.name}</td>}
                               {cols.find(c=>c.id==='ips')?.show && <td>{row.ips?.join(", ") || "-"}</td>}
@@ -517,26 +570,95 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
 
       {activeTab === "EXECUTION" && (
         <div className="section">
-          <div className="section-head">
+          <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span className="title">Execution History (Snapshots)</span>
-            <button className="iconbtn" onClick={refreshHistory} disabled={processing} title="Refresh">
-               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-            </button>
+            <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="dropdown" ref={execColRef}>
+                    <button className="btn outline sec small" onClick={() => { setShowExecColDrop(!showExecColDrop); setShowExecExpDrop(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        &nbsp; Columns
+                    </button>
+                    {showExecColDrop && (
+                        <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {execCols.map((col, i) => (
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                            const next = [...execCols]; next[i].show = e.target.checked; setExecCols(next);
+                                        }} />
+                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div className="dropdown" ref={execExpRef}>
+                    <button className="btn outline small" onClick={() => { setShowExecExpDrop(!showExecExpDrop); setShowExecColDrop(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                        &nbsp; Export
+                    </button>
+                    {showExecExpDrop && (
+                        <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                 <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt, true)}>{fmt}</button>
+                               ))}
+                            </div>
+                            <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
+                            <button className="item" onClick={() => handleExport('CSV', true)}>Filtered Data</button>
+                        </div>
+                    )}
+                </div>
+            </div>
           </div>
           <div className="tableWrap border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
             <table>
-              <thead className="kpi-th-sticky"><tr><th>Server Name</th><th>Snapshot Name</th><th>Task ID</th><th>Started</th><th>Status</th></tr></thead>
+              <thead className="kpi-th-sticky">
+                <tr>
+                  {execCols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleExecSort('name')}>Server Name{getSortIcon('name', execSortConfig)}</th>}
+                  {execCols.find(c=>c.id==='snapName')?.show && <th className="cursor-pointer" onClick={() => handleExecSort('snapName')}>Snapshot Name{getSortIcon('snapName', execSortConfig)}</th>}
+                  {execCols.find(c=>c.id==='taskId')?.show && <th className="cursor-pointer" onClick={() => handleExecSort('taskId')}>Task ID{getSortIcon('taskId', execSortConfig)}</th>}
+                  {execCols.find(c=>c.id==='createdAt')?.show && <th className="cursor-pointer" onClick={() => handleExecSort('createdAt')}>Started{getSortIcon('createdAt', execSortConfig)}</th>}
+                  {execCols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleExecSort('status')}>Status{getSortIcon('status', execSortConfig)}</th>}
+                </tr>
+              </thead>
               <tbody>
-                {executions.length === 0 ? (<tr><td colSpan={5} className="text-center p-20">No snapshots found.</td></tr>) : (
-                  executions.map((ex, i) => (
+                {execPaginatedItems.length === 0 ? (<tr><td colSpan={5} className="text-center p-20">No snapshots found.</td></tr>) : (
+                  execPaginatedItems.map((ex, i) => (
                     <tr key={i}>
-                      <td>{ex.name}</td><td>{ex.snapName}</td><td>{ex.taskId || "-"}</td><td>{ex.createdAt}</td>
-                      <td>{renderExecStatus(ex.status)} {ex.error && <small className="text-danger d-block">{ex.error}</small>}</td>
+                      {execCols.find(c=>c.id==='name')?.show && <td>{ex.name}</td>}
+                      {execCols.find(c=>c.id==='snapName')?.show && <td>{ex.snapName}</td>}
+                      {execCols.find(c=>c.id==='taskId')?.show && <td>{ex.taskId || "-"}</td>}
+                      {execCols.find(c=>c.id==='createdAt')?.show && <td>{ex.createdAt}</td>}
+                      {execCols.find(c=>c.id==='status')?.show && <td>{renderExecStatus(ex.status)} {ex.error && <small className="text-danger d-block">{ex.error}</small>}</td>}
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                  <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={execRowsPerPage} onChange={(e) => { setExecRowsPerPage(Number(e.target.value)); setExecCurrentPage(1); }}>
+                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                  </select>
+              </div>
+              <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                  {sortedExecs.length > 0 ? (execCurrentPage - 1) * execRowsPerPage + 1 : 0}-{Math.min(execCurrentPage * execRowsPerPage, sortedExecs.length)} of {sortedExecs.length}
+              </span>
+              <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                  <button className="pager-btn" disabled={execCurrentPage === 1} onClick={() => setExecCurrentPage(p => p - 1)}>&lt;</button>
+                  <button className={`pager-btn ${execCurrentPage === 1 ? 'active' : ''}`} onClick={() => setExecCurrentPage(1)}>1</button>
+                  {execTotalPages > 1 && <button className={`pager-btn ${execCurrentPage === 2 ? 'active' : ''}`} onClick={() => setExecCurrentPage(2)}>2</button>}
+                  {execTotalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                  {execTotalPages > 2 && execCurrentPage > 2 && execCurrentPage < execTotalPages && <button className="pager-btn active">{execCurrentPage}</button>}
+                  {execTotalPages > 2 && <button className={`pager-btn ${execCurrentPage === execTotalPages ? 'active' : ''}`} onClick={() => setExecCurrentPage(execTotalPages)}>{execTotalPages}</button>}
+                  <button className="pager-btn" disabled={execCurrentPage === execTotalPages || execTotalPages === 0} onClick={() => setExecCurrentPage(p => p + 1)}>&gt;</button>
+              </div>
           </div>
         </div>
       )}

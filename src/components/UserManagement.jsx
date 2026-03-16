@@ -59,6 +59,7 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState("");
 
   const currentRole = sessionStorage.getItem("user_role") || "Windows";
   const isAdmin = currentRole === "Admin";
@@ -112,7 +113,11 @@ export default function UserManagement({ onClose, currentUserId }) {
 
   async function fetchUsers() {
     setLoading(true); setError("");
-    try { const data = await apiFetch("/api/auth/users"); setUsers(data.users || []); } 
+    try { 
+      const data = await apiFetch("/api/auth/users"); 
+      setUsers(data.users || []); 
+      setLastUpdated(new Date().toLocaleString());
+    } 
     catch (e) { setError(e.message); } 
     finally { setLoading(false); }
   }
@@ -168,9 +173,6 @@ export default function UserManagement({ onClose, currentUserId }) {
       return 'green'; 
   };
 
-  // --- Data Processing (Filter, Sort, Paginate) ---
-  const visibleUsers = users.filter(u => ![9002, 9003, 9004].includes(Number(u.UserID)));
-
   const applyFilters = (user) => {
     if (!filters.length) return true;
     let globalMatch = globalLogic === "OR" ? false : true;
@@ -191,9 +193,8 @@ export default function UserManagement({ onClose, currentUserId }) {
     return globalMatch;
   };
 
-  const filteredUsers = useMemo(() => { 
-    return visibleUsers.filter(applyFilters); 
-  }, [visibleUsers, filters, globalLogic]);
+  const visibleUsers = users.filter(u => ![9002, 9003, 9004].includes(Number(u.UserID)));
+  const filteredUsers = useMemo(() => visibleUsers.filter(applyFilters), [visibleUsers, filters, globalLogic]);
 
   const sortedUsers = useMemo(() => {
     let sortableItems = [...filteredUsers];
@@ -222,7 +223,10 @@ export default function UserManagement({ onClose, currentUserId }) {
   const paginatedUsers = sortedUsers.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
@@ -241,8 +245,11 @@ export default function UserManagement({ onClose, currentUserId }) {
 
   return (
     <div className="mgmtenv">
-      <div className="topbar">
-        <div className="left"><h2 className="clickable" onClick={onClose} title="Go back">User Management</h2></div>
+      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+            <h2 className="clickable" style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }} onClick={onClose} title="Go back">User Management</h2>
+            <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
+        </div>
         <div className="right flex-row gap-12 items-center">
             <div style={{ position: 'relative' }}>
                 <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
@@ -324,14 +331,10 @@ export default function UserManagement({ onClose, currentUserId }) {
       )}
 
       <div className="section">
-        <div className="section-head" style={{ paddingBottom: '16px' }}>
+        <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="title">Existing Users</span>
-        </div>
-
-        <div className="grid-toolbar" style={{ padding: '16px 20px 16px 20px', margin: 0, borderBottom: 'none' }}>
-            <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-            </div>
-            <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+          
+          <div style={{ display: 'flex', gap: '12px' }}>
               <div className="dropdown" ref={colRef}>
                   <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -371,7 +374,7 @@ export default function UserManagement({ onClose, currentUserId }) {
                       </div>
                   )}
               </div>
-            </div>
+          </div>
         </div>
 
         <div className="gridusr">
@@ -386,9 +389,9 @@ export default function UserManagement({ onClose, currentUserId }) {
                   <table className="user-table">
                     <thead className="kpi-th-sticky">
                       <tr>
-                        {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Username{getSortArrow('LoginName')}</th>}
-                        {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortArrow('Role')}</th>}
-                        {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortArrow('CreatedAt')}</th>}
+                        {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Username{getSortIcon('LoginName')}</th>}
+                        {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortIcon('Role')}</th>}
+                        {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
                         <th className="text-center w-100">Action</th>
                       </tr>
                     </thead>

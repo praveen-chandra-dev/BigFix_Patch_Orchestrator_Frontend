@@ -253,7 +253,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
         <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
           <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "" : ""}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>          </button>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>          </button>
         </div>
         {err ? <div className="sub error">{err}</div> : !lockedId ? <div className="sub">No data</div> : (
           <>

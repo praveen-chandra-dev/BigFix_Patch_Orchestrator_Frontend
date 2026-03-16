@@ -90,7 +90,7 @@ function enhanceNativeSelect(selectEl) {
       it.setAttribute("aria-selected", option.selected);
       it.innerHTML = `
         <span class="fx-label">${option.textContent}</span>
-        ${option.selected ? "<span class='fx-tick'>✓</span>" : ""}
+        ${option.selected ? "" : ""}
       `;
       it.addEventListener("mouseenter", () => setHover(visibleIndex));
       it.addEventListener("mousedown", (e) => e.preventDefault());
@@ -245,26 +245,23 @@ export default function Environment() {
       [k]:
         e.target.type === "checkbox"
           ? e.target.checked
-          : e.target.type === "number"
-            ? (val === "" ? "" : Number(val))
-            : val,
+          : val,
     }));
   };
-  
-  const onNumber = (k, min = 0, max = 999) => (e) => {
-    const valStr = e.target.value;
-    if (valStr === "") {
-        setEnv((f) => ({ ...f, [k]: "" }));
-        return;
-    }
-    let val = parseInt(valStr, 10);
-    if (isNaN(val)) {
-        setEnv((f) => ({ ...f, [k]: "" }));
-        return;
-    }
-    if (val < min) val = min;
-    if (val > max) val = max;
-    setEnv((f) => ({ ...f, [k]: val }));
+
+  const handleNumChange = (k) => (e) => {
+      const val = e.target.value;
+      if (val === "") setEnv(f => ({ ...f, [k]: "" }));
+      else setEnv(f => ({ ...f, [k]: Number(val) }));
+  };
+
+  const handleBlur = (k, min = 0, max = 999) => () => {
+      setEnv(f => {
+          let num = Number(f[k]);
+          if (!Number.isFinite(num) || f[k] === "") num = min;
+          num = Math.min(max, Math.max(min, num));
+          return { ...f, [k]: num };
+      });
   };
 
   const baselineOptions = useMemo(
@@ -284,7 +281,7 @@ export default function Environment() {
         <h2>Environment &amp; Baseline</h2>
         <button type="button" onClick={loadOptions} disabled={loading} className="btn outline small" title="Reload">
           {loading ? "Loading…" : ""}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
         </button>
       </div>
 
@@ -317,27 +314,31 @@ export default function Environment() {
               type="number"
               className="control env-patch-input"
               title="Days"
-              min={0}
-              value={env.patchWindowDays}
-              onChange={onNumber("patchWindowDays", 0)}
+              min="0"
+              value={env.patchWindowDays ?? 0}
+              onChange={handleNumChange("patchWindowDays")}
+              onBlur={handleBlur("patchWindowDays", 0, 999)}
               disabled={loading}
             />
+
             <input
               type="number"
               className="control env-patch-input"
               title="Hours"
-              min={0} max={23}
-              value={env.patchWindowHours}
-              onChange={onNumber("patchWindowHours", 0, 23)}
+              min="0" max="23"
+              value={env.patchWindowHours ?? 0}
+              onChange={handleNumChange("patchWindowHours")}
+              onBlur={handleBlur("patchWindowHours", 0, 23)}
               disabled={loading}
             />
             <input
               type="number"
               className="control env-patch-input"
               title="Minutes"
-              min={0} max={59}
-              value={env.patchWindowMinutes}
-              onChange={onNumber("patchWindowMinutes", 0, 59)}
+              min="0" max="59"
+              value={env.patchWindowMinutes ?? 0}
+              onChange={handleNumChange("patchWindowMinutes")}
+              onBlur={handleBlur("patchWindowMinutes", 0, 59)}
               disabled={loading}
             />
           </div>

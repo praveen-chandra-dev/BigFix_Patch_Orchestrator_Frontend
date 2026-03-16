@@ -38,9 +38,11 @@ export default function DeploymentHistory() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [items, setItems] = useState([]); 
+  const [lastUpdated, setLastUpdated] = useState("");
 
   const [detailAction, setDetailAction] = useState(null); 
   const [detailResults, setDetailResults] = useState({ loading: false, rows: [], error: null });
+  const [detailLastUpdated, setDetailLastUpdated] = useState("");
 
   // Filter Drawer State
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -90,6 +92,7 @@ export default function DeploymentHistory() {
       if (!r.ok) throw new Error(t);
       const j = JSON.parse(t);
       setItems(Array.isArray(j?.items) ? j.items : []);
+      setLastUpdated(new Date().toLocaleString());
     } catch (e) {
       setErr(e?.message || String(e));
     } finally {
@@ -112,6 +115,7 @@ export default function DeploymentHistory() {
         rows: Array.isArray(res?.rows) ? res.rows : [],
         error: null,
       });
+      setDetailLastUpdated(new Date().toLocaleString());
     } catch (e) {
       setDetailResults({
         loading: false,
@@ -182,7 +186,11 @@ export default function DeploymentHistory() {
   useEffect(() => { setCurrentPage(1); }, [filters, rowsPerPage]);
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  
+  const getSortIcon = (key, config) => {
+    if (config.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{config.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const handleExport = (fmt) => { 
     setShowExpDrop(false); 
@@ -205,6 +213,7 @@ export default function DeploymentHistory() {
         loading={detailResults.loading} 
         rows={detailResults.rows} 
         error={detailResults.error} 
+        lastUpdated={detailLastUpdated}
         onBack={() => setDetailAction(null)} 
         onRefresh={() => openActionDetails(detailAction)}
      />
@@ -213,11 +222,11 @@ export default function DeploymentHistory() {
   return (
     <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
       
-      {/* KPI Details-style Sticky Header */}
+      {/* Sticky Header */}
       <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Deployment History</h2>
-          <div className="text-13 muted-text" style={{ marginTop: '4px' }}>History of all BigFix Patch Setu actions executed.</div>
+          <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Updated: {lastUpdated || "—"}</div>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <div style={{ position: 'relative' }}>
@@ -312,12 +321,12 @@ export default function DeploymentHistory() {
                 <table>
                     <thead className="kpi-th-sticky">
                         <tr>
-                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Action Name{getSortArrow('name')}</th>}
-                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortArrow('id')}</th>}
-                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')}>State{getSortArrow('state')}</th>}
-                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')}>Issued{getSortArrow('issued')}</th>}
-                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')}>Stopped{getSortArrow('stopped')}</th>}
-                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')}>Issuer{getSortArrow('issuer')}</th>}
+                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Action Name{getSortIcon('name', sortConfig)}</th>}
+                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortIcon('id', sortConfig)}</th>}
+                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')}>State{getSortIcon('state', sortConfig)}</th>}
+                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')}>Issued{getSortIcon('issued', sortConfig)}</th>}
+                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')}>Stopped{getSortIcon('stopped', sortConfig)}</th>}
+                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')}>Issuer{getSortIcon('issuer', sortConfig)}</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -348,7 +357,7 @@ export default function DeploymentHistory() {
                 </select>
             </div>
             <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedItems.length)} of {sortedItems.length}
+                {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredItems.length)} of {filteredItems.length}
             </span>
             <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
                 <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
@@ -369,7 +378,7 @@ export default function DeploymentHistory() {
   );
 }
 
-function ActionResultsView({ action, loading, rows, error, onBack, onRefresh }) {
+function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, lastUpdated }) {
     const title = action?.name || "Action Details";
 
     const [currentPage, setCurrentPage] = useState(1);
@@ -452,7 +461,10 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh }) 
     const paginated = sorted.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
     const handleSort = (key) => setSortConfig(c => ({ key, direction: c.key === key && c.direction === "asc" ? "desc" : "asc" }));
-    const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+    const getSortIcon = (key, config) => {
+      if (config.key !== key) return <span className="muted-text ml-6">↕</span>;
+      return <span className="ml-6">{config.direction === "asc" ? "↑" : "↓"}</span>;
+    };
 
     const getBadgeClass = (status) => {
       const s = classify(status);
@@ -482,12 +494,10 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh }) 
             
             <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <button className="iconbtn" onClick={onBack} title="Back to History" style={{ background: "var(--panel)" }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
-                    </button>
+                   
                     <div>
                         <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{title}</h2>
-                        <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Action Execution Details</div>
+                        <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Updated: {lastUpdated || "—"}</div>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
@@ -583,12 +593,8 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh }) 
                         <table>
                             <thead className="kpi-th-sticky">
                                 <tr>
-                                    {cols.find(c=>c.id==='server')?.show && (
-                                      <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortArrow('server')}</th>
-                                    )}
-                                    {cols.find(c=>c.id==='status')?.show && (
-                                      <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortArrow('status')}</th>
-                                    )}
+                                    {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server', sortConfig)}</th>}
+                                    {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status', sortConfig)}</th>}
                                 </tr>
                             </thead>
                             <tbody>

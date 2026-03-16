@@ -129,7 +129,10 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
   };
 
   const handleSort = (key) => setSortConfig((prev) => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const filteredPatches = [...patches].filter(applyFilters).sort((a, b) => {
     if (!sortConfig.key) return 0;
@@ -226,12 +229,12 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
           <thead className="kpi-th-sticky">
             <tr>
               <th style={{ width: 48, textAlign: "center" }}><input type="checkbox" className="custom-checkbox" onChange={() => toggleSelectAll(paginatedPatches)} /></th>
-              {cols.find(c=>c.id==='patch_id')?.show && <th onClick={() => handleSort("patch_id")} className="cursor-pointer">Patch ID {getSortArrow("patch_id")}</th>}
-              {cols.find(c=>c.id==='patch_name')?.show && <th onClick={() => handleSort("patch_name")} className="cursor-pointer">Name {getSortArrow("patch_name")}</th>}
-              {cols.find(c=>c.id==='applicable_count')?.show && <th onClick={() => handleSort("applicable_count")} className="cursor-pointer">Applicable Computers {getSortArrow("applicable_count")}</th>}
-              {cols.find(c=>c.id==='cve_count')?.show && <th onClick={() => handleSort("cve_count")} className="cursor-pointer">Associated CVE IDs {getSortArrow("cve_count")}</th>}
+              {cols.find(c=>c.id==='patch_id')?.show && <th onClick={() => handleSort("patch_id")} className="cursor-pointer">Patch ID {getSortIcon("patch_id")}</th>}
+              {cols.find(c=>c.id==='patch_name')?.show && <th onClick={() => handleSort("patch_name")} className="cursor-pointer">Name {getSortIcon("patch_name")}</th>}
+              {cols.find(c=>c.id==='applicable_count')?.show && <th onClick={() => handleSort("applicable_count")} className="cursor-pointer">Applicable Computers {getSortIcon("applicable_count")}</th>}
+              {cols.find(c=>c.id==='cve_count')?.show && <th onClick={() => handleSort("cve_count")} className="cursor-pointer">Associated CVE IDs {getSortIcon("cve_count")}</th>}
               {cols.find(c=>c.id==='severity')?.show && <th>Vulnerability Severity</th>}
-              {cols.find(c=>c.id==='final_score')?.show && <th onClick={() => handleSort("final_score")} className="cursor-pointer">Score {getSortArrow("final_score")}</th>}
+              {cols.find(c=>c.id==='final_score')?.show && <th onClick={() => handleSort("final_score")} className="cursor-pointer">Score {getSortIcon("final_score")}</th>}
             </tr>
           </thead>
           <tbody>

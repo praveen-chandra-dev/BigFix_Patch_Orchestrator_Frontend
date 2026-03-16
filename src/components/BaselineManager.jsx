@@ -141,6 +141,7 @@ export default function BaselineManager({ onClose }) {
   useEffect(() => {
     async function init() {
       setLoadingSites(true);
+      setLastUpdated(new Date().toLocaleString());
       try {
         const [jSrc, jTgt] = await Promise.all([getJSON("/api/baseline/sites"), getJSON("/api/baseline/custom-sites")]);
         if (jSrc.ok) {
@@ -224,7 +225,10 @@ export default function BaselineManager({ onClose }) {
   const toggleAll = () => { clearMessages(); const allKeys = paginatedPatches.map((p) => p.key); const allSelected = allKeys.length > 0 && allKeys.every((k) => selectedPatchKeys.has(k)); const next = new Set(selectedPatchKeys); if (allSelected) allKeys.forEach((k) => next.delete(k)); else allKeys.forEach((k) => next.add(k)); setSelectedPatchKeys(next); };
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const handleCreate = async () => {
     setError(""); setSuccessMsg(""); const localName = baselineName.trim();
@@ -259,8 +263,11 @@ export default function BaselineManager({ onClose }) {
 
   return (
     <div className="mgmt">
-      <div className="topbar">
-        <div className="left"><h2>Create Baseline</h2></div>
+      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Create Baseline</h2>
+            <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
+        </div>
         <div className="right flex-row gap-12 items-center">
             <div style={{ position: 'relative' }}>
                 <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
@@ -284,17 +291,38 @@ export default function BaselineManager({ onClose }) {
 
       {selectedSites.length > 0 && selectedSeverities.length > 0 && (
         <div className="section">
-          <div className="section-head" style={{ paddingBottom: '16px' }}>
+          
+          {activeFilterCount > 0 && (
+              <div className="p-0-20-20">
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {filters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+                  </div>
+              </div>
+          )}
+
+          <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span className="title">2. Select Patches</span>
               <span className="pill soft">Selected: {selectedPatchKeys.size}</span>
             </div>
-          </div>
-          
-          <div className="grid-toolbar" style={{ padding: '16px 20px 16px 20px', margin: 0, borderBottom: 'none' }}>
-             <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-             </div>
-             <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '12px' }}>
                 <div className="dropdown" ref={colRef}>
                     <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -304,7 +332,7 @@ export default function BaselineManager({ onClose }) {
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 {cols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                             const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                         }} />
@@ -345,10 +373,10 @@ export default function BaselineManager({ onClose }) {
                 <thead className="kpi-th-sticky">
                   <tr>
                     <th className="text-center w-40"><input type="checkbox" className="custom-checkbox" checked={isAllSelected} ref={(el) => el && (el.indeterminate = isIndeterminate)} onChange={toggleAll} /></th>
-                    {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortArrow('id')}</th>}
-                    {cols.find(c=>c.id==='severity')?.show && <th className="cursor-pointer" onClick={() => handleSort('severity')}>Severity{getSortArrow('severity')}</th>}
-                    {cols.find(c=>c.id==='site')?.show && <th className="cursor-pointer" onClick={() => handleSort('site')}>Site{getSortArrow('site')}</th>}
-                    {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Name{getSortArrow('name')}</th>}
+                    {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortIcon('id')}</th>}
+                    {cols.find(c=>c.id==='severity')?.show && <th className="cursor-pointer" onClick={() => handleSort('severity')}>Severity{getSortIcon('severity')}</th>}
+                    {cols.find(c=>c.id==='site')?.show && <th className="cursor-pointer" onClick={() => handleSort('site')}>Site{getSortIcon('site')}</th>}
+                    {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Name{getSortIcon('name')}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -389,32 +417,7 @@ export default function BaselineManager({ onClose }) {
         </div>
       )}
 
-      {activeFilterCount > 0 && (
-          <div className="p-0-20-20">
-              <div className="active-filter-banner active">
-                <div className="filter-tags">
-                  {filters.map((b, bIdx) => {
-                    const validConds = b.conds.filter(c => c.value);
-                    if (!validConds.length) return null;
-                    return (
-                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
-                        {validConds.map((c, cIdx) => (
-                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
-              </div>
-          </div>
-      )}
-
-      <div className="p-0-20-20">
+      <div className="p-0-20-10">
         {error && <div className="banner error">{error}</div>}
         {successMsg && <div className="banner success"><svg className="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><span>{successMsg}</span></div>}
       </div>

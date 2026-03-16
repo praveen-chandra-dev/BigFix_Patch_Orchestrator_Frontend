@@ -139,6 +139,7 @@ export default function GroupManager({ onClose }) {
 
   useEffect(() => {
     clearMessages();
+    setLastUpdated(new Date().toLocaleString());
     if (groupType === "Automatic") {
       if (properties.length === 0) {
         setLoadingProps(true);
@@ -154,7 +155,7 @@ export default function GroupManager({ onClose }) {
   const fetchComputers = async () => {
     setFetchingComp(true);
     try {
-      const url = `/api/groups/metadata/computers?page=1&limit=10000`; // Fetch all for robust client-side sorting/filtering
+      const url = `/api/groups/metadata/computers?page=1&limit=10000`; 
       const data = await getJSON(url);
       if (data.ok) {
         setAllComputers(data.computers || []);
@@ -235,7 +236,10 @@ export default function GroupManager({ onClose }) {
   const toggleAllVisible = () => { clearMessages(); const next = new Set(selectedCompIds); const allVisibleIds = paginatedComputers.map(c => c.id); const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); if (allSelected) allVisibleIds.forEach(id => next.delete(id)); else allVisibleIds.forEach(id => next.add(id)); setSelectedCompIds(next); };
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const handleCreate = async () => {
     setError(""); setSuccessMsg("");
@@ -280,8 +284,11 @@ export default function GroupManager({ onClose }) {
 
   return (
     <div className="mgmt">
-      <div className="topbar">
-        <div className="left"><h2>Create Computer Group</h2></div>
+      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Create Computer Group</h2>
+            <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
+        </div>
         <div className="right flex-row gap-12 items-center">
             {groupType === 'Manual' && (
               <>
@@ -332,7 +339,6 @@ export default function GroupManager({ onClose }) {
             </div>
             <div className="pb-0"><button className="btn outline small" style={{ height: '40px' }} onClick={addCondition}>Add</button></div>
           </div>
-          {/* Target site wrapper updated to explicitly match the 20px left margin/padding */}
           <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
              <div className="flex-1"><FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} /></div>
           </div>
@@ -349,17 +355,38 @@ export default function GroupManager({ onClose }) {
 
       {groupType === "Manual" && (
         <div className="section overflow-visible">
-          <div className="section-head" style={{ paddingBottom: '16px' }}>
+          
+          {activeFilterCount > 0 && (
+              <div className="p-0-20-20">
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {filters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+                  </div>
+              </div>
+          )}
+
+          <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span className="title">2. Select Computers</span>
-              <span className="pill green">Selected: {selectedCompIds.size}</span>
+              <span className="pill soft">Selected: {selectedCompIds.size}</span>
             </div>
-          </div>
-          
-          <div className="grid-toolbar" style={{ padding: '16px 20px 16px 20px', margin: 0, borderBottom: 'none' }}>
-             <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-             </div>
-             <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '12px' }}>
                 <div className="dropdown" ref={colRef}>
                     <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -414,9 +441,9 @@ export default function GroupManager({ onClose }) {
                 <thead className="kpi-th-sticky">
                   <tr>
                     <th className="text-center w-40"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} checked={paginatedComputers.length > 0 && paginatedComputers.every(c => selectedCompIds.has(c.id))} /></th>
-                    {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Computer Name{getSortArrow('name')}</th>}
-                    {cols.find(c=>c.id==='os')?.show && <th className="cursor-pointer" onClick={() => handleSort('os')}>Operating System{getSortArrow('os')}</th>}
-                    {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortArrow('ips')}</th>}
+                    {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Computer Name{getSortIcon('name')}</th>}
+                    {cols.find(c=>c.id==='os')?.show && <th className="cursor-pointer" onClick={() => handleSort('os')}>Operating System{getSortIcon('os')}</th>}
+                    {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortIcon('ips')}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -454,31 +481,6 @@ export default function GroupManager({ onClose }) {
               </div>
           </div>
         </div>
-      )}
-
-      {activeFilterCount > 0 && groupType === 'Manual' && (
-          <div className="p-0-20-20">
-              <div className="active-filter-banner active">
-                <div className="filter-tags">
-                  {filters.map((b, bIdx) => {
-                    const validConds = b.conds.filter(c => c.value);
-                    if (!validConds.length) return null;
-                    return (
-                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
-                        {validConds.map((c, cIdx) => (
-                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
-              </div>
-          </div>
       )}
 
       <div className="p-0-20-10">

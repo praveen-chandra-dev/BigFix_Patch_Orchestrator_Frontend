@@ -20,6 +20,7 @@ export default function PatchCalendar({ onClose, userRole }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState("");
   
   const [viewMode, setViewMode] = useState("CALENDAR"); // 'CALENDAR' or 'LIST'
   const [selectedDateFilter, setSelectedDateFilter] = useState(null); // Stores the clicked date from the calendar
@@ -39,7 +40,8 @@ export default function PatchCalendar({ onClose, userRole }) {
     { value: "server", label: "Server Name" },
     { value: "os", label: "Operating System" },
     { value: "time", label: "Time" },
-    { value: "month", label: "Month" }
+    { value: "month", label: "Month" },
+    { value: "date", label: "Date" } 
   ];
 
   // Toolbar, Pagination & Sorting State for List View
@@ -76,7 +78,10 @@ export default function PatchCalendar({ onClose, userRole }) {
       setError(null);
       const res = await fetch(`${API_BASE}/api/calendar?role=${encodeURIComponent(userRole)}`);
       const data = await res.json();
-      if (data.ok) setEvents(data.events || []);
+      if (data.ok) {
+        setEvents(data.events || []);
+        setLastUpdated(new Date().toLocaleString());
+      }
     } catch (err) { 
       setError("Failed to fetch schedule data.");
       console.error(err); 
@@ -144,7 +149,11 @@ export default function PatchCalendar({ onClose, userRole }) {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: newEvents })
       });
       const data = await res.json();
-      if (data.ok) { setEvents(newEvents); alert("Schedule uploaded successfully!"); } 
+      if (data.ok) { 
+        setEvents(newEvents); 
+        setLastUpdated(new Date().toLocaleString());
+        alert("Schedule uploaded successfully!"); 
+      } 
       else { setError("Failed to save: " + (data.error || "Unknown error")); }
     } catch (err) { setError("Network error saving schedule."); } finally { setLoading(false); }
   };
@@ -167,6 +176,7 @@ export default function PatchCalendar({ onClose, userRole }) {
         
         let field = "";
         if (c.column === "month") field = MONTH_NAMES[item.monthIndex].toLowerCase();
+        else if (c.column === "date") field = `${MONTH_NAMES[item.monthIndex]} ${item.day}, ${item.year}`.toLowerCase();
         else field = String(item[c.column] || "").toLowerCase();
 
         if (c.operator === "contains") condition = field.includes(search);
@@ -214,8 +224,13 @@ export default function PatchCalendar({ onClose, userRole }) {
   const handleDayClick = (day, dayEvents) => {
     if (!dayEvents || dayEvents.length === 0) return;
     
-    // Set the filter for the specific day clicked and switch to list view
-    setSelectedDateFilter({ year, monthIndex: month, day });
+    const dateStr = `${MONTH_NAMES[month]} ${day}, ${year}`;
+    
+    // Auto-populate the date into the master filter logic.
+    setFilters([{
+        conds: [{ column: "date", operator: "contains", value: dateStr }]
+    }]);
+    
     setViewMode("LIST");
     setCurrentPage(1);
   };
@@ -250,7 +265,10 @@ export default function PatchCalendar({ onClose, userRole }) {
   useEffect(() => { setCurrentPage(1); }, [filters, rowsPerPage, viewMode, selectedDateFilter]);
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortArrow = (key) => sortConfig.key !== key ? "" : sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const getSortArrow = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const handleExport = (fmt) => { 
     setShowExpDrop(false); 
@@ -277,7 +295,7 @@ export default function PatchCalendar({ onClose, userRole }) {
       <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Patch Calendar</h2>
-          <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Manage and view scheduled patch deployments.</div>
+          <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Updated: {lastUpdated || "—"}</div>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           
