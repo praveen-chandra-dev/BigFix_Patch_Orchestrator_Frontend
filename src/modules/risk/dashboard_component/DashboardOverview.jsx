@@ -10,7 +10,7 @@ const SEVERITY_COLORS = {
   CRITICAL: "#dc2626",
   HIGH: "#ea580c",
   IMPORTANT: "#facc15",
-    MEDIUM: "#facc15", // Added professional color for MEDIUM
+  MEDIUM: "#facc15", // Added professional color for MEDIUM
 
   MODERATE: "#22c55e",
   LOW: "#3b82f6",
@@ -197,13 +197,70 @@ export default function DashboardOverview({ navigate }) {
     0,
   );
 
+  const handlePatchSeverityClick = (severity) => {
+    navigate(
+      "patch",
+      [
+        {
+          conds: [
+            {
+              column: "severity",
+              operator: "equals",
+              value: severity,
+            },
+          ],
+        },
+      ],
+      "AND",
+    );
+  };
+
+  const handleCveSeverityClick = (severity) => {
+    navigate(
+      "cve",
+      [
+        {
+          conds: [
+            {
+              column: "cvss_severity",
+              operator: "equals",
+              value: severity,
+            },
+          ],
+        },
+      ],
+      "AND",
+    );
+  };
+
+  const handleKevNavigation = (kevValue) => {
+    navigate(
+      "cve",
+      [
+        {
+          conds: [
+            {
+              column: "kev",
+              operator: "=",
+              value: kevValue,
+            },
+          ],
+        },
+      ],
+      "AND",
+    );
+  };
+
+  const handleKevDonutClick = (label) => {
+    handleKevNavigation(label.toUpperCase());
+  };
+
   /* =========================================
      COMPONENT
   ========================================= */
 
   return (
     <div className="dashboard-overview">
-
       {/* =====================================
           KPI ROW
       ===================================== */}
@@ -215,13 +272,13 @@ export default function DashboardOverview({ navigate }) {
           <span>Detected vulnerabilities</span>
         </div>
 
-        <div className="kpi-card" onClick={() => navigate("cve")}>
+        <div className="kpi-card" onClick={() => handleKevNavigation("YES")}>
           <h4>KEV CVEs</h4>
           <p>{kevCount}</p>
           <span>Exploited vulnerabilities</span>
         </div>
 
-        <div className="kpi-card" onClick={() => navigate("patch")}>
+        <div className="kpi-card" onClick={() => navigate("patch", [], "AND")}>
           <h4>Total Patches</h4>
           <p>{patches.length}</p>
           <span>Available Patches</span>
@@ -258,6 +315,8 @@ export default function DashboardOverview({ navigate }) {
                 nameKey="name"
                 innerRadius={80}
                 outerRadius={120}
+                onClick={(data) => handleCveSeverityClick(data.name)}
+                cursor="pointer"
               >
                 {severityData.map((entry, i) => (
                   <Cell key={i} fill={SEVERITY_COLORS[entry.name]} />
@@ -292,7 +351,12 @@ export default function DashboardOverview({ navigate }) {
 
           <div className="chart-legend">
             {severityData.map((item) => (
-              <div key={item.name} className="legend-item">
+              <div
+                key={item.name}
+                className="legend-item"
+                onClick={() => handleCveSeverityClick(item.name)}
+                style={{ cursor: "pointer" }}
+              >
                 <span
                   className="legend-color"
                   style={{ background: SEVERITY_COLORS[item.name] }}
@@ -318,6 +382,10 @@ export default function DashboardOverview({ navigate }) {
                 dataKey="value"
                 innerRadius={80}
                 outerRadius={120}
+                onClick={(data) =>
+                  handleKevNavigation(data.name === "KEV" ? "YES" : "NO")
+                }
+                cursor="pointer"
               >
                 <Cell fill="#dc2626" />
                 <Cell fill="#22c55e" />
@@ -348,19 +416,27 @@ export default function DashboardOverview({ navigate }) {
           </ResponsiveContainer>
 
           <div className="chart-legend">
-            <div className="legend-item">
+            <div
+              className="legend-item"
+              onClick={() => handleKevNavigation("YES")}
+              style={{ cursor: "pointer" }}
+            >
               <span
                 className="legend-color"
                 style={{ background: "#dc2626" }}
-              />
+              ></span>
               KEV ({kevCount})
             </div>
 
-            <div className="legend-item">
+            <div
+              className="legend-item"
+              onClick={() => handleKevNavigation("NO")}
+              style={{ cursor: "pointer" }}
+            >
               <span
                 className="legend-color"
                 style={{ background: "#22c55e" }}
-              />
+              ></span>
               Non KEV ({cves.length - kevCount})
             </div>
           </div>
@@ -379,6 +455,8 @@ export default function DashboardOverview({ navigate }) {
                 nameKey="name"
                 innerRadius={80}
                 outerRadius={120}
+                onClick={(data) => handlePatchSeverityClick(data.name)}
+                cursor="pointer"
               >
                 {patchSeverityDistribution.map((entry, i) => (
                   <Cell key={i} fill={SEVERITY_COLORS[entry.name]} />
@@ -411,7 +489,12 @@ export default function DashboardOverview({ navigate }) {
 
           <div className="chart-legend">
             {patchSeverityDistribution.map((item) => (
-              <div key={item.name} className="legend-item">
+              <div
+                key={item.name}
+                className="legend-item"
+                onClick={() => handlePatchSeverityClick(item.name)}
+                style={{ cursor: "pointer" }}
+              >
                 <span
                   className="legend-color"
                   style={{ background: SEVERITY_COLORS[item.name] }}

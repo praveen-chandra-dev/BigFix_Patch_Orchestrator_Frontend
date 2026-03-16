@@ -33,10 +33,22 @@
   border: 1px solid var(--severity-moderate); 
 }
 
+.severity-medium { 
+  background: color-mix(in srgb, var(--severity-moderate) 15%, transparent); 
+  color: var(--severity-moderate); 
+  border: 1px solid var(--severity-moderate); 
+}
+
 .severity-low { 
   background: color-mix(in srgb, var(--severity-low) 15%, transparent); 
   color: var(--severity-low); 
   border: 1px solid var(--severity-low); 
+}
+
+.severity-unknown {
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
 }
 
 .risk-container {
@@ -620,6 +632,12 @@ tbody tr.selected-row td {
   background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
+.baseline-details .patch-order-item {
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: left;
+}
 /* =====================================================
    CVE TABLE
 ===================================================== */
@@ -785,4 +803,17 @@ margin:20px auto;
 @keyframes risk-spin{
 0%{transform:rotate(0deg);}
 100%{transform:rotate(360deg);}
+}
+
+/* clickable values in tables */
+.cell-link {
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cell-link:hover {
+  text-decoration: underline;
+  color: #2563eb;
 }

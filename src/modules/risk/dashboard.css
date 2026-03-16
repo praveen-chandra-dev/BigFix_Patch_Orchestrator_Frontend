@@ -56,7 +56,7 @@
   font-size: 32px;
   font-weight: 700;
   margin: 0;
-  color: var(--text);
+  color: var(--primary);   
 }
 
 .kpi-card span {
@@ -140,6 +140,10 @@
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
 }
 
 .legend-color {
@@ -153,4 +157,10 @@
 .recharts-wrapper svg g:focus {
   outline: none !important;
   stroke: var(--bg) !important;
+}
+
+.legend-item:hover {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--primary);
+  font-weight: 600;
 }

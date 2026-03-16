@@ -76,3 +76,13 @@
 .cve-modal-body li { margin-bottom: 6px; }
 
 .cve-loading { padding: 40px; color: var(--text); text-align: center; font-weight: 500; }
+
+.severity-medium {
+  background: #facc15;
+  color: #111827;
+}
+
+.severity-unknown {
+  background: #9ca3af;
+  color: white;
+}
