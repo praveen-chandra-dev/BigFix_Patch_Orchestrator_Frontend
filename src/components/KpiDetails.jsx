@@ -49,6 +49,88 @@ function classify(raw) {
   return s; 
 }
 
+function evaluateCondition(f, operator, s, colId) {
+    if (!s) return true;
+    const dateFields = ['date', 'month', 'CreatedAt', 'lastReportTime', 'issued', 'stopped', 'start', 'end', 'createdAt'];
+    if (dateFields.includes(colId) || (!isNaN(Date.parse(f)) && isNaN(f))) {
+        const dateF = new Date(f).getTime(); const dateS = new Date(s).getTime();
+        if (!isNaN(dateF) && !isNaN(dateS)) {
+            if (operator === "=") return new Date(f).toDateString() === new Date(s).toDateString();
+            if (operator === "!=") return new Date(f).toDateString() !== new Date(s).toDateString();
+            if (operator === ">") return dateF > dateS;
+            if (operator === "<") return dateF < dateS;
+            if (operator === ">=") return dateF >= dateS;
+            if (operator === "<=") return dateF <= dateS;
+        }
+    }
+    const numF = Number(f); const numS = Number(s);
+    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
+        if (operator === "=") return numF === numS;
+        if (operator === "!=") return numF !== numS;
+        if (operator === ">") return numF > numS;
+        if (operator === "<") return numF < numS;
+        if (operator === ">=") return numF >= numS;
+        if (operator === "<=") return numF <= numS;
+    }
+    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
+    if (operator === "contains") return strF.includes(strS);
+    if (operator === "=") return strF === strS;
+    if (operator === "!=") return strF !== strS;
+    if (operator === ">") return strF > strS;
+    if (operator === "<") return strF < strS;
+    if (operator === ">=") return strF >= strS;
+    if (operator === "<=") return strF <= strS;
+    return true;
+}
+
+function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
+    const visibleCols = columns.filter(c => c.show);
+    const headers = visibleCols.map(c => c.label);
+    const triggerDownload = (content, type, ext) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${filenamePrefix}.${ext}`;
+        a.click(); URL.revokeObjectURL(url);
+    };
+    if (format === 'JSON') {
+        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
+        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
+    } else if (format === 'XML') {
+        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
+        dataToExport.forEach(row => {
+            xml += '  <row>\n';
+            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
+            xml += '  </row>\n';
+        });
+        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
+    } else if (format === 'HTML') {
+        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
+        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
+        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
+    } else if (format === 'TXT') {
+        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
+        triggerDownload(txt, "text/plain", "txt");
+    } else if (format === 'PDF') {
+        const loadScript = (src) => new Promise(resolve => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
+        });
+        Promise.all([
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
+        ]).then(() => {
+            const { jsPDF } = window.jspdf; const doc = new jsPDF();
+            doc.text(`Export: ${filenamePrefix}`, 14, 15);
+            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
+            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
+        });
+    } else { 
+        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+        triggerDownload(csv, "text/csv", "csv");
+    }
+}
+
 const NoDataSVG = () => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', padding: '60px 0' }}>
       <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text)', fontFamily: '"HCL BOOMER", sans-serif' }}>No Data Available</div>
@@ -83,12 +165,12 @@ export default function KpiDetails({ context, onBack }) {
   const [sortConfig, setSortConfig] = useState({ key: null, dir: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState('CSV');
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
 
-  // Action states
   const [actionStatus, setActionStatus] = useState({});
   const [confirmRestart, setConfirmRestart] = useState(null);
   const [confirmService, setConfirmService] = useState(null);
@@ -96,23 +178,15 @@ export default function KpiDetails({ context, onBack }) {
   const [selectedReboots, setSelectedReboots] = useState(new Set());
   const [bulkRebootStatus, setBulkRebootStatus] = useState("");
 
-  const colRef = useRef(null);
-  const expRef = useRef(null);
+  const colRef = useRef(null); const expRef = useRef(null);
 
   const [cols, setCols] = useState([
-    { id: 'server', label: 'Server Name', show: true },
-    { id: 'status', label: 'Status', show: true },
-    { id: 'issue', label: 'Issue', show: true },
-    { id: 'serviceStatus', label: 'Service Status', show: true },
-    { id: 'lastReportTime', label: 'Last Report', show: true },
-    { id: 'ip', label: 'IP Address', show: true },
-    { id: 'uptime', label: 'UpTime', show: true },
-    { id: 'besRelay', label: 'BES Relay', show: true },
-    { id: 'patch', label: 'Patch Name', show: true },
-    { id: 'start', label: 'Start', show: true },
-    { id: 'end', label: 'End', show: true },
-    { id: 'issuer', label: 'Issuer', show: true },
-    { id: 'action', label: 'Action', show: true }
+    { id: 'server', label: 'Server Name', show: true }, { id: 'status', label: 'Status', show: true },
+    { id: 'issue', label: 'Issue', show: true }, { id: 'serviceStatus', label: 'Service Status', show: true },
+    { id: 'lastReportTime', label: 'Last Report', show: true }, { id: 'ip', label: 'IP Address', show: true },
+    { id: 'uptime', label: 'UpTime', show: true }, { id: 'besRelay', label: 'BES Relay', show: true },
+    { id: 'patch', label: 'Patch Name', show: true }, { id: 'start', label: 'Start', show: true },
+    { id: 'end', label: 'End', show: true }, { id: 'issuer', label: 'Issuer', show: true }, { id: 'action', label: 'Action', show: true }
   ]);
 
   useEffect(() => {
@@ -135,26 +209,13 @@ export default function KpiDetails({ context, onBack }) {
     return [];
   }, [type]);
 
-  const titleMap = {
-    'success': 'Success Rate Details',
-    'health': 'Critical Health Failures',
-    'reboot': 'Reboot Pending Servers',
-    'sandbox': `Action Results ${actionId ? `(#${actionId})` : ''}`
-  };
+  const titleMap = { 'success': 'Success Rate Details', 'health': 'Critical Health Failures', 'reboot': 'Reboot Pending Servers', 'sandbox': `Action Results ${actionId ? `(#${actionId})` : ''}` };
 
   const propertyOptionsMap = {
-    'health': [
-      { value: "server", label: "Server Name" }, { value: "issues", label: "Issue" }, { value: "serviceStatus", label: "Service Status" }, { value: "lastReportTime", label: "Last Report" }
-    ],
-    'reboot': [
-      { value: "server", label: "Server Name" }, { value: "ip", label: "IP Address" }, { value: "besRelay", label: "BES Relay" }
-    ],
-    'success': [
-      { value: "server", label: "Server Name" }, { value: "status", label: "Status" }
-    ],
-    'sandbox': [
-      { value: "server", label: "Server Name" }, { value: "patch", label: "Patch Name" }, { value: "status", label: "Status" }, { value: "issuer", label: "Issuer" }
-    ]
+    'health': [{ value: "server", label: "Server Name" }, { value: "issues", label: "Issue" }, { value: "serviceStatus", label: "Service Status" }, { value: "lastReportTime", label: "Last Report" }],
+    'reboot': [{ value: "server", label: "Server Name" }, { value: "ip", label: "IP Address" }, { value: "besRelay", label: "BES Relay" }],
+    'success': [{ value: "server", label: "Server Name" }, { value: "status", label: "Status" }],
+    'sandbox': [{ value: "server", label: "Server Name" }, { value: "patch", label: "Patch Name" }, { value: "status", label: "Status" }, { value: "issuer", label: "Issuer" }]
   };
 
   const propertyOptions = propertyOptionsMap[type] || propertyOptionsMap['health'];
@@ -162,14 +223,7 @@ export default function KpiDetails({ context, onBack }) {
   const fetchData = async (signal) => {
     try {
       setLoading(true); setError(""); setSelectedReboots(new Set()); setBulkRebootStatus("");
-      
-      if (!sysConfig) {
-        try {
-          const conf = await getJson(`${API_BASE}/api/config`, signal);
-          setSysConfig(conf);
-        } catch(e) {}
-      }
-
+      if (!sysConfig) { try { const conf = await getJson(`${API_BASE}/api/config`, signal); setSysConfig(conf); } catch(e) {} }
       if (!context) { setData([]); return; }
       let url = "";
       if (type === 'health') url = `${API_BASE}/api/health/critical`;
@@ -183,38 +237,30 @@ export default function KpiDetails({ context, onBack }) {
       const res = await getJson(url, signal);
       let rows = Array.isArray(res?.rows) ? res.rows : [];
       if (type === 'success') rows = rows.filter((r) => /success/i.test(r?.status || ""));
-      setData(rows);
-      setLastUpdated(new Date().toLocaleString());
-    } catch (err) {
-      if (err.name !== "AbortError") setError(err.message);
-    } finally { setLoading(false); }
+      setData(rows); setLastUpdated(new Date().toLocaleString());
+    } catch (err) { if (err.name !== "AbortError") setError(err.message); } finally { setLoading(false); }
   };
 
   useEffect(() => { const ab = new AbortController(); fetchData(ab.signal); return () => ab.abort(); }, [type, actionId, context]);
 
-  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
-
   const applyFilters = (row) => {
     if (!filters.length) return true;
     let globalMatch = globalLogic === "OR" ? false : true;
+    let validBlocks = 0;
     for (let b of filters) {
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        const search = String(c.value).toLowerCase();
         let field = "";
         if (c.column === "status") field = classify(row.status).toLowerCase();
-        else if (c.column === "issues") field = (row.issues || []).join(", ").toLowerCase();
-        else field = String(row[c.column] || "").toLowerCase();
-
-        if (c.operator === "contains") blockMatch = blockMatch && field.includes(search);
-        else if (c.operator === "=") blockMatch = blockMatch && field === search;
-        else if (c.operator === "!=") blockMatch = blockMatch && field !== search;
+        else if (c.column === "issues") field = (row.issues || []).join(", ");
+        else field = String(row[c.column] || "");
+        blockMatch = blockMatch && evaluateCondition(field, c.operator, c.value, c.column);
       }
-      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      if (validConds > 0) { validBlocks++; globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch); }
     }
-    return globalMatch;
+    return validBlocks === 0 ? true : globalMatch;
   };
 
   const filtered = useMemo(() => data.filter(applyFilters), [data, filters, globalLogic]);
@@ -226,9 +272,8 @@ export default function KpiDetails({ context, onBack }) {
       if (sortConfig.key === 'status') { valA = classify(a.status).toLowerCase(); valB = classify(b.status).toLowerCase(); }
       else if (sortConfig.key === 'issue') { valA = (a.issues || []).join(",").toLowerCase(); valB = (b.issues || []).join(",").toLowerCase(); }
       else { valA = String(a[sortConfig.key] || "").toLowerCase(); valB = String(b[sortConfig.key] || "").toLowerCase(); }
-      
-      if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
-      if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
+      if (valA < valB) return sortConfig.dir === "asc" ? -1 : 1;
+      if (valA > valB) return sortConfig.dir === "asc" ? 1 : -1;
       return 0;
     });
   }, [filtered, sortConfig]);
@@ -236,12 +281,25 @@ export default function KpiDetails({ context, onBack }) {
   const totalPages = Math.ceil(sorted.length / pageSize);
   const paginated = useMemo(() => sorted.slice((page - 1) * pageSize, page * pageSize), [sorted, page, pageSize]);
 
-  const handleSort = (key) => setSortConfig(c => ({ key, direction: c.key === key && c.direction === "asc" ? "desc" : "asc" }));
-  const getSortIcon = (key) => { if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>; return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>; };
+  const handleSort = (key) => setSortConfig(c => ({ key, dir: c.key === key && c.dir === "asc" ? "desc" : "asc" }));
+  const getSortIcon = (key) => { if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>; return <span className="ml-6">{sortConfig.dir === "asc" ? "↑" : "↓"}</span>; };
 
-  const handleExport = (fmt, scope) => { setShowExpDrop(false); };
+  const handleExport = (scope) => { 
+    setShowExpDrop(false); 
+    let dataToExport = [];
+    if (scope === 'page') dataToExport = paginated;
+    else if (scope === 'filtered') dataToExport = sorted;
+    else dataToExport = data;
 
-  // --- ACTIONS LOGIC ---
+    const visibleCols = cols.filter(c => c.show && relevantColIds.includes(c.id));
+    performExport(dataToExport, visibleCols, exportFormat, "kpi_details", (r, cId) => {
+        if (cId === 'issue') return (r.issues || []).join(', ');
+        if (cId === 'status') return classify(r.status);
+        if (cId === 'start' || cId === 'end') return fmtTime(r[cId]);
+        return r[cId];
+    });
+  };
+
   const toggleRebootSelection = (serverName) => {
     const next = new Set(selectedReboots);
     if (next.has(serverName)) next.delete(serverName); else next.add(serverName);
@@ -254,17 +312,10 @@ export default function KpiDetails({ context, onBack }) {
   };
 
   async function executeRestart() {
-    const serverName = confirmRestart;
-    if (!serverName) return;
-    setActionStatus((p) => ({ ...p, [serverName]: "loading" }));
-    setConfirmRestart(null); setError("");
-    try {
-      await postJSON(`${API_BASE}/api/actions/restart`, { computerName: serverName });
-      setActionStatus((p) => ({ ...p, [serverName]: "success" }));
-    } catch (e) {
-      setActionStatus((p) => ({ ...p, [serverName]: "error" }));
-      setError(`Failed to restart ${serverName}: ${e.message}`);
-    }
+    const serverName = confirmRestart; if (!serverName) return;
+    setActionStatus((p) => ({ ...p, [serverName]: "loading" })); setConfirmRestart(null); setError("");
+    try { await postJSON(`${API_BASE}/api/actions/restart`, { computerName: serverName }); setActionStatus((p) => ({ ...p, [serverName]: "success" })); } 
+    catch (e) { setActionStatus((p) => ({ ...p, [serverName]: "error" })); setError(`Failed to restart ${serverName}: ${e.message}`); }
   }
 
   async function executeBulkRestart() {
@@ -273,40 +324,27 @@ export default function KpiDetails({ context, onBack }) {
     try {
       const names = Array.from(selectedReboots);
       await postJSON(`${API_BASE}/api/actions/restart-bulk`, { computerNames: names });
-      const newStatus = { ...actionStatus };
-      names.forEach(name => { newStatus[name] = "success"; });
-      setActionStatus(newStatus);
-      setBulkRebootStatus(`Successfully triggered restart for ${names.length} servers.`);
-      setSelectedReboots(new Set());
-      setTimeout(() => setBulkRebootStatus(""), 5000);
-    } catch (e) {
-      setBulkRebootStatus("Failed.");
-      setError(`Bulk restart failed: ${e.message}`);
-    }
+      const newStatus = { ...actionStatus }; names.forEach(name => { newStatus[name] = "success"; });
+      setActionStatus(newStatus); setBulkRebootStatus(`Successfully triggered restart for ${names.length} servers.`);
+      setSelectedReboots(new Set()); setTimeout(() => setBulkRebootStatus(""), 5000);
+    } catch (e) { setBulkRebootStatus("Failed."); setError(`Bulk restart failed: ${e.message}`); }
   }
 
   async function executeServiceRestart() {
-    const serverName = confirmService;
-    if (!serverName) return;
+    const serverName = confirmService; if (!serverName) return;
     const key = `svc_${serverName}`;
-    setActionStatus((p) => ({ ...p, [key]: "loading" }));
-    setConfirmService(null); setError("");
-    try {
-      await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: serverName });
-      setActionStatus((p) => ({ ...p, [key]: "success" }));
-    } catch (e) {
-      setActionStatus((p) => ({ ...p, [key]: "error" }));
-      setError(`Failed to restart service on ${serverName}: ${e.message}`);
-    }
+    setActionStatus((p) => ({ ...p, [key]: "loading" })); setConfirmService(null); setError("");
+    try { await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: serverName }); setActionStatus((p) => ({ ...p, [key]: "success" })); } 
+    catch (e) { setActionStatus((p) => ({ ...p, [key]: "error" })); setError(`Failed to restart service on ${serverName}: ${e.message}`); }
   }
 
   const role = sessionStorage.getItem("user_role") || "Admin";
   const checkServiceConfig = sysConfig?.checkServiceStatus || sysConfig?.config?.checkServiceStatus || false;
+  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
   return (
     <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
       
-      {/* EXACT STICKY HEADER AS RISK MODULE FOR FULL WIDTH */}
       <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{titleMap[type] || 'KPI Details'}</h2>
@@ -328,7 +366,7 @@ export default function KpiDetails({ context, onBack }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           
         {activeFilterCount > 0 && (
-          <div className="active-filter-banner active">
+          <div className="active-filter-banner active" style={{ marginBottom: "16px" }}>
             <div className="filter-tags">
               {filters.map((b, bIdx) => {
                 const validConds = b.conds.filter(c => c.value);
@@ -352,10 +390,8 @@ export default function KpiDetails({ context, onBack }) {
 
         <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
             <div className="grid-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                
-                {/* BULK RESTART UI */}
                 {type === 'reboot' && selectedReboots.size > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '16px', borderLeft: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span className="pill amber">{selectedReboots.size} selected</span>
                         <button className="btn outline sec small" onClick={() => setConfirmBulkReboot(true)}>Restart Selected</button>
                         {bulkRebootStatus && <span className="text-13" style={{color: bulkRebootStatus.includes('Failed') ? 'var(--danger)' : 'var(--success)'}}>{bulkRebootStatus}</span>}
@@ -397,14 +433,14 @@ export default function KpiDetails({ context, onBack }) {
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={() => handleExport(fmt, 'current')}>{fmt}</button>
+                                 <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                                ))}
                             </div>
                             <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                            <button className="item" onClick={() => handleExport('CSV', 'page')}>Current Page</button>
-                            <button className="item" onClick={() => handleExport('CSV', 'filtered')}>Filtered Data</button>
-                            <button className="item" onClick={() => handleExport('CSV', 'all')}>All Data</button>
+                            <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                            <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                            <button className="item" onClick={() => handleExport('all')}>All Data</button>
                         </div>
                     )}
                 </div>

@@ -3,17 +3,108 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import FilterDrawer from "./FilterDrawer";
 
 const DAYS_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
-];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const CSV_HEADER = "Server,Day,Month,Year,Time,Operating System";
-const SAMPLE_CSV = `Server-Win-01,15,January,2025,10:00 AM,Windows
-Server-Win-02,16,January,2025,10:30 AM,Windows
-DB-Linux-01,20,February,2025,02:00 PM,Linux`;
+const SAMPLE_CSV = `Server-Win-01,15,January,2025,10:00 AM,Windows\nServer-Win-02,16,January,2025,10:30 AM,Windows\nDB-Linux-01,20,February,2025,02:00 PM,Linux`;
 
 const API_BASE = window.env?.VITE_API_BASE || "http://localhost:5174";
+
+function evaluateCondition(f, operator, s, colId) {
+    if (!s) return true;
+    if (colId === 'month' || MONTH_NAMES.some(m => String(f).toLowerCase().startsWith(m.substring(0,3)))) {
+        const mF = MONTH_NAMES.findIndex(m => String(f).toLowerCase().startsWith(m.substring(0,3)));
+        const mS = MONTH_NAMES.findIndex(m => String(s).toLowerCase().startsWith(m.substring(0,3)));
+        if (mF !== -1 && mS !== -1) {
+            if (operator === "=") return mF === mS;
+            if (operator === "!=") return mF !== mS;
+            if (operator === ">") return mF > mS;
+            if (operator === "<") return mF < mS;
+            if (operator === ">=") return mF >= mS;
+            if (operator === "<=") return mF <= mS;
+        }
+    }
+    const dateFields = ['date', 'CreatedAt', 'lastReportTime', 'issued', 'stopped', 'start', 'end', 'createdAt'];
+    if (dateFields.includes(colId) || (!isNaN(Date.parse(f)) && isNaN(f))) {
+        const dateF = new Date(f).getTime();
+        const dateS = new Date(s).getTime();
+        if (!isNaN(dateF) && !isNaN(dateS)) {
+            if (operator === "=") return new Date(f).toDateString() === new Date(s).toDateString();
+            if (operator === "!=") return new Date(f).toDateString() !== new Date(s).toDateString();
+            if (operator === ">") return dateF > dateS;
+            if (operator === "<") return dateF < dateS;
+            if (operator === ">=") return dateF >= dateS;
+            if (operator === "<=") return dateF <= dateS;
+        }
+    }
+    const numF = Number(f); const numS = Number(s);
+    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
+        if (operator === "=") return numF === numS;
+        if (operator === "!=") return numF !== numS;
+        if (operator === ">") return numF > numS;
+        if (operator === "<") return numF < numS;
+        if (operator === ">=") return numF >= numS;
+        if (operator === "<=") return numF <= numS;
+    }
+    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
+    if (operator === "contains") return strF.includes(strS);
+    if (operator === "=") return strF === strS;
+    if (operator === "!=") return strF !== strS;
+    if (operator === ">") return strF > strS;
+    if (operator === "<") return strF < strS;
+    if (operator === ">=") return strF >= strS;
+    if (operator === "<=") return strF <= strS;
+    return true;
+}
+
+function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
+    const visibleCols = columns.filter(c => c.show);
+    const headers = visibleCols.map(c => c.label);
+    const triggerDownload = (content, type, ext) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${filenamePrefix}.${ext}`;
+        a.click(); URL.revokeObjectURL(url);
+    };
+    if (format === 'JSON') {
+        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
+        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
+    } else if (format === 'XML') {
+        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
+        dataToExport.forEach(row => {
+            xml += '  <row>\n';
+            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
+            xml += '  </row>\n';
+        });
+        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
+    } else if (format === 'HTML') {
+        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
+        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
+        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
+    } else if (format === 'TXT') {
+        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
+        triggerDownload(txt, "text/plain", "txt");
+    } else if (format === 'PDF') {
+        const loadScript = (src) => new Promise(resolve => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
+        });
+        Promise.all([
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
+        ]).then(() => {
+            const { jsPDF } = window.jspdf; const doc = new jsPDF();
+            doc.text(`Export: ${filenamePrefix}`, 14, 15);
+            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
+            doc.autoTable({ head: [headers], body: body, startY: 20 });
+            doc.save(`${filenamePrefix}.pdf`);
+        });
+    } else { 
+        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+        triggerDownload(csv, "text/csv", "csv");
+    }
+}
 
 export default function PatchCalendar({ onClose, userRole }) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -21,44 +112,30 @@ export default function PatchCalendar({ onClose, userRole }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState("");
-  
-  const [viewMode, setViewMode] = useState("CALENDAR"); // 'CALENDAR' or 'LIST'
-  const [selectedDateFilter, setSelectedDateFilter] = useState(null); // Stores the clicked date from the calendar
-
+  const [viewMode, setViewMode] = useState("CALENDAR"); 
+  const [selectedDateFilter, setSelectedDateFilter] = useState(null); 
   const isAdmin = (userRole || "").toLowerCase() === "admin";
-
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth(); 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayOffset = new Date(year, month, 1).getDay(); 
-
-  // Filter Drawer State
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
   const propertyOptions = [
-    { value: "server", label: "Server Name" },
-    { value: "os", label: "Operating System" },
-    { value: "time", label: "Time" },
-    { value: "month", label: "Month" },
-    { value: "date", label: "Date" } 
+    { value: "server", label: "Server Name" }, { value: "os", label: "Operating System" },
+    { value: "time", label: "Time" }, { value: "month", label: "Month" }, { value: "date", label: "Date" } 
   ];
-
-  // Toolbar, Pagination & Sorting State for List View
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
-  
-  const colRef = useRef(null);
-  const expRef = useRef(null);
-
+  const [exportFormat, setExportFormat] = useState('CSV');
+  const colRef = useRef(null); const expRef = useRef(null);
   const [cols, setCols] = useState([
-    { id: 'server', label: 'Server', show: true },
-    { id: 'date', label: 'Date', show: true },
-    { id: 'time', label: 'Time', show: true },
-    { id: 'os', label: 'OS', show: true }
+    { id: 'server', label: 'Server', show: true }, { id: 'date', label: 'Date', show: true },
+    { id: 'time', label: 'Time', show: true }, { id: 'os', label: 'OS', show: true }
   ]);
 
   useEffect(() => {
@@ -74,18 +151,11 @@ export default function PatchCalendar({ onClose, userRole }) {
 
   const fetchEvents = async () => {
     try {
-      setLoading(true);
-      setError(null);
+      setLoading(true); setError(null);
       const res = await fetch(`${API_BASE}/api/calendar?role=${encodeURIComponent(userRole)}`);
       const data = await res.json();
-      if (data.ok) {
-        setEvents(data.events || []);
-        setLastUpdated(new Date().toLocaleString());
-      }
-    } catch (err) { 
-      setError("Failed to fetch schedule data.");
-      console.error(err); 
-    } finally { setLoading(false); }
+      if (data.ok) { setEvents(data.events || []); setLastUpdated(new Date().toLocaleString()); }
+    } catch (err) { setError("Failed to fetch schedule data."); } finally { setLoading(false); }
   };
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
@@ -95,95 +165,55 @@ export default function PatchCalendar({ onClose, userRole }) {
   const downloadTemplate = () => {
     const blob = new Blob([`${CSV_HEADER}\n${SAMPLE_CSV}`], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "patch_schedule_template.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = "patch_schedule_template.csv"; a.click(); URL.revokeObjectURL(url);
   };
 
   const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = (evt) => parseCSV(evt.target.result);
-    reader.readAsText(file);
-    e.target.value = null; 
+    const file = e.target.files[0]; if (!file) return;
+    setError(null); const reader = new FileReader();
+    reader.onload = (evt) => parseCSV(evt.target.result); reader.readAsText(file); e.target.value = null; 
   };
 
   const parseCSV = async (text) => {
-    const lines = text.split(/\r?\n/);
-    const newEvents = [];
-    const nowYear = new Date().getFullYear();
+    const lines = text.split(/\r?\n/); const newEvents = []; const nowYear = new Date().getFullYear();
     const startIndex = lines[0].toLowerCase().startsWith("server") ? 1 : 0;
-
     for (let i = startIndex; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const parts = line.split(",");
-      if (parts.length < 6) continue; 
-
-      const server = parts[0].trim();
-      const day = parseInt(parts[1].trim(), 10);
-      const monthRaw = parts[2].trim();
-      const yr = parseInt(parts[3].trim(), 10);
-      const time = parts[4].trim();
-      const os = parts[5].trim(); 
-
+      const line = lines[i].trim(); if (!line) continue;
+      const parts = line.split(","); if (parts.length < 6) continue; 
+      const server = parts[0].trim(); const day = parseInt(parts[1].trim(), 10);
+      const monthRaw = parts[2].trim(); const yr = parseInt(parts[3].trim(), 10);
+      const time = parts[4].trim(); const os = parts[5].trim(); 
       let monthIndex = -1;
       if (!isNaN(monthRaw)) monthIndex = parseInt(monthRaw, 10) - 1;
       else monthIndex = MONTH_NAMES.findIndex(m => m.toLowerCase() === monthRaw.toLowerCase());
-
       if (!server || isNaN(day) || monthIndex === -1 || isNaN(yr) || !os) continue;
-
       if (yr !== nowYear) { setError(`Error: Row ${i+1} has year ${yr}. Only current year (${nowYear}) is allowed.`); return; }
       newEvents.push({ server, day, monthIndex, year: yr, time, os });
     }
-    
     if (newEvents.length === 0) { setError("No valid events found in CSV."); return; }
-
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/calendar`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: newEvents })
-      });
+      const res = await fetch(`${API_BASE}/api/calendar`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: newEvents }) });
       const data = await res.json();
-      if (data.ok) { 
-        setEvents(newEvents); 
-        setLastUpdated(new Date().toLocaleString());
-        alert("Schedule uploaded successfully!"); 
-      } 
+      if (data.ok) { setEvents(newEvents); setLastUpdated(new Date().toLocaleString()); alert("Schedule uploaded successfully!"); } 
       else { setError("Failed to save: " + (data.error || "Unknown error")); }
     } catch (err) { setError("Network error saving schedule."); } finally { setLoading(false); }
   };
 
-  // --- Filtering Logic ---
   const applyFilters = (item) => {
     if (!filters.length) return true;
     let globalMatch = globalLogic === "OR" ? false : true;
     let validBlocks = 0;
-
     for (let b of filters) {
-      let blockMatch = true;
-      let validConds = 0;
-
+      let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase();
-        
         let field = "";
-        if (c.column === "month") field = MONTH_NAMES[item.monthIndex].toLowerCase();
-        else if (c.column === "date") field = `${MONTH_NAMES[item.monthIndex]} ${item.day}, ${item.year}`.toLowerCase();
-        else field = String(item[c.column] || "").toLowerCase();
-
-        if (c.operator === "contains") condition = field.includes(search);
-        else if (c.operator === "=") condition = field === search;
-        else if (c.operator === "!=") condition = field !== search;
-        
-        blockMatch = blockMatch && condition;
+        if (c.column === "date") field = `${MONTH_NAMES[item.monthIndex]} ${item.day}, ${item.year}`;
+        else if (c.column === "month") field = MONTH_NAMES[item.monthIndex];
+        else field = String(item[c.column] || "");
+        blockMatch = blockMatch && evaluateCondition(field, c.operator, c.value, c.column);
       }
       if (validConds > 0) {
         validBlocks++;
@@ -193,23 +223,14 @@ export default function PatchCalendar({ onClose, userRole }) {
     return validBlocks === 0 ? true : globalMatch;
   };
 
-  // Base filter (Drawer Filters) applied to EVERYTHING
   const baseFilteredEvents = useMemo(() => events.filter(applyFilters), [events, filters, globalLogic]);
-
-  // List filter (Drawer Filters + Specific Calendar Day Clicked)
   const listFilteredEvents = useMemo(() => {
     if (viewMode === 'LIST' && selectedDateFilter) {
-      return baseFilteredEvents.filter(ev => 
-        ev.year === selectedDateFilter.year && 
-        ev.monthIndex === selectedDateFilter.monthIndex && 
-        ev.day === selectedDateFilter.day
-      );
+      return baseFilteredEvents.filter(ev => ev.year === selectedDateFilter.year && ev.monthIndex === selectedDateFilter.monthIndex && ev.day === selectedDateFilter.day);
     }
     return baseFilteredEvents;
   }, [baseFilteredEvents, viewMode, selectedDateFilter]);
 
-
-  // --- Calendar Specific Logic ---
   const eventsByDate = useMemo(() => {
     const map = {}; 
     baseFilteredEvents.forEach(ev => {
@@ -223,34 +244,22 @@ export default function PatchCalendar({ onClose, userRole }) {
 
   const handleDayClick = (day, dayEvents) => {
     if (!dayEvents || dayEvents.length === 0) return;
-    
     const dateStr = `${MONTH_NAMES[month]} ${day}, ${year}`;
-    
-    // Auto-populate the date into the master filter logic.
-    setFilters([{
-        conds: [{ column: "date", operator: "contains", value: dateStr }]
-    }]);
-    
-    setViewMode("LIST");
-    setCurrentPage(1);
+    setFilters([{ conds: [{ column: "date", operator: "contains", value: dateStr }] }]);
+    setViewMode("LIST"); setCurrentPage(1);
   };
 
-  // --- List View Specific Logic ---
   const sortedEvents = useMemo(() => {
     let sortableItems = [...listFilteredEvents];
     if (sortConfig.key) {
       sortableItems.sort((a, b) => {
-        let aVal = a[sortConfig.key] || "";
-        let bVal = b[sortConfig.key] || "";
-        
+        let aVal = a[sortConfig.key] || ""; let bVal = b[sortConfig.key] || "";
         if (sortConfig.key === 'date') {
             aVal = new Date(a.year, a.monthIndex, a.day).getTime();
             bVal = new Date(b.year, b.monthIndex, b.day).getTime();
         } else {
-            aVal = String(aVal).toLowerCase();
-            bVal = String(bVal).toLowerCase();
+            aVal = String(aVal).toLowerCase(); bVal = String(bVal).toLowerCase();
         }
-
         if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
         return 0;
@@ -263,27 +272,22 @@ export default function PatchCalendar({ onClose, userRole }) {
   const paginatedEvents = sortedEvents.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   useEffect(() => { setCurrentPage(1); }, [filters, rowsPerPage, viewMode, selectedDateFilter]);
-
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   const getSortArrow = (key) => {
     if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
     return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
   };
 
-  const handleExport = (fmt) => { 
+  const handleExport = (scope) => { 
     setShowExpDrop(false); 
-    if (fmt === 'CSV') {
-        const header = cols.filter(c => c.show).map(c => c.label);
-        const rows = sortedEvents.map(p => cols.filter(c => c.show).map(c => {
-            if (c.id === 'date') return `"${MONTH_NAMES[p.monthIndex]} ${p.day}, ${p.year}"`;
-            return `"${p[c.id] || ""}"`;
-        }));
-        const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "patch_schedule_export.csv"; a.click();
-    }
+    let exportData = [];
+    if (scope === 'page') exportData = paginatedEvents;
+    else if (scope === 'filtered') exportData = sortedEvents;
+    else exportData = events;
+    performExport(exportData, cols, exportFormat, "patch_schedule", (r, cId) => {
+        if (cId === 'date') return `${MONTH_NAMES[r.monthIndex]} ${r.day}, ${r.year}`;
+        return r[cId];
+    });
   };
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
@@ -291,14 +295,12 @@ export default function PatchCalendar({ onClose, userRole }) {
   return (
     <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
       
-      {/* KPI Details-style Sticky Header */}
       <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Patch Calendar</h2>
           <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Updated: {lastUpdated || "—"}</div>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          
           {isAdmin && (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
               <button className="btn outline sec small" style={{ height: '36px' }} onClick={downloadTemplate}>Template</button>
@@ -309,7 +311,6 @@ export default function PatchCalendar({ onClose, userRole }) {
               <div style={{ width: '1px', height: '24px', background: 'var(--border)', margin: '0 4px' }}></div>
             </div>
           )}
-
           {viewMode === "LIST" && (
             <>
               <div style={{ position: 'relative' }}>
@@ -358,7 +359,6 @@ export default function PatchCalendar({ onClose, userRole }) {
             <button className={`tab small ${viewMode === 'LIST' ? 'active' : ''}`} onClick={() => { setViewMode('LIST'); setSelectedDateFilter(null); }}>List View</button>
         </div>
 
-        {/* --- CALENDAR VIEW --- */}
         {viewMode === "CALENDAR" && (
             <div className="calendar-layout fade-in" style={{ padding: 0 }}>
               <div className="cal-header-bar flex-row justify-between items-center w-full" style={{ marginBottom: '16px' }}>
@@ -379,21 +379,15 @@ export default function PatchCalendar({ onClose, userRole }) {
                 </div>
 
                 <div className="cal-days-matrix">
-                  {Array.from({ length: firstDayOffset }).map((_, i) => (
-                    <div key={`empty-${i}`} className="cal-day-card empty" />
-                  ))}
-
+                  {Array.from({ length: firstDayOffset }).map((_, i) => <div key={`empty-${i}`} className="cal-day-card empty" />)}
                   {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
                     const dayEvents = eventsByDate[day] || [];
                     const hasEvent = dayEvents.length > 0;
                     const isToday = new Date().getDate() === day && new Date().getMonth() === month && new Date().getFullYear() === year;
-
                     return (
                       <div key={day} className={`cal-day-card ${hasEvent ? "active" : ""} ${isToday ? "today" : ""}`} onClick={() => handleDayClick(day, dayEvents)}>
-                        <div className="cal-day-header">
-                          <span className="cal-day-num">{day}</span>
-                        </div>
+                        <div className="cal-day-header"><span className="cal-day-num">{day}</span></div>
                         {hasEvent && (
                           <div className="cal-event-block">
                             <span className="cal-event-icon">⚙️</span>
@@ -411,29 +405,14 @@ export default function PatchCalendar({ onClose, userRole }) {
             </div>
         )}
 
-        {/* --- LIST VIEW --- */}
         {viewMode === "LIST" && (
             <div className="fade-in" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
-                    <div className="grid-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      
-                      {/* Active Date Filter Pill */}
-                      {selectedDateFilter && (
-                        <span className="pill blue" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          {MONTH_NAMES[selectedDateFilter.monthIndex]} {selectedDateFilter.day}, {selectedDateFilter.year}
-                          <button 
-                            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: '0 0 0 4px', fontSize: '14px', lineHeight: 1 }} 
-                            onClick={() => setSelectedDateFilter(null)}
-                            title="Clear date filter"
-                          >
-                            ✕
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
+                    <div className="grid-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}></div>
+                    <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                        <div style={{ fontWeight: 600, color: 'var(--text)', marginRight: '4px' }}>Showing {listFilteredEvents.length} Scheduled Patches</div>
                         <div className="dropdown" ref={colRef}>
-                            <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                            <button className="btn outline sec small" style={{ height: '36px' }} onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
                                 &nbsp; Columns
                             </button>
@@ -454,7 +433,7 @@ export default function PatchCalendar({ onClose, userRole }) {
                         </div>
 
                         <div className="dropdown" ref={expRef}>
-                            <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                            <button className="btn outline small" style={{ height: '36px' }} onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
                                 &nbsp; Export
                             </button>
@@ -463,12 +442,14 @@ export default function PatchCalendar({ onClose, userRole }) {
                                     <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                        {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                         <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={() => handleExport(fmt)}>{fmt}</button>
+                                         <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                                        ))}
                                     </div>
                                     <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                                     <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                                    <button className="item" onClick={() => handleExport('CSV')}>Filtered Data</button>
+                                    <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                                    <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                                    <button className="item" onClick={() => handleExport('all')}>All Data</button>
                                 </div>
                             )}
                         </div>
@@ -476,42 +457,34 @@ export default function PatchCalendar({ onClose, userRole }) {
                 </div>
 
                 <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
-                    {loading ? (
-                        <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading records...</div>
-                    ) : error ? (
-                        <div style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>{error}</div>
-                    ) : (
-                        <table>
-                            <thead className="kpi-th-sticky">
-                                <tr>
-                                    {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server Name{getSortArrow('server')}</th>}
-                                    {cols.find(c=>c.id==='date')?.show && <th className="cursor-pointer" onClick={() => handleSort('date')}>Date{getSortArrow('date')}</th>}
-                                    {cols.find(c=>c.id==='time')?.show && <th className="cursor-pointer" onClick={() => handleSort('time')}>Time{getSortArrow('time')}</th>}
-                                    {cols.find(c=>c.id==='os')?.show && <th className="cursor-pointer" onClick={() => handleSort('os')}>Operating System{getSortArrow('os')}</th>}
+                    <table>
+                        <thead className="kpi-th-sticky">
+                            <tr>
+                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortArrow('server')}</th>}
+                                {cols.find(c=>c.id==='date')?.show && <th className="cursor-pointer" onClick={() => handleSort('date')}>Date {getSortArrow('date')}</th>}
+                                {cols.find(c=>c.id==='time')?.show && <th className="cursor-pointer" onClick={() => handleSort('time')}>Time {getSortArrow('time')}</th>}
+                                {cols.find(c=>c.id==='os')?.show && <th className="cursor-pointer" onClick={() => handleSort('os')}>Operating System {getSortArrow('os')}</th>}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loading && <tr><td colSpan="4" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>Loading schedule...</td></tr>}
+                            {!loading && paginatedEvents.length === 0 && <tr><td colSpan="4" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>No patches scheduled.</td></tr>}
+                            {paginatedEvents.map((ev, idx) => (
+                                <tr key={idx}>
+                                    {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 600 }}>{ev.server}</td>}
+                                    {cols.find(c=>c.id==='date')?.show && <td>{MONTH_NAMES[ev.monthIndex]} {ev.day}, {ev.year}</td>}
+                                    {cols.find(c=>c.id==='time')?.show && <td className="cal-mono-time">{ev.time}</td>}
+                                    {cols.find(c=>c.id==='os')?.show && (
+                                        <td>
+                                            <span className={`cal-os-badge ${ev.os.toLowerCase().includes("win") ? "win" : "linux"}`}>
+                                                {ev.os}
+                                            </span>
+                                        </td>
+                                    )}
                                 </tr>
-                            </thead>
-                            <tbody>
-                                {paginatedEvents.length === 0 ? (
-                                    <tr><td colSpan="4" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No patches scheduled.</td></tr>
-                                ) : (
-                                    paginatedEvents.map((ev, idx) => (
-                                        <tr key={idx}>
-                                            {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 600 }}>{ev.server}</td>}
-                                            {cols.find(c=>c.id==='date')?.show && <td>{MONTH_NAMES[ev.monthIndex]} {ev.day}, {ev.year}</td>}
-                                            {cols.find(c=>c.id==='time')?.show && <td className="cal-mono-time">{ev.time}</td>}
-                                            {cols.find(c=>c.id==='os')?.show && (
-                                                <td>
-                                                    <span className={`cal-os-badge ${ev.os.toLowerCase().includes("win") ? "win" : "linux"}`}>
-                                                        {ev.os}
-                                                    </span>
-                                                </td>
-                                            )}
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    )}
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
 
                 <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
@@ -539,7 +512,6 @@ export default function PatchCalendar({ onClose, userRole }) {
       </div>
 
       <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
-
     </div>
   );
 }

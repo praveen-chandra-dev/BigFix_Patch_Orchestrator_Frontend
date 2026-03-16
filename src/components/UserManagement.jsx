@@ -14,6 +14,54 @@ async function apiFetch(url, options = {}) {
 
 function fmtDate(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
 
+function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
+    const visibleCols = columns.filter(c => c.show);
+    const headers = visibleCols.map(c => c.label);
+    const triggerDownload = (content, type, ext) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${filenamePrefix}.${ext}`;
+        a.click(); URL.revokeObjectURL(url);
+    };
+    if (format === 'JSON') {
+        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
+        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
+    } else if (format === 'XML') {
+        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
+        dataToExport.forEach(row => {
+            xml += '  <row>\n';
+            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
+            xml += '  </row>\n';
+        });
+        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
+    } else if (format === 'HTML') {
+        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
+        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
+        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
+    } else if (format === 'TXT') {
+        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
+        triggerDownload(txt, "text/plain", "txt");
+    } else if (format === 'PDF') {
+        const loadScript = (src) => new Promise(resolve => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
+        });
+        Promise.all([
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
+        ]).then(() => {
+            const { jsPDF } = window.jspdf; const doc = new jsPDF();
+            doc.text(`Export: ${filenamePrefix}`, 14, 15);
+            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
+            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
+        });
+    } else { 
+        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+        triggerDownload(csv, "text/csv", "csv");
+    }
+}
+
 const FancySelect = ({ label, options, value, onChange, disabled, placeholder }) => {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef(null);
@@ -81,6 +129,7 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState('CSV');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
@@ -230,17 +279,17 @@ export default function UserManagement({ onClose, currentUserId }) {
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
-  const handleExport = (fmt) => { 
+  const handleExport = (scope) => { 
     setShowExpDrop(false); 
-    if (fmt === 'CSV') {
-        const header = cols.filter(c => c.show).map(c => c.label);
-        const rows = sortedUsers.map(u => cols.filter(c => c.show).map(c => `"${u[c.id] || ""}"`));
-        const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "users_export.csv"; a.click();
-    }
+    let dataToExport = [];
+    if (scope === 'page') dataToExport = paginatedUsers;
+    else if (scope === 'filtered') dataToExport = sortedUsers;
+    else dataToExport = visibleUsers;
+    
+    performExport(dataToExport, cols, exportFormat, "users_export", (r, cId) => {
+        if (cId === 'CreatedAt') return fmtDate(r[cId]);
+        return r[cId];
+    });
   };
 
   return (
@@ -362,15 +411,17 @@ export default function UserManagement({ onClose, currentUserId }) {
                   </button>
                   {showExpDrop && (
                       <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
-                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt)}>{fmt}</button>
+                                <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                               ))}
                           </div>
                           <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
-                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
-                          <button className="item" onClick={() => handleExport('CSV')}>Filtered Data</button>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                          <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                          <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                          <button className="item" onClick={() => handleExport('all')}>All Data</button>
                       </div>
                   )}
               </div>

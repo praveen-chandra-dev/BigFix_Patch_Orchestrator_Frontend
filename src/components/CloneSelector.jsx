@@ -16,6 +16,54 @@ async function postJSON(url, body) {
   return r.json();
 }
 
+function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
+    const visibleCols = columns.filter(c => c.show);
+    const headers = visibleCols.map(c => c.label);
+    const triggerDownload = (content, type, ext) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${filenamePrefix}.${ext}`;
+        a.click(); URL.revokeObjectURL(url);
+    };
+    if (format === 'JSON') {
+        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
+        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
+    } else if (format === 'XML') {
+        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
+        dataToExport.forEach(row => {
+            xml += '  <row>\n';
+            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
+            xml += '  </row>\n';
+        });
+        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
+    } else if (format === 'HTML') {
+        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
+        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
+        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
+    } else if (format === 'TXT') {
+        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
+        triggerDownload(txt, "text/plain", "txt");
+    } else if (format === 'PDF') {
+        const loadScript = (src) => new Promise(resolve => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
+        });
+        Promise.all([
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
+        ]).then(() => {
+            const { jsPDF } = window.jspdf; const doc = new jsPDF();
+            doc.text(`Export: ${filenamePrefix}`, 14, 15);
+            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
+            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
+        });
+    } else { 
+        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+        triggerDownload(csv, "text/csv", "csv");
+    }
+}
+
 const FancySelect = ({ label, options, value, onChange, placeholder, disabled, isLoading }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -72,12 +120,14 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState('CSV');
   
   const [execCurrentPage, setExecCurrentPage] = useState(1);
   const [execRowsPerPage, setExecRowsPerPage] = useState(10);
   const [execSortConfig, setExecSortConfig] = useState({ key: null, direction: "asc" });
   const [showExecColDrop, setShowExecColDrop] = useState(false);
   const [showExecExpDrop, setShowExecExpDrop] = useState(false);
+  const [execExportFormat, setExecExportFormat] = useState('CSV');
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
@@ -308,24 +358,24 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
-  const handleExport = (fmt, isExec) => { 
+  const handleExport = (scope, isExec) => { 
     if (isExec) setShowExecExpDrop(false); else setShowExpDrop(false); 
-    if (fmt === 'CSV') {
-        const columns = isExec ? execCols : cols;
-        const dataToExport = isExec ? sortedExecs : sortedItems;
-        const header = columns.filter(c => c.show).map(c => c.label);
-        const rows = dataToExport.map(p => columns.filter(c => c.show).map(c => {
-           let val = p[c.id];
-           if (!isExec && c.id === 'ips') val = Array.isArray(p.ips) ? p.ips.join(", ") : "";
-           if (!isExec && c.id === 'vcStatus') val = p.vcStatus === 'ready' ? 'Ready' : p.vcStatus === 'resolving' ? 'Resolving' : p.vcStatus === 'not_found' ? 'Not Found' : 'Pending';
-           return `"${val || ""}"`;
-        }));
-        const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = isExec ? "clone_history.csv" : "clone_targets.csv"; a.click();
-    }
+
+    let dataToExport = [];
+    const format = isExec ? execExportFormat : exportFormat;
+    const columns = isExec ? execCols : cols;
+    const filename = isExec ? "clone_history" : "clone_targets";
+
+    if (scope === 'page') dataToExport = isExec ? execPaginatedItems : paginatedItems;
+    else if (scope === 'filtered') dataToExport = isExec ? sortedExecs : sortedItems;
+    else dataToExport = isExec ? visibleExecs : visibleItems;
+
+    performExport(dataToExport, columns, format, filename, (p, c) => {
+        let val = p[c];
+        if (!isExec && c === 'ips') val = Array.isArray(p.ips) ? p.ips.join(", ") : "";
+        if (!isExec && c === 'vcStatus') val = p.vcStatus === 'ready' ? 'Ready' : p.vcStatus === 'resolving' ? 'Resolving' : p.vcStatus === 'not_found' ? 'Not Found' : 'Pending';
+        return val;
+    });
   };
 
   useEffect(() => {
@@ -521,15 +571,17 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                         </button>
                         {showExpDrop && (
                             <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
-                                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
+                                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                    {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                     <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt, false)}>{fmt}</button>
+                                     <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                                    ))}
                                 </div>
                                 <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
-                                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
-                                <button className="item" onClick={() => handleExport('CSV', false)}>Filtered Data</button>
+                                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                                <button className="item" onClick={() => handleExport('page', false)}>Current Page</button>
+                                <button className="item" onClick={() => handleExport('filtered', false)}>Filtered Data</button>
+                                <button className="item" onClick={() => handleExport('all', false)}>All Data</button>
                             </div>
                         )}
                     </div>
@@ -688,15 +740,17 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                     </button>
                     {showExecExpDrop && (
                         <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
-                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Format</div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className="btn outline small" style={{ fontSize: '11px', height: '32px' }} onClick={() => handleExport(fmt, true)}>{fmt}</button>
+                                 <button key={fmt} className={`btn small ${execExportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExecExportFormat(fmt); }}>{fmt}</button>
                                ))}
                             </div>
                             <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
-                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px" }}>Scope</div>
-                            <button className="item" onClick={() => handleExport('CSV', true)}>Filtered Data</button>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                            <button className="item" onClick={() => handleExport('page', true)}>Current Page</button>
+                            <button className="item" onClick={() => handleExport('filtered', true)}>Filtered Data</button>
+                            <button className="item" onClick={() => handleExport('all', true)}>All Data</button>
                         </div>
                     )}
                 </div>

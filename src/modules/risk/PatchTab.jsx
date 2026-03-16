@@ -2,6 +2,78 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import api from "../../api/api";
 
+function evaluateCondition(f, operator, s, colId) {
+    if (!s) return true;
+    const numF = Number(f); const numS = Number(s);
+    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
+        if (operator === "=") return numF === numS;
+        if (operator === "!=") return numF !== numS;
+        if (operator === ">") return numF > numS;
+        if (operator === "<") return numF < numS;
+        if (operator === ">=") return numF >= numS;
+        if (operator === "<=") return numF <= numS;
+    }
+    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
+    if (operator === "contains") return strF.includes(strS);
+    if (operator === "=") return strF === strS;
+    if (operator === "!=") return strF !== strS;
+    if (operator === ">") return strF > strS;
+    if (operator === "<") return strF < strS;
+    if (operator === ">=") return strF >= strS;
+    if (operator === "<=") return strF <= strS;
+    return true;
+}
+
+function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
+    const visibleCols = columns.filter(c => c.show);
+    const headers = visibleCols.map(c => c.label);
+    const triggerDownload = (content, type, ext) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${filenamePrefix}.${ext}`;
+        a.click(); URL.revokeObjectURL(url);
+    };
+    if (format === 'JSON') {
+        const json = dataToExport.map(row => {
+            let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj;
+        });
+        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
+    } else if (format === 'XML') {
+        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
+        dataToExport.forEach(row => {
+            xml += '  <row>\n';
+            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
+            xml += '  </row>\n';
+        });
+        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
+    } else if (format === 'HTML') {
+        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
+        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
+        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
+    } else if (format === 'TXT') {
+        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
+        triggerDownload(txt, "text/plain", "txt");
+    } else if (format === 'PDF') {
+        const loadScript = (src) => new Promise(resolve => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
+        });
+        Promise.all([
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
+        ]).then(() => {
+            const { jsPDF } = window.jspdf; const doc = new jsPDF();
+            doc.text(`Export: ${filenamePrefix}`, 14, 15);
+            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
+            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
+        });
+    } else { 
+        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
+        triggerDownload(csv, "text/csv", "csv");
+    }
+}
+
 const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
 
 export default function PatchTab({ patches, patchLoading, addBaseline, parentFilters = [], parentLogic = "AND" }) {
@@ -17,6 +89,7 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState('CSV');
   const colRef = useRef(null);
   const expRef = useRef(null);
 
@@ -95,37 +168,33 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
   const applyFilters = (patch) => {
     if (!parentFilters.length) return true;
     let globalMatch = parentLogic === "OR" ? false : true;
+    let validBlocks = 0;
     for (let b of parentFilters) {
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
-        validConds++; let condition = true;
-        const search = String(c.value).toLowerCase();
+        validConds++; 
+        let field = "";
         if (c.column === "cve_id") {
           const list = patchCveMap[getPatchKey(patch)] || [];
-          condition = list.some((cve) => cve.toLowerCase().includes(search));
-        } else if (c.column === "final_score") {
-          const field = Number(patch.final_score || 0); const val = Number(c.value);
-          if (!isNaN(val)) {
-            if (c.operator === ">") condition = field > val;
-            else if (c.operator === "<") condition = field < val;
-            else if (c.operator === "=") condition = field === val;
-            else if (c.operator === ">=") condition = field >= val;
-            else if (c.operator === "<=") condition = field <= val;
-            else if (c.operator === "!=") condition = field !== val;
-          }
+          const search = String(c.value).toLowerCase();
+          blockMatch = blockMatch && list.some((cve) => cve.toLowerCase().includes(search));
+          continue;
+        } else if (c.column === "final_score" || c.column === "applicable_count") {
+           field = Number(patch[c.column] || 0);
+        } else if (c.column === "patch_id") {
+           field = String(patch[c.column] || "").replace(/^bigfix-/, "");
         } else {
-          let field = String(patch[c.column] || "").toLowerCase(); 
-          if (c.column === "patch_id") field = field.replace(/^bigfix-/, "");
-          if (c.operator === "contains") condition = field.includes(search);
-          else if (c.operator === "=") condition = field === search;
-          else if (c.operator === "!=") condition = field !== search;
+           field = String(patch[c.column] || "");
         }
-        blockMatch = blockMatch && condition;
+        blockMatch = blockMatch && evaluateCondition(field, c.operator, c.value, c.column);
       }
-      if (validConds > 0) globalMatch = parentLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      if (validConds > 0) {
+          validBlocks++;
+          globalMatch = parentLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      }
     }
-    return globalMatch;
+    return validBlocks === 0 ? true : globalMatch;
   };
 
   const handleSort = (key) => setSortConfig((prev) => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
@@ -160,7 +229,19 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
   const paginatedPatches = filteredPatches.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
   const selectedCount = Object.keys(selectedMap).length;
 
-  const exportCSV = () => { setShowExpDrop(false); };
+  const handleExport = (scope) => { 
+    setShowExpDrop(false); 
+    let dataToExport = [];
+    if (scope === 'page') dataToExport = paginatedPatches;
+    else if (scope === 'filtered') dataToExport = filteredPatches;
+    else dataToExport = patches;
+    
+    performExport(dataToExport, cols, exportFormat, "patches", (r, cId) => {
+        if (cId === 'cve_count') return r.cve_count ?? (patchCveMap[getPatchKey(r)]?.length || 0);
+        if (cId === 'severity') return getSeverityFromScore(Number(r.final_score || 0));
+        return r[cId];
+    });
+  };
 
   const approvePatches = () => {
     if (selectedCount === 0) return;
@@ -174,15 +255,14 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
       
       <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
-      
-        
+        <div className="grid-toolbar-left"></div>
         <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
-          <button className="btn outline sec small" disabled={selectedCount === 0} onClick={approvePatches} style={{ color: selectedCount === 0 ? 'var(--muted)' : 'var(--text)', borderColor: 'var(--border)' }}>
+          <button className="btn outline sec small" disabled={selectedCount === 0} onClick={approvePatches} style={{ color: selectedCount === 0 ? 'var(--muted)' : 'var(--text)', borderColor: 'var(--border)', height: '36px' }}>
              Approve Patches
           </button>
           
           <div className="dropdown" ref={colRef}>
-            <button className="btn outline sec small" onClick={(e) => { e.stopPropagation(); setShowColDrop(!showColDrop); setShowExpDrop(false); }} title="Columns">
+            <button className="btn outline sec small" style={{ height: '36px' }} onClick={(e) => { e.stopPropagation(); setShowColDrop(!showColDrop); setShowExpDrop(false); }} title="Columns">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg> 
               &nbsp; Columns
             </button>
@@ -201,7 +281,7 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
           </div>
 
           <div className="dropdown" ref={expRef}>
-            <button className="btn outline small" onClick={(e) => { e.stopPropagation(); setShowExpDrop(!showExpDrop); setShowColDrop(false); }} title="Export">
+            <button className="btn outline small" style={{ height: '36px' }} onClick={(e) => { e.stopPropagation(); setShowExpDrop(!showExpDrop); setShowColDrop(false); }} title="Export">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg> 
               &nbsp; Export
             </button>
@@ -210,14 +290,14 @@ export default function PatchTab({ patches, patchLoading, addBaseline, parentFil
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                      {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                       <button key={fmt} className="btn outline small" style={{ fontSize: '12px', height: '32px', padding: 0 }} onClick={exportCSV}>{fmt}</button>
+                       <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                      ))}
                   </div>
                   <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                  <button className="item" onClick={exportCSV}>Current Page</button>
-                  <button className="item" onClick={exportCSV}>Filtered Data</button>
-                  <button className="item" onClick={exportCSV}>All Data</button>
+                  <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                  <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                  <button className="item" onClick={() => handleExport('all')}>All Data</button>
               </div>
             )}
           </div>
