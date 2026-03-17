@@ -28,25 +28,30 @@ function enhanceNativeSelect(selectEl) {
   if (!selectEl || selectEl.dataset.fx === "ok") return;
   selectEl.dataset.fx = "ok";
   selectEl.style.display = "none";
+  
   const wrap = document.createElement("div");
   wrap.className = "fx-wrap";
   selectEl.parentNode.insertBefore(wrap, selectEl);
   wrap.appendChild(selectEl);
+  
   const getLabel = () => {
     const opt = selectEl.options[selectEl.selectedIndex];
     return opt ? opt.text : "— select —";
   };
+  
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.className = "fx-trigger";
   trigger.innerHTML = `<span class="fx-value" style="overflow:hidden;text-overflow:ellipsis;">${getLabel()}</span><span class="fx-chevron" style="opacity:0.5;font-size:12px;">▼</span>`;
   wrap.insertBefore(trigger, selectEl);
+  
   const menu = document.createElement("div");
   menu.className = "fx-menu";
   const menuInner = document.createElement("div");
   menuInner.className = "fx-menu-inner";
   menu.appendChild(menuInner);
   wrap.appendChild(menu);
+  
   const allOptions = Array.from(selectEl.querySelectorAll("option"));
   const itemsOnly = () => allOptions.filter(o => !o.disabled && o.value !== "");
   
@@ -61,22 +66,26 @@ function enhanceNativeSelect(selectEl) {
       const it = document.createElement("div");
       const active = option.selected;
       it.className = "fx-item" + (active ? " fx-active" : "");
-      it.innerHTML = `<span class="fx-label">${option.textContent}</span>${active ? "<span class='fx-tick'>✓</span>" : ""}`;
+      it.innerHTML = `<span class="fx-label">${option.textContent}</span>${active ? "" : ""}`;
       it.onclick = () => commit(i);
       menuInner.appendChild(it);
     });
   }
+  
   function open() {
     if (wrap.classList.contains("fx-open")) return;
     wrap.classList.add("fx-open");
     renderMenu();
     document.addEventListener("mousedown", onDocDown);
   }
+  
   function close() {
     wrap.classList.remove("fx-open");
     document.removeEventListener("mousedown", onDocDown);
   }
+  
   function onDocDown(e) { if (!wrap.contains(e.target)) close(); }
+  
   function commit(i) {
     const real = itemsOnly();
     if (!real[i]) return;
@@ -87,7 +96,19 @@ function enhanceNativeSelect(selectEl) {
     close();
     selectEl.dispatchEvent(new Event("change", { bubbles: true }));
   }
+  
   trigger.onclick = (e) => { e.stopPropagation(); wrap.classList.contains("fx-open") ? close() : open(); };
+
+  // This ensures the custom dropdown stays synced when React updates the <select> value asynchronously
+  const obs = new MutationObserver(() => {
+    const selectedOption = selectEl.options[selectEl.selectedIndex];
+    const displayText = selectedOption ? selectedOption.text : "— select —";
+    const valEl = trigger.querySelector(".fx-value");
+    if (valEl) {
+      valEl.textContent = displayText;
+    }
+  });
+  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected", "value"] });
 }
 
 function enhanceNativeSelects(root = document) {
@@ -155,6 +176,7 @@ export default function Configuration({ onSaved, locked = false }) {
     if (val === "") setter(""); 
     else setter(Number(val)); 
   };
+  
   const handleBlur = (val, setter, min, max) => {
     let num = Number(val);
     if (!Number.isFinite(num) || val === "") num = min;
@@ -167,28 +189,38 @@ export default function Configuration({ onSaved, locked = false }) {
     (async () => {
       try {
         const j = await getJSON(`${API_BASE}/api/config`, controller.signal);
-        if (typeof j?.diskThresholdGB === "number") setDisk(j.diskThresholdGB);
-        if (typeof j?.requireChg === "boolean") setRequireChg(j.requireChg);
-        if (typeof j?.checkServiceStatus === "boolean") setCheckService(j.checkServiceStatus);
-        setCloneVM(Boolean(j?.cloneVM));
-        setSnapshotVM(Boolean(j?.snapshotVM));
+        if (!j) return;
         
-        if (typeof j?.enableSandbox === "boolean") setEnableSandbox(j.enableSandbox);
-        if (typeof j?.enablePilot === "boolean") setEnablePilot(j.enablePilot);
+        const diskVal = j.diskThresholdGB ?? j.diskThreshold;
+        if (diskVal != null) setDisk(Number(diskVal));
+        
+        if (j.requireChg != null) setRequireChg(Boolean(j.requireChg));
+        if (j.checkServiceStatus != null) setCheckService(Boolean(j.checkServiceStatus));
+        
+        setCloneVM(Boolean(j.cloneVM));
+        setSnapshotVM(Boolean(j.snapshotVM));
+        
+        if (j.enableSandbox != null) setEnableSandbox(Boolean(j.enableSandbox));
+        if (j.enablePilot != null) setEnablePilot(Boolean(j.enablePilot));
+        
+        if (j.lastReportValue != null) setLastReportValue(Number(j.lastReportValue));
+        if (j.lastReportUnit != null) setLastReportUnit(String(j.lastReportUnit));
 
         setEnv(f => ({ 
             ...f, 
-            autoMail: j.autoMail, 
-            postMail: j.postMail, 
-            cloneVM: Boolean(j?.cloneVM), 
-            snapshotVM: Boolean(j?.snapshotVM),
-            enableSandbox: j.enableSandbox ?? true, 
-            enablePilot: j.enablePilot ?? true      
+            autoMail: Boolean(j.autoMail), 
+            postMail: Boolean(j.postPatchMail ?? j.postMail), 
+            cloneVM: Boolean(j.cloneVM), 
+            snapshotVM: Boolean(j.snapshotVM),
+            enableSandbox: j.enableSandbox != null ? Boolean(j.enableSandbox) : true, 
+            enablePilot: j.enablePilot != null ? Boolean(j.enablePilot) : true      
         }));
         
-        if (typeof j?.lastReportValue === "number") setLastReportValue(j.lastReportValue);
-        if (typeof j?.lastReportUnit  === "string") setLastReportUnit(j.lastReportUnit);
-      } catch (e) { setErr(e.message || String(e)); } finally { setTimeout(() => enhanceNativeSelects(configRef.current), 100); }
+      } catch (e) { 
+        if (e.name !== 'AbortError') setErr(e.message || String(e)); 
+      } finally { 
+        setTimeout(() => enhanceNativeSelects(configRef.current), 100); 
+      }
     })();
     return () => controller.abort();
   }, [setEnv]);
@@ -196,6 +228,7 @@ export default function Configuration({ onSaved, locked = false }) {
   async function save() {
     if (busy || locked) return;
     setBusy(true); setErr("");
+    
     const diskSafe = Math.max(0, Number(disk) || 0);
     const lastSafe = Math.max(0, Number(lastReportValue) || 0);
     
@@ -218,16 +251,20 @@ export default function Configuration({ onSaved, locked = false }) {
       
       setEnv(f => ({ 
           ...f, 
+          autoMail: !!env.autoMail,
+          postMail: !!env.postMail,
           cloneVM: Boolean(cloneVM), 
           snapshotVM: Boolean(snapshotVM),
           enableSandbox: Boolean(enableSandbox),
           enablePilot: Boolean(enablePilot)
       }));
 
-      onSaved?.({
-          enableSandbox: Boolean(enableSandbox),
-          enablePilot: Boolean(enablePilot)
-      });
+      if (onSaved) {
+        onSaved({
+            enableSandbox: Boolean(enableSandbox),
+            enablePilot: Boolean(enablePilot)
+        });
+      }
 
     } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   }

@@ -16,16 +16,16 @@ function enhanceNativeSelect(selectEl) {
   if (!selectEl || selectEl.dataset.fx === "ok") return;
   selectEl.dataset.fx = "ok";
   selectEl.style.display = "none";
-
+  
   const wrap = document.createElement("div");
   wrap.className = "fx-wrap";
   selectEl.parentNode.insertBefore(wrap, selectEl);
   wrap.appendChild(selectEl);
-
+  
   const selectedOption = selectEl.options[selectEl.selectedIndex];
   const displayText = selectedOption ? selectedOption.text : "— select —";
   const isPlaceholder = !selectedOption || selectedOption.value === "";
-
+  
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.className = "fx-trigger";
@@ -36,17 +36,21 @@ function enhanceNativeSelect(selectEl) {
     <span class="fx-chevron">▾</span>
   `;
   wrap.insertBefore(trigger, selectEl);
-
+  
   const menu = document.createElement("div");
   menu.className = "fx-menu";
   menu.setAttribute("role", "listbox");
+  
   const menuInner = document.createElement("div");
   menuInner.className = "fx-menu-inner";
   menu.appendChild(menuInner);
   wrap.appendChild(menu);
-
+  
   const allOptions = Array.from(selectEl.querySelectorAll("option"));
+  
   let hoverIdx = -1;
+  let visibleItems = [];
+
   const isRealOption = (o) => {
     const txt = (o.textContent || "").trim().toLowerCase();
     return !o.disabled && o.value !== "" && !/^—.*—$/.test(txt);
@@ -56,28 +60,120 @@ function enhanceNativeSelect(selectEl) {
   function renderMenu() {
     menuInner.innerHTML = "";
     const realItems = itemsOnly();
+    
+    // Add Search Box
+    const searchWrap = document.createElement("div");
+    searchWrap.style.padding = "8px";
+    searchWrap.style.borderBottom = "1px solid var(--border)";
+    searchWrap.style.position = "sticky";
+    searchWrap.style.top = "0";
+    searchWrap.style.backgroundColor = "var(--panel)";
+    searchWrap.style.zIndex = "10";
+    
+    const searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.className = "control";
+    searchInput.placeholder = "Search...";
+    searchInput.style.width = "100%";
+    searchInput.style.height = "32px";
+    searchInput.style.fontSize = "13px";
+    
+    searchInput.addEventListener("click", e => e.stopPropagation());
+    searchInput.addEventListener("keydown", e => {
+      if (e.key === "Escape") { e.stopPropagation(); close(); }
+      if (e.key === "Enter") {
+          e.stopPropagation(); e.preventDefault();
+          if (hoverIdx >= 0 && visibleItems[hoverIdx]) commitNode(visibleItems[hoverIdx]);
+      }
+      if (e.key === "ArrowDown") {
+          e.stopPropagation(); e.preventDefault();
+          setHover((hoverIdx + 1) % visibleItems.length);
+      }
+      if (e.key === "ArrowUp") {
+          e.stopPropagation(); e.preventDefault();
+          setHover((hoverIdx - 1 + visibleItems.length) % visibleItems.length);
+      }
+    });
+    
+    searchWrap.appendChild(searchInput);
+    menuInner.appendChild(searchWrap);
+    
+    // Add List Wrap
+    const listWrap = document.createElement("div");
+    menuInner.appendChild(listWrap);
+
     if (realItems.length === 0) {
       const emptyMsg = document.createElement("div");
       emptyMsg.className = "fx-item fx-empty";
       emptyMsg.textContent = "No options";
-      menuInner.appendChild(emptyMsg);
+      listWrap.appendChild(emptyMsg);
       return;
     }
-    realItems.forEach((option, visibleIndex) => {
+
+    const itemNodes = [];
+    realItems.forEach((option, originalIndex) => {
       const it = document.createElement("div");
       it.className = "fx-item" + (option.selected ? " fx-active" : "");
-      it.dataset.index = String(visibleIndex);
+      it.dataset.origIndex = String(originalIndex);
       it.setAttribute("role", "option");
       it.setAttribute("aria-selected", option.selected);
-      it.innerHTML = `
-        <span class="fx-label">${option.textContent}</span>
-        ${option.selected ? "" : ""}
-      `;
-      it.addEventListener("mouseenter", () => setHover(visibleIndex));
+      it.innerHTML = `<span class="fx-label">${option.textContent}</span>`;
+      
+      it.addEventListener("mouseenter", () => {
+         const vIdx = visibleItems.indexOf(it);
+         if (vIdx >= 0) setHover(vIdx);
+      });
       it.addEventListener("mousedown", (e) => e.preventDefault());
-      it.addEventListener("click", () => commit(visibleIndex));
-      menuInner.appendChild(it);
+      it.addEventListener("click", () => commitNode(it));
+      
+      listWrap.appendChild(it);
+      itemNodes.push(it);
     });
+
+    visibleItems = [...itemNodes];
+
+    // Search Logic
+    searchInput.addEventListener("input", (e) => {
+        const term = e.target.value.toLowerCase();
+        visibleItems = [];
+        itemNodes.forEach((node) => {
+            if (node.textContent.toLowerCase().includes(term)) {
+                node.style.display = "";
+                visibleItems.push(node);
+            } else {
+                node.style.display = "none";
+            }
+        });
+        setHover(0);
+    });
+    
+    setTimeout(() => searchInput.focus(), 10);
+    
+    const currentIndex = visibleItems.findIndex(o => o.classList.contains("fx-active"));
+    setHover(currentIndex >= 0 ? currentIndex : 0);
+  }
+
+  function setHover(i) {
+    if (visibleItems.length === 0) return;
+    hoverIdx = Math.max(0, Math.min(i, visibleItems.length - 1));
+    visibleItems.forEach((n, j) => n.classList.toggle("fx-hover", j === hoverIdx));
+    const el = visibleItems[hoverIdx];
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function commitNode(node) {
+    const origIndex = parseInt(node.dataset.origIndex, 10);
+    const realItems = itemsOnly();
+    const chosen = realItems[origIndex];
+    if (!chosen) return;
+    allOptions.forEach(o => o.selected = false);
+    chosen.selected = true;
+    selectEl.value = chosen.value;
+    const valEl = trigger.querySelector(".fx-value");
+    valEl.textContent = chosen.textContent;
+    valEl.classList.remove("fx-placeholder");
+    close();
+    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function open() {
@@ -94,6 +190,7 @@ function enhanceNativeSelect(selectEl) {
     trigger.setAttribute("aria-expanded", "true");
     renderMenu();
     document.addEventListener("mousedown", onDocDown);
+    
     const triggerWidth = trigger.offsetWidth;
     menu.style.width = triggerWidth + "px";
     menu.style.minWidth = triggerWidth + "px";
@@ -106,10 +203,6 @@ function enhanceNativeSelect(selectEl) {
       menu.style.left = "0";
       menu.style.right = "auto";
     }
-    menu.style.maxHeight = "300px";
-    menu.style.overflow = "auto";
-    const currentIndex = itemsOnly().findIndex(o => o.selected);
-    setHover(currentIndex >= 0 ? currentIndex : 0);
   }
 
   function close() {
@@ -121,49 +214,16 @@ function enhanceNativeSelect(selectEl) {
     menu.style.width = "";
     menu.style.minWidth = "";
     menu.style.maxWidth = "";
-    menu.style.maxHeight = "";
-    menu.style.overflow = "";
     menu.style.left = "";
     menu.style.right = "";
   }
 
   function onDocDown(e) { if (!wrap.contains(e.target)) close(); }
 
-  function setHover(i) {
-    const realItems = itemsOnly();
-    if (realItems.length === 0) return;
-    hoverIdx = Math.max(0, Math.min(i, realItems.length - 1));
-    const nodes = menuInner.querySelectorAll(".fx-item");
-    nodes.forEach((n, j) => n.classList.toggle("fx-hover", j === hoverIdx));
-    nodes[hoverIdx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }
-
-  function commit(i) {
-    const realItems = itemsOnly();
-    if (realItems.length === 0) return;
-    const chosen = realItems[i];
-    allOptions.forEach(o => (o.selected = false));
-    chosen.selected = true;
-    selectEl.value = chosen.value;
-    const valEl = trigger.querySelector(".fx-value");
-    valEl.textContent = chosen.textContent;
-    valEl.classList.remove("fx-placeholder");
-    close();
-    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
   trigger.addEventListener("click", (e) => { e.stopPropagation(); wrap.classList.contains("fx-open") ? close() : open(); });
   trigger.addEventListener("keydown", (e) => {
     const isOpen = wrap.classList.contains("fx-open");
-    const realItems = itemsOnly();
     if (!isOpen && ["ArrowDown","Enter"," "].includes(e.key)) { e.preventDefault(); open(); return; }
-    if (!isOpen) return;
-    switch (e.key) {
-      case "Escape": e.preventDefault(); close(); break;
-      case "Enter": e.preventDefault(); if (hoverIdx >= 0) commit(hoverIdx); break;
-      case "ArrowDown": e.preventDefault(); setHover((hoverIdx + 1) % realItems.length); break;
-      case "ArrowUp": e.preventDefault(); setHover((hoverIdx - 1 + realItems.length) % realItems.length); break;
-    }
   });
 
   const obs = new MutationObserver(() => {
@@ -177,7 +237,6 @@ function enhanceNativeSelect(selectEl) {
     }
   });
   obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected","value"] });
-  document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) close(); });
 }
 
 function enhanceNativeSelects(root = document) {

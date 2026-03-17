@@ -66,13 +66,22 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
 
 const FancySelect = ({ label, options, value, onChange, placeholder, disabled, isLoading }) => {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const ref = useRef(null);
+
   useEffect(() => {
     const handleClickOutside = (event) => { if (ref.current && !ref.current.contains(event.target)) setOpen(false); };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
+
   const selectedLabel = options.find((o) => o.value === value)?.label || placeholder;
+  const filteredOptions = options.filter(opt => String(opt.label).toLowerCase().includes(search.toLowerCase()));
+
   return (
     <div className="field flex-1 min-w-200" ref={ref}>
       {label && <div className="meta"><label>{label}</label></div>}
@@ -84,11 +93,24 @@ const FancySelect = ({ label, options, value, onChange, placeholder, disabled, i
             </button>
             {open && (
               <div className="fx-menu">
+                <div style={{ padding: "8px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, backgroundColor: "var(--panel)", zIndex: 10 }}>
+                  <input 
+                    type="text" 
+                    className="control" 
+                    placeholder="Search..." 
+                    value={search} 
+                    onChange={(e) => setSearch(e.target.value)} 
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => e.stopPropagation()}
+                    autoFocus 
+                    style={{ width: "100%", height: "32px", fontSize: "13px" }} 
+                  />
+                </div>
                 <div className="fx-menu-inner">
-                    {options.length === 0 ? (
+                    {filteredOptions.length === 0 ? (
                     <div className="fx-item empty">No Options Found</div>
                     ) : (
-                    options.map((opt) => (
+                    filteredOptions.map((opt) => (
                         <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>
                         {opt.label}
                         </div>

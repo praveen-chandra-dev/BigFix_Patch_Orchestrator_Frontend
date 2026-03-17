@@ -66,12 +66,21 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
 
 const FancyDropdown = ({ options, value, onChange, placeholder, disabled }) => {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const ref = useRef(null);
+
   useEffect(() => {
     const handleClickOutside = (event) => { if (ref.current && !ref.current.contains(event.target)) setOpen(false); };
     document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
+
   const selectedLabel = options.find((o) => o.value === value)?.label || placeholder;
+  const filteredOptions = options.filter(opt => String(opt.label).toLowerCase().includes(search.toLowerCase()));
+
   return (
     <div className="field flex-1" ref={ref}>
       <div className="meta"><label>Select Group</label></div>
@@ -83,13 +92,28 @@ const FancyDropdown = ({ options, value, onChange, placeholder, disabled }) => {
             </button>
             {open && (
               <div className="fx-menu">
-                {options.length === 0 ? (
-                  <div className="fx-item empty">No Groups Found</div>
-                ) : (
-                  options.map((opt) => (
-                    <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>{opt.label}</div>
-                  ))
-                )}
+                <div style={{ padding: "8px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, backgroundColor: "var(--panel)", zIndex: 10 }}>
+                  <input 
+                    type="text" 
+                    className="control" 
+                    placeholder="Search..." 
+                    value={search} 
+                    onChange={(e) => setSearch(e.target.value)} 
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => e.stopPropagation()}
+                    autoFocus 
+                    style={{ width: "100%", height: "32px", fontSize: "13px" }} 
+                  />
+                </div>
+                <div className="fx-menu-inner">
+                  {filteredOptions.length === 0 ? (
+                    <div className="fx-item empty">No Groups Found</div>
+                  ) : (
+                    filteredOptions.map((opt) => (
+                      <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>{opt.label}</div>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -634,7 +658,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 {execCols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                             const next = [...execCols]; next[i].show = e.target.checked; setExecCols(next);
                                         }} />

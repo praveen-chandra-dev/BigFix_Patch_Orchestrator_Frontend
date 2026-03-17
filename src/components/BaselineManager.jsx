@@ -72,6 +72,7 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
 
 const FancySelect = ({ label, options, value, onChange, disabled, placeholder, isLoading, multiSelect }) => {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const wrapperRef = useRef(null);
 
   useEffect(() => {
@@ -79,6 +80,10 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
 
   let displayText = placeholder;
   let isPlaceholder = true;
@@ -97,6 +102,8 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
     } else { onChange(opt); setOpen(false); }
   };
 
+  const filteredOptions = options.filter(opt => String(opt).toLowerCase().includes(search.toLowerCase()));
+
   return (
     <div className="field flex-1">
       <span className="label">{label}</span>
@@ -109,11 +116,24 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
 
         {open && (
           <div className="fx-menu">
+            <div style={{ padding: "8px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, backgroundColor: "var(--panel)", zIndex: 10 }}>
+              <input 
+                type="text" 
+                className="control" 
+                placeholder="Search..." 
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+                onClick={e => e.stopPropagation()}
+                onKeyDown={e => e.stopPropagation()}
+                autoFocus 
+                style={{ width: "100%", height: "32px", fontSize: "13px" }} 
+              />
+            </div>
             <div className="fx-menu-inner">
-              {options.length === 0 ? (
+              {filteredOptions.length === 0 ? (
                 <div className="fx-item fx-empty">No options</div>
               ) : (
-                options.map((opt) => {
+                filteredOptions.map((opt) => {
                   const isSelected = multiSelect ? (value || []).includes(opt) : value === opt;
                   return (
                     <div key={opt} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={(e) => handleOptionClick(opt, e)}>

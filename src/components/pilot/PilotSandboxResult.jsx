@@ -21,28 +21,64 @@ const fmtTime = (s) => {
 const escapeHtml = (str) =>
   String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+// Updated Buckets based on BigFix definitions
 const BUCKETS = [
-  "Success", "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login",
-  "Not Relevant", "Running", "Evaluating", "Waiting", "Pending Downloads", "Pending Offer Acceptance",
-  "Failed", "Cancelled", "Download Failed", "Locked", "Constrained", "Postponed", "Invalid Signature",
-  "Offers Disabled", "Disk Limited", "Disk Free Limited", "Hash Mismatch", "Transcoding", "Error", "Not Reported",
+  "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
+  "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login", 
+  "Pending Offer Acceptance", "Failed", "error", "Download Failed", "Cancelled", 
+  "Locked", "Constrained", "Postponed", "Invalid Signature", "Offers Disabled", 
+  "Disk Limited", "Disk Free Limited", "Hash Mismatch", "Transcoding Error", 
+  "Not Relevant", "Not Reported"
 ];
 
 const ORDER = [
-  "Success", "Running", "Evaluating", "Pending Restart", "Pending Client Restart", "Pending Message",
-  "Pending Login", "Waiting", "Pending Downloads", "Pending Offer Acceptance", "Failed", "Cancelled",
-  "Download Failed", "Locked", "Constrained", "Postponed", "Invalid Signature", "Offers Disabled",
-  "Disk Limited", "Disk Free Limited", "Hash Mismatch", "Transcoding", "Not Relevant", "Error", "Not Reported",
+  "Fixed", "Completed", "Running", "Evaluating", "Pending Restart", "Pending Client Restart",
+  "Pending Message", "Pending Login", "Waiting", "Pending Downloads", "Pending Offer Acceptance",
+  "Failed", "error", "Download Failed", "Cancelled", "Locked", "Constrained", "Postponed",
+  "Invalid Signature", "Offers Disabled", "Disk Limited", "Disk Free Limited", "Hash Mismatch",
+  "Transcoding Error", "Not Relevant", "Not Reported"
 ];
 
+const DESCRIPTIONS = {
+  "Not Reported": "No report on this action yet. We cannot confirm if the action has been propagated, mirrored, gathered, processed, or reported until this status changes.",
+  "Fixed": "The action executed successfully. The BigFix Client has run the action and the relevance is now false (meaning that the action ran and fixed the issue).",
+  "Running": "The action is currently running.",
+  "Evaluating": "Evaluating relevance and action constraints. The BigFix Client has received the action targeted at it and will evaluate it.",
+  "Completed": "The action has completed and no other actions are required.",
+  "Failed": "The action failed. The BigFix Client has run the action and the issue is still relevant.",
+  "Cancelled": "The action was canceled by the user.",
+  "Download Failed": "A required download failed.",
+  "Locked": "This computer is locked. The BigFix Client is in the 'Locked' state that prevents it from running actions.",
+  "Waiting": "The BigFix Client is waiting for some condition to be able to run the action (e.g., dependencies, time range, user input).",
+  "Pending Downloads": "Waiting for downloads to be mirrored. The BigFix Client is waiting to receive the complete file.",
+  "Pending Restart": "Waiting for restart to complete action. The status cannot be assessed until the computer is restarted.",
+  "Pending Message": "Waiting for user to respond to message.",
+  "Pending Login": "Waiting for user to log in.",
+  "Constrained": "The computer doesn't meet the specified retrieved property constraint.",
+  "Postponed": "The user postponed execution of this action.",
+  "Invalid Signature": "The client was unable to verify the signature on this action.",
+  "Not Relevant": "The Fixlet that this action addresses is not relevant on this machine.",
+  "Pending Offer Acceptance": "Waiting for user to accept this offer.",
+  "Offers Disabled": "No user is able to accept this offer.",
+  "Disk Limited": "The download size exceeds the maximum value set in the client setting.",
+  "Disk Free Limited": "The remaining disk space is smaller than the required value.",
+  "Hash Mismatch": "The download completed, but the file failed a hash comparison.",
+  "Transcoding Error": "The action failed transcoding from the deployment codepage.",
+  "Pending Client Restart": "Waiting for client restart to complete action.",
+  "error": "An unknown error occurred (e.g., missing context, invalid content, download syntax error, UI translation error)."
+};
+
 const COLOR = {
-  Success: "#10b981", Failed: "#ef4444", "Download Failed": "#dc2626", Running: "#2563eb",
-  Evaluating: "#06b6d4", Waiting: "#8b5cf6", "Pending Restart": "#f59e0b", "Pending Client Restart": "#f59e0b",
-  "Pending Message": "#f59e0b", "Pending Login": "#f59e0b", "Pending Downloads": "#f59e0b",
-  "Pending Offer Acceptance": "#f59e0b", Cancelled: "#6b7280", Locked: "#6b7280", Constrained: "#6b7280",
-  Postponed: "#6b7280", "Invalid Signature": "#6b7280", "Offers Disabled": "#6b7280", "Disk Limited": "#fb7185",
-  "Disk Free Limited": "#f97316", "Hash Mismatch": "#a855f7", Transcoding: "#f97316", "Not Relevant": "#64748b",
-  Error: "#b91c1c", "Not Reported": "#94a3b8",
+  Fixed: "#10b981", Completed: "#10b981", 
+  Failed: "#ef4444", error: "#b91c1c", "Download Failed": "#dc2626", 
+  Running: "#2563eb", Evaluating: "#06b6d4", Waiting: "#8b5cf6", 
+  "Pending Restart": "#f59e0b", "Pending Client Restart": "#f59e0b",
+  "Pending Message": "#f59e0b", "Pending Login": "#f59e0b", 
+  "Pending Downloads": "#f59e0b", "Pending Offer Acceptance": "#f59e0b", 
+  Cancelled: "#6b7280", Locked: "#6b7280", Constrained: "#6b7280",
+  Postponed: "#6b7280", "Invalid Signature": "#6b7280", "Offers Disabled": "#6b7280", 
+  "Disk Limited": "#fb7185", "Disk Free Limited": "#f97316", "Hash Mismatch": "#a855f7", 
+  "Transcoding Error": "#f97316", "Not Relevant": "#64748b", "Not Reported": "#94a3b8"
 };
 
 const EXTRA = ["#10b981", "#f97316", "#e11d48", "#84cc16", "#14b8a6", "#8b5cf6", "#f43f5e"];
@@ -57,14 +93,36 @@ function classify(raw) {
   const s = String(raw || "").trim();
   if (!s) return "Not Reported";
   const L = s.toLowerCase();
-  if (/^fixed$/i.test(s) || /^completed$/i.test(s) || /executed successfully/i.test(L)) return "Success";
-  if (/^pending restart$/i.test(s) || /waiting for restart/i.test(L)) return "Pending Restart";
-  if (/^running$/i.test(s) || /is currently running/i.test(L)) return "Running";
-  if (/^failed$/i.test(s) || /\baction failed\b/i.test(L)) return "Failed";
+  
+  const exactBucket = BUCKETS.find(b => b.toLowerCase() === L);
+  if (exactBucket) return exactBucket;
+
+  if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
+  if (/^completed$/i.test(s)) return "Completed";
+  if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
   if (/^not reported$/i.test(s)) return "Not Reported";
-  if (/success/i.test(L)) return "Success";
+  
+  if (/waiting for restart/i.test(L) || /pending restart/i.test(L)) return "Pending Restart";
+  if (/pending downloads/i.test(L) || /waiting for downloads/i.test(L)) return "Pending Downloads";
+  if (/pending message/i.test(L) || /waiting for user to respond/i.test(L)) return "Pending Message";
+  if (/pending login/i.test(L) || /waiting for user to log in/i.test(L)) return "Pending Login";
+  if (/pending offer/i.test(L) || /waiting for user to accept/i.test(L)) return "Pending Offer Acceptance";
+  if (/pending client restart/i.test(L) || /waiting for client restart/i.test(L)) return "Pending Client Restart";
+
+  if (/constrained/i.test(L) || /constraint/i.test(L)) return "Constrained";
+  if (/postponed/i.test(L)) return "Postponed";
+  if (/invalid signature/i.test(L)) return "Invalid Signature";
+  if (/not relevant/i.test(L)) return "Not Relevant";
+  if (/offers disabled/i.test(L)) return "Offers Disabled";
+  if (/disk limited/i.test(L)) return "Disk Limited";
+  if (/disk free limited/i.test(L)) return "Disk Free Limited";
+  if (/hash mismatch/i.test(L)) return "Hash Mismatch";
+  if (/transcoding error/i.test(L) || /failed transcoding/i.test(L)) return "Transcoding Error";
+  if (/unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i.test(L)) return "error";
+
   if (/fail|error/i.test(L)) return "Failed";
   if (/wait|pending/i.test(L)) return "Waiting";
+  
   return s; 
 }
 
@@ -107,6 +165,7 @@ function arcPath(cx, cy, r, startDeg, endDeg, innerR = 0) {
   const eiy = cy + innerR * Math.sin(toRad(startDeg));
   return [`M ${sx} ${sy}`, `A ${r} ${r} 0 ${large} 1 ${ex} ${ey}`, `L ${six} ${siy}`, `A ${innerR} ${innerR} 0 ${large} 0 ${eix} ${eiy}`, "Z"].join(" ");
 }
+
 function fullRingPaths(cx, cy, r, innerR) {
   const p1 = arcPath(cx, cy, r, 0, 180, innerR);
   const p2 = arcPath(cx, cy, r, 180, 360, innerR);
@@ -129,7 +188,8 @@ function rowsToCSV(rows) {
   const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [header.join(",")];
   for (const r of rows) {
-    lines.push([r.server, r.patch, fmtTime(r.start), fmtTime(r.end), r.status, r.issuer].map(escape).join(","));
+    const rawStatus = r.status || "Not Reported";
+    lines.push([r.server, r.patch, fmtTime(r.start), fmtTime(r.end), rawStatus, r.issuer].map(escape).join(","));
   }
   return lines.join("\n");
 }
@@ -139,8 +199,12 @@ function rowsToHTML(rows, title = "Results") {
   const head = `<meta charset="utf-8"/><title>${safeTitle}</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:16px;color:#111827}h1{font-size:18px;margin:0 0 12px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #e5e7eb;padding:8px 10px;font-size:14px}thead th{background:#f8fafc;text-align:left}.status-pill { padding: 4px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; display: inline-block; }.status-green { background: #dcfce7; color: #166534; }.status-red { background: #fee2e2; color: #991b1b; }.status-blue { background: #dbeafe; color: #1e40af; }.status-amber { background: #fef3c7; color: #92400e; }</style>`;
   const rowsHtml = (rows || []).map(r => {
     const s = classify(r.status);
-    const cls = s === 'Success' ? 'status-green' : (s === 'Failed' || s === 'Error') ? 'status-red' : (s === 'Running') ? 'status-blue' : 'status-amber';
-    return `<tr><td>${escapeHtml(r.server ?? "—")}</td><td>${escapeHtml(r.patch ?? "—")}</td><td>${escapeHtml(fmtTime(r.start))}</td><td>${escapeHtml(fmtTime(r.end))}</td><td><span class="status-pill ${cls}">${escapeHtml(s)}</span></td><td>${escapeHtml(r.issuer ?? "—")}</td></tr>`;
+    let displayStatus = s;
+    if ((s === 'Waiting' || s === 'error' || s === 'Failed') && r.status && r.status.toLowerCase() !== s.toLowerCase()) {
+        displayStatus = `${s} (${r.status})`;
+    }
+    const cls = (s === 'Fixed' || s === 'Completed') ? 'status-green' : (s === 'Failed' || s === 'error' || s === 'Download Failed') ? 'status-red' : (s === 'Running' || s === 'Evaluating') ? 'status-blue' : 'status-amber';
+    return `<tr><td>${escapeHtml(r.server ?? "—")}</td><td>${escapeHtml(r.patch ?? "—")}</td><td>${escapeHtml(fmtTime(r.start))}</td><td>${escapeHtml(fmtTime(r.end))}</td><td><span class="status-pill ${cls}">${escapeHtml(displayStatus)}</span></td><td>${escapeHtml(r.issuer ?? "—")}</td></tr>`;
   }).join("");
   return `<!doctype html><html><head>${head}</head><body><h1>${safeTitle}</h1><table><thead><tr><th>Server Name</th><th>Patch Name</th><th>Start Time</th><th>End Time</th><th>Status</th><th>Issuer</th></tr></thead><tbody>${rowsHtml || `<tr><td colspan="6">No rows.</td></tr>`}</tbody></table></body></html>`;
 }
@@ -153,9 +217,12 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   const [err, setErr] = useState("");
   const [statusBanner, setStatusBanner] = useState(null);
   const [hoverKey, setHoverKey] = useState(null);
-  const [rows, setRows] = useState([]);
+  
+  const [rows, setRows] = useState([]); 
+  const [uniqueRows, setUniqueRows] = useState([]); 
+  
   const [open, setOpen] = useState(false);
-  const [rowsLoading, setRowsLoading] = useState(false);
+  const [donutFilter, setDonutFilter] = useState(null);
   const refreshAbortRef = useRef(null);
 
   useEffect(() => {
@@ -178,13 +245,31 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
         setStatusBanner(null);
         return;
       }
+      
       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
-      const cm = Array.isArray(res?.rows) && res.rows.length ? countsFromRows(res.rows) : countsFromObj(res);
-      const totalFromCounts = Array.from(cm.values()).reduce((a, b) => a + b, 0);
-      const total = Number(res?.total ?? (Array.isArray(res?.rows) ? res.rows.length : totalFromCounts) ?? 0);
-      const success = Number(res?.success ?? res?.Fixed ?? (cm.has("Success") ? cm.get("Success") : 0)) || 0;
+      
+      const allRows = Array.isArray(res?.rows) ? res.rows : [];
+      setRows(allRows);
+
+      let uRows = [];
+      const map = new Map();
+      for (const r of allRows) {
+          if (r.server && !map.has(r.server)) {
+              map.set(r.server, r);
+          }
+      }
+      uRows = Array.from(map.values());
+      setUniqueRows(uRows);
+
+      const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
+      const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
+      const success = uRows.length > 0 
+          ? uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+          : Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
+      
       setCounts(cm);
       setSummary({ success, total });
+      
       try {
         const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
         const s = String(statusRes?.state || "").toLowerCase();
@@ -204,23 +289,27 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     const ab = new AbortController();
     refreshAbortRef.current = ab;
     refresh(ab.signal);
-    const interval = setInterval(() => { if (!loading) refresh(ab.signal); }, 300000);
+    const interval = setInterval(() => { if (!loading) refresh(ab.signal); }, 30000);
     return () => { ab.abort(); clearInterval(interval); };
   }, [lockedId, refresh]);
 
-  async function openDetails() {
-    if (!lockedId) return;
-    setOpen(true);
-    setRowsLoading(true);
-    try {
-      const res = await getJson(`${API_BASE}/api/actions/${lockedId}/results`);
-      setRows(Array.isArray(res?.rows) ? res.rows : []);
-    } catch {
-      setRows([]);
-    } finally {
-      setRowsLoading(false);
+  const handleContainerClick = (e, statusFilter = null) => {
+    e.stopPropagation();
+    if (onViewDetails) {
+      if (statusFilter) {
+          // Send robust array payload and cache it in sessionStorage just in case parent drops it during routing
+          const payload = [{ logic: "Single", conds: [{ column: "status", operator: "contains", value: statusFilter }] }];
+          sessionStorage.setItem("kpi_pending_filter", JSON.stringify(payload));
+          onViewDetails(lockedId, payload);
+      } else {
+          sessionStorage.removeItem("kpi_pending_filter");
+          onViewDetails(lockedId, []);
+      }
+    } else {
+      setDonutFilter(statusFilter);
+      setOpen(true);
     }
-  }
+  };
 
   const donut = useMemo(() => {
     const entries = BUCKETS.map((b) => [b, counts.get(b) || 0]).filter(([, v]) => v > 0);
@@ -239,12 +328,16 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   }, [counts]);
 
   const center = useMemo(() => {
+    let lbl = "Success";
+    let pt = summary.total > 0 ? Math.round((summary.success / summary.total) * 100) : 0;
+    
     if (hoverKey && counts.has(hoverKey)) {
-      const total = Math.max(1, summary.total);
-      return { pct: Math.round(((counts.get(hoverKey) || 0) / total) * 100), label: hoverKey };
+      lbl = hoverKey;
+      pt = Math.round(((counts.get(hoverKey) || 0) / Math.max(1, summary.total)) * 100);
     }
-    const pct = summary.total > 0 ? Math.round((summary.success / summary.total) * 100) : 0;
-    return { pct, label: "Success" };
+
+    const shortLabel = lbl.length > 10 ? lbl.substring(0, 8) + '..' : lbl;
+    return { pct: pt, label: shortLabel, fullLabel: lbl };
   }, [hoverKey, counts, summary]);
 
   return (
@@ -253,7 +346,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
         <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
           <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "" : ""}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>          </button>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>          
+          </button>
         </div>
         {err ? <div className="sub error">{err}</div> : !lockedId ? <div className="sub">No data</div> : (
           <>
@@ -262,14 +356,15 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                 <span className="pill green fw-600">{`Success: ${summary.success}/${summary.total}`}</span>
                 <span className="muted-text fw-600 text-13">ID: {lockedId}</span>
               </div>
-              <button className="btn outline small" onClick={() => onViewDetails ? onViewDetails(lockedId) : openDetails()}>View Details</button>
+              <button className="btn outline small" onClick={(e) => handleContainerClick(e, null)}>View Details</button>
             </div>
             
             {statusBanner && (<div className={`status-banner ${statusBanner.type}`}>{statusBanner.type === 'running' && <span className="pulse-dot"></span>}{statusBanner.msg}</div>)}
             
-            <div className="donut-wrap">
-              <div className="donut-cell" style={{ display: 'flex', justifyContent: 'center' }}>
-                <svg viewBox="0 0 120 120" role="img" className="donut-svg">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px' }}>
+              
+              <div style={{ width: '160px', height: '200px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={(e) => handleContainerClick(e, null)} style={{ cursor: 'pointer', width: '100%', height: '100%' }}>
                   <g transform="translate(60,60)">
                     {donut.length === 0 ? (
                       fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" /> ))
@@ -283,31 +378,53 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                         const d = arcPath(0, 0, 48, s.start, s.end, 30);
                         const isFull = d === null;
                         
-                        const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: "pointer" };
+                        const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: 'pointer' };
                         
-                        if (isFull) { return ( <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> ); }
-                        return ( <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle} /> );
+                        if (isFull) { return ( <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle} onClick={(e) => handleContainerClick(e, s.key)}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> ); }
+                        return ( <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} onClick={(e) => handleContainerClick(e, s.key)} style={activeStyle} /> );
                       })
                     )}
-                    <text x="0" y="-4" textAnchor="middle" fontSize="12" fontWeight="800" fill="var(--text)">{center.pct}%</text>
-                    <text x="0" y="10" textAnchor="middle" fontSize="7" fill="var(--muted)">{center.label}</text>
+                    <text x="0" y="-2" textAnchor="middle" fontSize="14" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>{center.pct}%</text>
+                    <text x="0" y="12" textAnchor="middle" fontSize="7" fill="var(--muted)" style={{ pointerEvents: 'none' }}>{center.label}</text>
                   </g>
                 </svg>
               </div>
-              <div className="legend-cell" onMouseLeave={() => setHoverKey(null)}>
-                {donut.map(l => ( <div key={l.key} className="legend-row" onMouseEnter={() => setHoverKey(l.key)}> <span className="legend-dot" style={{ background: l.fill }} /> <span className="legend-label">{l.key} ({l.val})</span> </div> ))}
-                {donut.length === 0 && <div className="legend-row"><span className="legend-label">No Data</span></div>}
+
+              <div style={{display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto', paddingRight: '8px' }} className="custom-scrollbar" onMouseLeave={() => setHoverKey(null)}>
+                {donut.length === 0 && <div className="muted-text text-12">No Data</div>}
+                {donut.map(l => (
+                   <div 
+                     key={l.key} 
+                     onClick={(e) => handleContainerClick(e, l.key)} 
+                     onMouseEnter={() => setHoverKey(l.key)} 
+                     style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', opacity: hoverKey && hoverKey !== l.key ? 0.4 : 1, transition: '0.2s' }}
+                     title={DESCRIPTIONS[l.key] || l.key}
+                   >
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: l.fill, flexShrink: 0 }}></span>
+                      <span style={{ fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                         {l.key} ({l.val})
+                      </span>
+                   </div>
+                ))}
               </div>
+
             </div>
           </>
         )}
       </section>
-      {open && <DetailsModal open={open} onClose={() => setOpen(false)} title={detailTitle || `${title} Details`} rows={rows} loading={rowsLoading} />}
+      
+      <DetailsModal 
+        open={open} 
+        onClose={() => { setOpen(false); setDonutFilter(null); }} 
+        title={detailTitle || `${title} Details`} 
+        rows={rows} 
+        initialStatus={donutFilter} 
+      />
     </>
   );
 }
 
-function DetailsModal({ open, onClose, title, rows, loading }) {
+function DetailsModal({ open, onClose, title, rows, initialStatus }) {
   const [sortConfig, setSortConfig] = useState({ key: "status", dir: "asc" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -323,7 +440,20 @@ function DetailsModal({ open, onClose, title, rows, loading }) {
     { value: "status", label: "Status" }
   ];
 
+  // Initialize perfectly matching the calendar's filter parameters
+  useEffect(() => {
+    if (initialStatus && open) {
+        setFilters([{
+            logic: "Single",
+            conds: [{ column: "status", operator: "contains", value: initialStatus }]
+        }]);
+    } else if (open) {
+        setFilters([]);
+    }
+  }, [open, initialStatus]);
+
   useEffect(() => setPage(1), [filters, pageSize]);
+  
   useEffect(() => {
     function onDocClick(e) { if (!showMenu) return; if (btnRef.current && !btnRef.current.contains(e.target)) setShowMenu(false); }
     document.addEventListener("mousedown", onDocClick); return () => document.removeEventListener("mousedown", onDocClick);
@@ -338,12 +468,23 @@ function DetailsModal({ open, onClose, title, rows, loading }) {
       let blockMatch = true;
       let validConds = 0;
 
-      for (let c of b.conds) {
+      for (let c of b?.conds || []) {
         if (!c.value) continue;
         validConds++;
         let condition = true;
         const search = String(c.value).toLowerCase();
-        const field = String(row[c.column] || "").toLowerCase();
+        
+        let field = "";
+        if (c.column === "status") {
+            const shortStatus = classify(row.status);
+            field = shortStatus.toLowerCase();
+            
+            if (c.operator === "contains" && !field.includes(search)) {
+                field = String(row.status || "").toLowerCase();
+            }
+        } else {
+            field = String(row[c.column] || "").toLowerCase();
+        }
 
         if (c.operator === "contains") condition = field.includes(search);
         else if (c.operator === "=") condition = field === search;
@@ -380,7 +521,7 @@ function DetailsModal({ open, onClose, title, rows, loading }) {
   const doExport = (type) => { setShowMenu(false); const safeTitle = (title || "Report").replace(/[^\w.-]+/g, "_"); if (type === 'csv') { const csv = rowsToCSV(sorted); downloadBlob(new Blob([csv], { type: "text/csv" }), `${safeTitle}.csv`); } else if (type === 'html') { const html = rowsToHTML(sorted, title); downloadBlob(new Blob([html], { type: "text/html" }), `${safeTitle}.html`); } else if (type === 'pdf') { const html = rowsToHTML(sorted, title); const blob = new Blob([html], { type: "text/html" }); const url = URL.createObjectURL(blob); const iframe = document.createElement("iframe"); iframe.className = "d-none"; iframe.src = url; iframe.onload = () => { try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch {} setTimeout(() => { URL.revokeObjectURL(url); iframe.remove(); }, 2000); }; document.body.appendChild(iframe); } };
 
   if (!open) return null;
-  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+  const activeFilterCount = filters.reduce((acc, b) => acc + (b?.conds ? b.conds.filter(c => c.value).length : 0), 0);
 
   return (
     <div className="modal show" role="dialog" aria-modal="true" onClick={onClose}>
@@ -395,7 +536,7 @@ function DetailsModal({ open, onClose, title, rows, loading }) {
           
           <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
             <div className="grid-toolbar-left" style={{ fontWeight: 600, color: 'var(--text)' }}>
-              Showing {filtered.length} Servers {activeFilterCount > 0 && <span className="pill blue ml-10">Filtered</span>}
+              Showing {filtered.length} Entries {activeFilterCount > 0 && <span className="pill blue ml-10">Filtered</span>}
             </div>
             <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
               <button className="btn pri" onClick={() => setDrawerOpen(true)}>
@@ -415,16 +556,40 @@ function DetailsModal({ open, onClose, title, rows, loading }) {
           </div>
 
           <div className="tableWrap action-modal-body">
-            {loading ? (<div className="action-modal-loading text-center muted-text">Loading records...</div>) : (
               <table className="action-modal-table">
                 <thead className="kpi-th-sticky">
                   <tr><th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th><th onClick={() => handleSort('patch')} className="cursor-pointer">Patch {getSortIcon('patch')}</th><th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th><th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th><th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th><th className="w-15p">Issuer</th></tr>
                 </thead>
                 <tbody>
-                  {paginated.length === 0 ? (<tr><td colSpan={6} className="text-center p-20">No results found.</td></tr>) : (paginated.map((r, i) => { const shortStatus = classify(r.status); const isSuccess = shortStatus === 'Success'; const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'Error'; const isRunning = shortStatus === 'Running'; return (<tr key={i}><td>{r.server}</td><td>{r.patch}</td><td className="whitespace-nowrap">{fmtTime(r.start)}</td><td className="whitespace-nowrap">{fmtTime(r.end)}</td><td><span className={`status-pill ${isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber'}`} title={r.status}>{shortStatus}</span></td><td>{r.issuer}</td></tr>); }))}
+                  {paginated.length === 0 ? (<tr><td colSpan={6} className="text-center p-20">No results found.</td></tr>) : (paginated.map((r, i) => { 
+                      const shortStatus = classify(r.status); 
+                      
+                      let displayStatus = shortStatus;
+                      if ((shortStatus === 'Waiting' || shortStatus === 'error' || shortStatus === 'Failed') && r.status && r.status.toLowerCase() !== shortStatus.toLowerCase()) {
+                          displayStatus = `${shortStatus} (${r.status})`;
+                      }
+
+                      const isSuccess = shortStatus === 'Fixed' || shortStatus === 'Completed'; 
+                      const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'error'; 
+                      const isRunning = shortStatus === 'Running' || shortStatus === 'Evaluating'; 
+                      
+                      return (
+                          <tr key={i}>
+                              <td>{r.server}</td>
+                              <td>{r.patch}</td>
+                              <td className="whitespace-nowrap">{fmtTime(r.start)}</td>
+                              <td className="whitespace-nowrap">{fmtTime(r.end)}</td>
+                              <td>
+                                  <span className={`status-pill ${isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber'}`} title={DESCRIPTIONS[shortStatus] || r.status}>
+                                      {displayStatus}
+                                  </span>
+                              </td>
+                              <td>{r.issuer}</td>
+                          </tr>
+                      ); 
+                  }))}
                 </tbody>
               </table>
-            )}
           </div>
         </div>
 

@@ -4,7 +4,6 @@ import "./styles/Style.css";
 import DeploymentHistory, { Stage } from "./components/FlowCard.jsx";
 import Environment, { EnvironmentProvider, useEnvironment } from "./components/Environment.jsx";
 import DecisionEngine from "./components/DecisionEngine.jsx";
-import ReportNotification from "./components/ReportNotification.jsx";
 import Configuration from "./components/Configuration.jsx";
 import Login from "./components/auth/Login.jsx";
 
@@ -15,7 +14,6 @@ const PilotEnvironment = lazy(() => import("./components/pilot/PilotEnvironment.
 const PilotSandboxResult = lazy(() => import("./components/pilot/PilotSandboxResult.jsx"));
 const PilotKPI = lazy(() => import("./components/pilot/PilotKPI.jsx"));
 const PilotDecisionEngine = lazy(() => import("./components/pilot/PilotDecisionEngine.jsx"));
-const PilotReports = lazy(() => import("./components/pilot/PilotReports.jsx"));
 const Management = lazy(() => import("./components/Management.jsx"));
 const UserManagement = lazy(() => import("./components/UserManagement.jsx"));
 const BaselineManager = lazy(() => import("./components/BaselineManager.jsx"));
@@ -198,7 +196,6 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
         <div className="stage-cards-row">
           <Environment />
           <DecisionEngine apiBase={apiBase} baseline={env.baseline} group={env.sbxGroup} autoMail={env.autoMail} onDone={handleSandboxDone} disabled={sandboxTriggered} username={username} />
-          <ReportNotification />
         </div>
       )}
 
@@ -211,7 +208,6 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
           </div>
           <div className="stage-cards-row mt-20">
             <PilotDecisionEngine sbxDone={!env.enableSandbox || sandboxTriggered} mode="pilot" autoMail={env.autoMail} readOnly={pilotTriggered} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} />
-            <PilotReports />
           </div>
         </Suspense>
       )}
@@ -230,7 +226,6 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
           </div>
           <div className="stage-cards-row mt-20">
             <PilotDecisionEngine sbxDone={true} pilotDone={true} mode="production" autoMail={env.autoMail} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} role={role} />
-            <PilotReports />
           </div>
         </Suspense>
       )}

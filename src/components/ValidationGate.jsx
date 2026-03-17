@@ -4,15 +4,18 @@ import { useState, useEffect } from "react";
 export default function ValidationGate({ targetGroupName, onValidationChange }) {
   const [status, setStatus] = useState("idle"); 
   const [data, setData] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     setStatus("idle");
     setData(null);
+    setErrorMessage("");
     onValidationChange(false); 
   }, [targetGroupName, onValidationChange]);
 
   const handleValidate = async () => {
     setStatus("checking");
+    setErrorMessage("");
     const API = window.env?.VITE_API_BASE || "http://localhost:5174";
     
     try {
@@ -29,11 +32,13 @@ export default function ValidationGate({ targetGroupName, onValidationChange }) 
         onValidationChange(true); 
       } else {
         setStatus("error");
+        setErrorMessage(json.error || "Validation failed.");
         onValidationChange(false); 
       }
     } catch (e) {
       console.error(e);
       setStatus("error");
+      setErrorMessage(e.message || "Failed to connect to validation server.");
       onValidationChange(false);
     }
   };
@@ -51,17 +56,23 @@ export default function ValidationGate({ targetGroupName, onValidationChange }) 
         )}
         {status === "checking" && <span className="val-gate-pill blue">Checking...</span>}
         {status === "success" && <span className="val-gate-pill green">✓ All {data?.total || 0} Protected</span>}
-        {status === "error" && data?.missing && <span className="val-gate-pill red">⚠ {data.missing.length} Missing</span>}
-        {status === "error" && !data?.missing && <span className="val-gate-pill red">⚠ Error</span>}
+        {status === "error" && data?.missing?.length > 0 && <span className="val-gate-pill red">⚠ {data.missing.length} Missing</span>}
+        {status === "error" && (!data?.missing || data.missing.length === 0) && <span className="val-gate-pill red">⚠ Error</span>}
       </div>
 
-      {status === "error" && data?.missing?.length > 0 && (
+      {status === "error" && (
         <div className="val-gate-error-box">
-          <b>Validation Failed.</b> These servers have no Snapshot or Clone in the last 24h:
-          <ul className="val-gate-ul">
-            {data.missing.map(m => <li key={m}>{m}</li>)}
-            {data.total > (data.protected || 0) + data.missing.length && <li>...and others</li>}
-          </ul>
+          {data?.missing?.length > 0 ? (
+            <>
+              <b>Validation Failed.</b> These servers have no Snapshot or Clone in the last 24h:
+              <ul className="val-gate-ul">
+                {data.missing.map(m => <li key={m}>{m}</li>)}
+                {data.total > (data.protected || 0) + data.missing.length && <li>...and others</li>}
+              </ul>
+            </>
+          ) : (
+             <><b>Validation Error:</b> {errorMessage}</>
+          )}
         </div>
       )}
     </div>

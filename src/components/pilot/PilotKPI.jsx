@@ -229,7 +229,6 @@ function EnhancedModal({ open, onClose, title, rows, loading, error, renderRows,
 }
 
 function MetricTile({ label, value, tone, delay = 0, onClick }) {
-  // We keep animation delay inline as it's dynamic based on props
   return (
     <div className={`kpi kpi-metric-tile ${onClick ? "clickable" : ""}`} onClick={onClick} style={{ animationDelay: `${delay}ms` }}>
       <span className="label fw-800">{label}</span>
@@ -256,13 +255,22 @@ function arcPath(cx, cy, r, startDeg, endDeg, innerR = 0) {
   const eiy = cy + innerR * Math.sin(toRad(startDeg));
   return [`M ${sx} ${sy}`, `A ${r} ${r} 0 ${large} 1 ${ex} ${ey}`, `L ${six} ${siy}`, `A ${innerR} ${innerR} 0 ${large} 0 ${eix} ${eiy}`, "Z"].join(" ");
 }
+
 function fullRingPaths(cx, cy, r, innerR) {
   const p1 = arcPath(cx, cy, r, 0, 180, innerR);
   const p2 = arcPath(cx, cy, r, 180, 360, innerR);
   return [p1, p2];
 }
 
-function DonutChart({ donut, center, hoverKey, setHoverKey }) {
+function DonutChart({ donut, center, hoverKey, setHoverKey, onClickMap }) {
+  const handleSliceClick = (e, key) => {
+      e.stopPropagation();
+      const lowerKey = String(key).toLowerCase();
+      if (lowerKey === 'success' && onClickMap.success) onClickMap.success();
+      else if (lowerKey === 'health' && onClickMap.health) onClickMap.health();
+      else if (lowerKey === 'reboot' && onClickMap.reboot) onClickMap.reboot();
+  };
+
   return (
     <div className="chart">
       <svg viewBox="0 0 120 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pilot distribution">
@@ -284,7 +292,7 @@ function DonutChart({ donut, center, hoverKey, setHoverKey }) {
               
               if (d === null) {
                   return (
-                      <g key={i} transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle}>
+                      <g key={i} transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} onClick={(e) => handleSliceClick(e, s.key)} style={activeStyle}>
                          {fullRingPaths(30, 32, 26, 16).map((path, idx) => (
                              <path key={idx} d={path} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
                          ))}
@@ -292,16 +300,16 @@ function DonutChart({ donut, center, hoverKey, setHoverKey }) {
                   );
               }
               return (
-                <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} style={activeStyle} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} />
+                <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} style={activeStyle} onClick={(e) => handleSliceClick(e, s.key)} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} />
               );
             })
           )}
-          <text x="30" y="29" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text)">{center.pct}%</text>
-          <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)">{center.label}</text>
+          <text x="30" y="29" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text)" style={{ pointerEvents: 'none' }}>{center.pct}%</text>
+          <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)" style={{ pointerEvents: 'none' }}>{center.label}</text>
         </g>
         <g transform="translate(64,10)" fontSize="6">
           {[{ key: "Success", fill: "var(--success)", y: 7 }, { key: "Reboot", fill: "var(--warn)", y: 18 }, { key: "Health", fill: "var(--danger)", y: 30 }].map((l) => (
-            <g key={l.key} transform={`translate(6,${l.y})`} onMouseEnter={() => setHoverKey(l.key)} onMouseLeave={() => setHoverKey(null)} className="cursor-pointer" style={{ opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
+            <g key={l.key} transform={`translate(6,${l.y})`} onClick={(e) => handleSliceClick(e, l.key)} onMouseEnter={() => setHoverKey(l.key)} onMouseLeave={() => setHoverKey(null)} className="cursor-pointer" style={{ opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
               <circle cx="4" cy="4" r="3" fill={l.fill} />
               <text x="12" y="6">{l.key}</text>
             </g>
@@ -365,6 +373,16 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const isEUC = userRole === "EUC";
+
+  // Re-used exact BigFix classifier
+  function classify(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "Not Reported";
+    const L = s.toLowerCase();
+    if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
+    if (/^completed$/i.test(s)) return "Completed";
+    return s;
+  }
 
    useEffect(() => {
     function onSandbox(e) {
@@ -458,8 +476,19 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     try {
       setSuccessLoading(true);
       const res = await getJson(`${API_BASE}/api/actions/${id}/results`);
-      const allRows = Array.isArray(res?.rows) ? res.rows : [];
-      setSuccessRows(allRows.filter((r) => /success/i.test(r?.status || "")));
+      
+      let uniqueRows = [];
+      if (Array.isArray(res?.rows)) {
+          const map = new Map();
+          for (const r of res.rows) {
+              if (r.server && !map.has(r.server)) {
+                  map.set(r.server, r);
+              }
+          }
+          uniqueRows = Array.from(map.values());
+      }
+      
+      setSuccessRows(uniqueRows.filter((r) => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }));
     } catch { setSuccessRows([]); } finally { setSuccessLoading(false); }
   }
 
@@ -565,12 +594,27 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
         let actionId = getPinnedActionId();
         if (actionId) {
           const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
-          const rows = Array.isArray(res?.rows) ? res.rows : [];
-          const success = Number(res?.success ?? rows.filter((r) => /success/i.test(r?.status || "")).length);
-          const total = Number(res?.total ?? rows.length);
+          
+          let uniqueRows = [];
+          if (Array.isArray(res?.rows)) {
+              const map = new Map();
+              for (const r of res.rows) {
+                  if (r.server && !map.has(r.server)) {
+                      map.set(r.server, r);
+                  }
+              }
+              uniqueRows = Array.from(map.values());
+          }
+          
+          const success = uniqueRows.length > 0 
+              ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+              : Number(res?.success ?? 0);
+          
+          const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
           const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+          
           setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
-          const payload = { actionId, success, total, rows };
+          const payload = { actionId, success, total, rows: uniqueRows };
           window.__pilotCache = window.__pilotCache || {};
           window.__pilotCache.sandboxResults = payload;
           window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: payload }));
@@ -623,7 +667,17 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
             <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => onKpiClick ? onKpiClick('reboot') : openRebootModal()} />
           </div>
           <div className="sep"></div>
-          <DonutChart donut={donut} center={center} hoverKey={hoverKey} setHoverKey={setHoverKey} />
+          <DonutChart 
+              donut={donut} 
+              center={center} 
+              hoverKey={hoverKey} 
+              setHoverKey={setHoverKey} 
+              onClickMap={{
+                  success: () => onKpiClick ? onKpiClick('success') : openSuccessModal(),
+                  health: () => onKpiClick ? onKpiClick('health') : openHealthModal(),
+                  reboot: () => onKpiClick ? onKpiClick('reboot') : openRebootModal()
+              }}
+          />
         </div>
       </div>
 
