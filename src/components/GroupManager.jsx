@@ -70,14 +70,28 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
-const FancySelect = ({ label, options, value, onChange, disabled, placeholder, isLoading, multiSelect }) => {
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, isLoading, multiSelect, searchable }) => {
   const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const wrapperRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
-    function handleClickOutside(event) { if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setOpen(false); }
-    document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (open && searchable && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [open, searchable]);
 
   let displayText = placeholder; let isPlaceholder = true;
   if (multiSelect) {
@@ -88,9 +102,22 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
   }
 
   const handleOptionClick = (opt, e) => {
-    if (multiSelect) { e.stopPropagation(); const current = Array.isArray(value) ? value : []; const newSet = new Set(current); if (newSet.has(opt)) newSet.delete(opt); else newSet.add(opt); onChange(Array.from(newSet)); } 
-    else { onChange(opt); setOpen(false); }
+    if (multiSelect) { 
+      e.stopPropagation(); 
+      const current = Array.isArray(value) ? value : []; 
+      const newSet = new Set(current); 
+      if (newSet.has(opt)) newSet.delete(opt); else newSet.add(opt); 
+      onChange(Array.from(newSet)); 
+    } else { 
+      onChange(opt); 
+      setOpen(false); 
+      setSearchTerm("");
+    }
   };
+
+  const filteredOptions = searchable && searchTerm.trim() !== ""
+    ? options.filter(opt => String(opt).toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
 
   return (
     <div className="field flex-1">
@@ -103,15 +130,29 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
         </button>
         {open && (
           <div className="fx-menu">
+            {searchable && (
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2 }}>
+                <input 
+                  ref={searchInputRef}
+                  type="text" 
+                  className="control" 
+                  placeholder="Search..." 
+                  value={searchTerm} 
+                  onChange={e => setSearchTerm(e.target.value)} 
+                  onClick={e => e.stopPropagation()} 
+                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
+                />
+              </div>
+            )}
             <div className="fx-menu-inner">
-              {options.length === 0 ? ( <div className="fx-item fx-empty">No options</div> ) : (
-                options.map((opt) => {
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty">No options</div> ) : (
+                filteredOptions.map((opt) => {
                   const isSelected = multiSelect ? (value || []).includes(opt) : value === opt;
                   return (
                     <div key={opt} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={(e) => handleOptionClick(opt, e)}>
                       {multiSelect && <input type="checkbox" className="custom-checkbox mr-10 no-events" checked={isSelected} readOnly />}
                       <span className="fx-label">{opt}</span>
-                      {!multiSelect && isSelected && <span className="fx-tick">✓</span>}
+                      {!multiSelect && isSelected}
                     </div>
                   );
                 })
@@ -148,7 +189,6 @@ export default function GroupManager({ onClose }) {
   const [fetchingComp, setFetchingComp] = useState(false);
   const [lastUpdated, setLastUpdated] = useState("");
 
-  // Toolbar, Pagination & Sorting State
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -374,8 +414,12 @@ export default function GroupManager({ onClose }) {
         <div className="section overflow-visible">
           <div className="section-head"><span className="title">2. Define Property Criteria</span></div>
           <div className="flex-row items-end p-20 gap-16 wrap">
-            <div className="flex-1 min-w-200"><FancySelect label="Property" options={properties} value={selectedProperty} onChange={setSelectedProperty} placeholder="— Select Property —" isLoading={loadingProps} /></div>
-            <div style={{ flex: 0.7, minWidth: 140 }}><FancySelect label="Comparison" options={operators} value={selectedOperator} onChange={setSelectedOperator} placeholder="Contains" /></div>
+            <div className="flex-1 min-w-200">
+              <FancySelect label="Property" options={properties} value={selectedProperty} onChange={setSelectedProperty} placeholder="— Select Property —" isLoading={loadingProps} searchable={true} />
+            </div>
+            <div style={{ flex: 0.7, minWidth: 140 }}>
+              <FancySelect label="Comparison" options={operators} value={selectedOperator} onChange={setSelectedOperator} placeholder="Contains" />
+            </div>
             <div className="field flex-1 min-w-200">
               <span className="label">Search Text</span>
               <div className="inputwrap">
@@ -385,7 +429,9 @@ export default function GroupManager({ onClose }) {
             <div className="pb-0"><button className="btn outline small" style={{ height: '40px' }} onClick={addCondition}>Add</button></div>
           </div>
           <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
-             <div className="flex-1"><FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} /></div>
+             <div className="flex-1">
+               <FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} searchable={true} />
+             </div>
           </div>
           {conditions.length > 0 && (
             <div className="tableWrap border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
@@ -509,7 +555,7 @@ export default function GroupManager({ onClose }) {
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                   <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
                   <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
                   </select>
               </div>
               <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>

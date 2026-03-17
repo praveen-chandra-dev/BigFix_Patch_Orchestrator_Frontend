@@ -430,12 +430,12 @@ export default function BaselineManager({ onClose }) {
                         </div>
                     )}
                 </div>
-             </div>
+            </div>
           </div>
-          
+
           <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
-            {filteredPatches.length === 0 ? (
-              <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No patches found.</div>
+            {paginatedPatches.length === 0 ? (
+                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No patches found matching criteria.</div>
             ) : (
               <table>
                 <thead className="kpi-th-sticky">
@@ -466,7 +466,7 @@ export default function BaselineManager({ onClose }) {
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                   <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
                   <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
                   </select>
               </div>
               <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>

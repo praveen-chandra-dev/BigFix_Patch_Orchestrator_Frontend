@@ -491,7 +491,7 @@ export default function PatchCalendar({ onClose, userRole }) {
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                         <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
                         <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
                         </select>
                     </div>
                     <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>

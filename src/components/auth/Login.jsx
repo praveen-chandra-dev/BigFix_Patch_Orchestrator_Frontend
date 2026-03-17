@@ -83,7 +83,11 @@ export default function Login({ onSuccess }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ username: u.trim(), password: p, role: 'Admin' }),
         });
-        const j = await r.json().catch(() => ({}));
+        
+        const text = await r.text();
+        let j;
+        try { j = JSON.parse(text); } catch (e) { throw new Error(text || "Setup failed."); }
+        
         if (!r.ok || !j.ok) throw new Error(j.message || "Setup failed.");
 
         setInfo("Admin account created successfully! Please login.");
@@ -95,7 +99,7 @@ export default function Login({ onSuccess }) {
         await performLogin();
       }
     } catch (e2) {
-      setErr(e2.message === "invalid" ? "Invalid username or password." : e2.message || "Error occurred.");
+      setErr(e2.message || "An unexpected error occurred.");
       setBusy(false);
     }
   }
@@ -105,38 +109,52 @@ export default function Login({ onSuccess }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: u.trim(), password: p }),
-      });
-      const j = await r.json().catch(() => ({}));
+    });
       
-      if (j.error === 'role_required') {
-          setNeedsRole(true);
-          setInfo(j.message || "Please select your team role to continue.");
-          setBusy(false);
-          return;
-      }
+    // Safely parse response whether it is JSON or plain text
+    const text = await r.text();
+    let j;
+    try { 
+        j = JSON.parse(text); 
+    } catch (err) { 
+        // If it's not JSON, throw the raw text (e.g. "User doesn't exist")
+        throw new Error(text || "Invalid response from server."); 
+    }
+      
+    if (j.error === 'role_required') {
+        setNeedsRole(true);
+        setInfo(j.message || "Please select your team role to continue.");
+        setBusy(false);
+        return;
+    }
 
-      if (!r.ok || !j.ok) throw new Error(j.error || "server_error");
+    if (!r.ok || !j.ok) {
+        throw new Error(j.message || (j.error === 'invalid' ? "Invalid username or password." : "Login failed. Please verify your credentials."));
+    }
       
-      const userRole = j.role || "Windows";
-      sessionStorage.setItem("user_role", userRole);
-      onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
-      setBusy(false);
+    const userRole = j.role || "Windows";
+    sessionStorage.setItem("user_role", userRole);
+    onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
+    setBusy(false);
   }
 
   async function performLdapRegister() {
-      const r = await fetch(`${API_BASE}/api/auth/ldap-first-login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: u.trim(), password: p, role: selectedRole }),
-      });
-      const j = await r.json().catch(() => ({}));
+    const r = await fetch(`${API_BASE}/api/auth/ldap-first-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u.trim(), password: p, role: selectedRole }),
+    });
+    
+    const text = await r.text();
+    let j;
+    try { j = JSON.parse(text); } catch(e) { throw new Error(text || "Registration failed."); }
       
-      if (!r.ok || !j.ok) throw new Error(j.message || "Registration failed.");
+    if (!r.ok || !j.ok) throw new Error(j.message || "Registration failed.");
 
-      const userRole = j.role;
-      sessionStorage.setItem("user_role", userRole);
-      onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
-      setBusy(false);
+    const userRole = j.role;
+    sessionStorage.setItem("user_role", userRole);
+    onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
+    setBusy(false);
   }
 
   return (
@@ -213,7 +231,24 @@ export default function Login({ onSuccess }) {
              </label>
           )}
 
-          {!!err && <div className="alert error">{err}</div>}
+          {!!err && (
+            <div 
+              className="alert error" 
+              style={{ 
+                color: '#d32f2f', 
+                backgroundColor: '#fdecea', 
+                border: '1px solid #f5c2c7', 
+                padding: '12px', 
+                borderRadius: '4px', 
+                marginBottom: '16px', 
+                fontSize: '13px', 
+                fontWeight: 500 
+              }}
+            >
+              {err}
+            </div>
+          )}
+          
           {!!info && <div className="alert success">{info}</div>}
 
           <button type="submit" className="btn-primary" disabled={busy}>

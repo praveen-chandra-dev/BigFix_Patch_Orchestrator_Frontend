@@ -152,7 +152,7 @@ function Section({ title, children, icon }) {
 export default function Configuration({ onSaved, locked = false }) {
   const { env, setEnv } = useEnvironment();
   const [disk, setDisk] = useState(10);
-  const [lastReportValue, setLastReportValue] = useState(10);
+  const [lastReportValue, setLastReportValue] = useState(1);
   const [lastReportUnit, setLastReportUnit] = useState("days");
   const [requireChg, setRequireChg] = useState(true);
   const [checkService, setCheckService] = useState(false);
@@ -287,7 +287,7 @@ export default function Configuration({ onSaved, locked = false }) {
             <div className="field">
               <label className="label">Last Report Time Threshold</label>
               <div className="input-combo">
-                <div className="env-patch-input"><input type="number" min="0" className="control input-modern" value={lastReportValue} onChange={handleNumChange(setLastReportValue)} onBlur={() => handleBlur(lastReportValue, setLastReportValue, 0, 365)} disabled={locked} /></div>
+                <div className="env-patch-input"><input type="number" min="0" className="control input-modern" placeholder="10" value={lastReportValue} onChange={handleNumChange(setLastReportValue)} onBlur={() => handleBlur(lastReportValue, setLastReportValue, 0, 365)} disabled={locked} /></div>
                 <div style={{ flex: 1.5, minWidth: '140px' }}><select value={lastReportUnit} onChange={(e) => setLastReportUnit(e.target.value)} disabled={locked} className="control"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
               </div>
               <div className="help-text">Max time allowed since last BigFix report.</div>
@@ -329,7 +329,7 @@ export default function Configuration({ onSaved, locked = false }) {
         </Section>
       </div>
       <div className="footer-actions">
-        <button className="btn secondary" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(10); setLastReportUnit("days"); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
+        <button className="btn secondary" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(1); setLastReportUnit("days"); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
         <button className="btn outline small" onClick={save} disabled={busy || locked}>{busy ? "Saving Settings..." : "Save Configuration"}</button>
       </div>
     </section>

@@ -2,6 +2,11 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import FilterDrawer from "./FilterDrawer";
 
+// --- SECURE IN-MEMORY VM CACHE ---
+// Caches INDIVIDUAL VMs instead of whole lists. 
+// If a server is in Group A and Group B, it will instantly load in Group B without another API call!
+const vmResolutionCache = new Map();
+
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
 function getHeaders() {
@@ -136,7 +141,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const [lastUpdated, setLastUpdated] = useState("");
   const [execLastUpdated, setExecLastUpdated] = useState("");
 
-  // Toolbar, Pagination & Sorting State
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -197,7 +201,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const [processing, setProcessing] = useState(false);
   const [executions, setExecutions] = useState([]); 
 
-  // Communicate with Header.jsx
   useEffect(() => { window.dispatchEvent(new CustomEvent('sync:clone_tab', { detail: activeTab })); }, [activeTab]);
   useEffect(() => { 
       const handler = (e) => {
@@ -248,42 +251,93 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
 
   const fetchData = async () => {
     if (mode === "GROUP" && !selectedGroupId) return;
+
     setIsFetching(true); setError("");
     try {
-      let newItems = [];
+      let rawItems = [];
       if (mode === "GROUP") {
         const g = groups.find((x) => x.value === selectedGroupId);
-        if (g) { const res = await getJSON(`/api/groups/${encodeURIComponent(g.label)}/members`); newItems = res.members || []; }
+        if (g) { 
+            const res = await getJSON(`/api/groups/${encodeURIComponent(g.label)}/members`); 
+            rawItems = res.members || []; 
+        }
       } else {
         const res = await getJSON(`/api/groups/metadata/computers?page=1&limit=10000`);
-        if (res.ok) { newItems = res.computers.map(c => ({ ...c, vcId: null, vcStatus: 'pending' })); }
+        rawItems = res.computers || [];
       }
-      setItems(newItems);
+
+      const unresolved = [];
+      const processedItems = rawItems.map(c => {
+          const key = String(c.name || "").toLowerCase();
+          if (vmResolutionCache.has(key)) {
+              // Immediately load from global cache
+              const cached = vmResolutionCache.get(key);
+              return { ...c, vcId: cached.vcId, vcStatus: cached.vcStatus };
+          } else {
+              unresolved.push(c);
+              return { ...c, vcId: null, vcStatus: 'resolving' };
+          }
+      });
+
+      setItems(processedItems);
       setLastUpdated(new Date().toLocaleString());
       setCurrentPage(1);
-      if (newItems.length > 0) resolveBatch(newItems);
+
+      if (unresolved.length > 0) {
+          resolveBatch(unresolved);
+      }
     } catch (e) { setError(e.message); } finally { setIsFetching(false); }
   };
 
   useEffect(() => { setItems([]); setSelectedIds(new Set()); setCurrentPage(1); }, [mode, selectedGroupId]);
   useEffect(() => { fetchData(); }, [mode, selectedGroupId]);
 
-  const resolveBatch = async (batchItems) => {
-      const targets = batchItems.map(m => ({ name: m.name, ips: (m.ips || []).map(ip => String(ip).trim()) }));
-      if (!targets.length) return;
-      setItems(prev => prev.map(i => batchItems.some(b => b.name === i.name) ? { ...i, vcStatus: 'resolving' } : i));
-      try {
-          const look = await postJSON("/api/vcenter/lookup", { targets });
-          const resultMap = new Map();
-          (look.matches || []).forEach(m => { if (m.name && m.id) resultMap.set(m.name, m.id); });
-          setItems(prev => prev.map(i => {
-             if (batchItems.some(b => b.name === i.name)) {
-                 const vcId = resultMap.get(i.name);
-                 return { ...i, vcId: vcId || null, vcStatus: vcId ? 'ready' : 'not_found' };
-             }
-             return i;
-          }));
-      } catch (e) {}
+  const resolveBatch = async (unresolvedItems) => {
+      // Chunk the API requests to prevent "All Servers" from crashing the payload limit
+      const CHUNK_SIZE = 200; 
+      
+      for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
+          const chunk = unresolvedItems.slice(i, i + CHUNK_SIZE);
+          const targets = chunk.map(m => ({ name: m.name, ips: (m.ips || []).map(ip => String(ip).trim()) }));
+          
+          try {
+              const look = await postJSON("/api/vcenter/lookup", { targets });
+              const resultMap = new Map();
+              (look.matches || []).forEach(m => { if (m.name && m.id) resultMap.set(String(m.name).toLowerCase(), m.id); });
+              
+              const chunkUpdates = {};
+              chunk.forEach(c => {
+                  const key = String(c.name || "").toLowerCase();
+                  const vcId = resultMap.get(key);
+                  const status = vcId ? 'ready' : 'not_found';
+                  
+                  // Save to secure memory cache
+                  vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
+                  chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
+              });
+              
+              // Safely update state for this specific chunk
+              setItems(prev => prev.map(item => {
+                  const key = String(item.name || "").toLowerCase();
+                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
+                  return item;
+              }));
+              
+          } catch (e) {
+              console.error("Batch resolve failed", e);
+              const chunkUpdates = {};
+              chunk.forEach(c => {
+                  const key = String(c.name || "").toLowerCase();
+                  vmResolutionCache.set(key, { vcId: null, vcStatus: 'not_found' });
+                  chunkUpdates[key] = { vcId: null, vcStatus: 'not_found' };
+              });
+              setItems(prev => prev.map(item => {
+                  const key = String(item.name || "").toLowerCase();
+                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
+                  return item;
+              }));
+          }
+      }
   };
 
   const applyFilters = (item) => {
@@ -643,7 +697,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                     <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
                     <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                        <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                        <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
                     </select>
                 </div>
                 <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
@@ -806,7 +860,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                   <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
                   <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={execRowsPerPage} onChange={(e) => { setExecRowsPerPage(Number(e.target.value)); setExecCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
+                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
                   </select>
               </div>
               <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>

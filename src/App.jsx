@@ -272,7 +272,20 @@ export default function App() {
     }
   };
   
-  const handleLogout = async () => { try { await postJSON(`${API}/api/auth/logout`, {}); } catch {} setSession(null); sessionStorage.removeItem('BPS_SESSION_ACTIVE'); };
+  const handleLogout = async () => { 
+    try { 
+      // Notify backend to destroy the cookie
+      await postJSON(`${API}/api/auth/logout`, {}); 
+    } catch {} 
+    
+    // Clear ALL local storage and session state
+    setSession(null); 
+    sessionStorage.clear(); 
+    localStorage.clear();
+    
+    // Hard refresh to completely wipe React memory and lingering tab states
+    window.location.href = '/'; 
+  };
 
   useEffect(() => {
     setAuthLoading(true);

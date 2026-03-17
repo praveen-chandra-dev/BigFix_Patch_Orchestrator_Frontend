@@ -118,12 +118,13 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [role, setRole] = useState("Windows"); 
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  
+  const [userType, setUserType] = useState("Local"); 
 
   const [editingId, setEditingId] = useState(null);
   const [editRole, setEditRole] = useState("");
   const [editBusy, setEditBusy] = useState(false);
 
-  // --- Toolbar, Pagination, Sorting & Filtering State ---
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -161,6 +162,11 @@ export default function UserManagement({ onClose, currentUserId }) {
   }, []);
 
   async function fetchUsers() {
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true); setError("");
     try { 
       const data = await apiFetch("/api/auth/users"); 
@@ -171,7 +177,7 @@ export default function UserManagement({ onClose, currentUserId }) {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { fetchUsers(); }, []);
+  useEffect(() => { fetchUsers(); }, [isAdmin]);
 
   async function handleCreateUser(e) {
     e.preventDefault(); setFormError("");
@@ -188,6 +194,32 @@ export default function UserManagement({ onClose, currentUserId }) {
     } catch (e) {
       setFormError(e.message === 'user_exists' ? 'User already exists.' : 'Failed to create user.');
     } finally { setFormBusy(false); }
+  }
+
+  async function handleCreateADUser(e) {
+    e.preventDefault(); 
+    setFormError("");
+    
+    if (!isAdmin) { setFormError("Permission Denied: Only Admins can add AD users."); return; }
+    if (!username) { setFormError("Username is required."); return; }
+    
+    setFormBusy(true);
+    try {
+      const response = await apiFetch("/api/auth/admin/add-user", { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ username, role }) 
+      });
+      
+      await fetchUsers(); 
+      setUsername(""); 
+      setRole("Windows"); 
+      alert(response.message || "AD User added successfully!");
+    } catch (e) {
+      setFormError(e.message === 'user_exists' ? 'User already exists.' : 'Failed to add AD user: ' + e.message);
+    } finally { 
+      setFormBusy(false); 
+    }
   }
 
   async function handleDeleteUser(userId) {
@@ -294,231 +326,263 @@ export default function UserManagement({ onClose, currentUserId }) {
 
   return (
     <div className="mgmtenv">
-      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
-            <h2 className="clickable" style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }} onClick={onClose} title="Go back">User Management</h2>
-            <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
+      {!isAdmin ? (
+        <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <div className="banner error" style={{ display: 'inline-flex', alignItems: 'center', fontSize: '16px', padding: '20px', gap: '12px' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              <strong>Security Violation:</strong> You do not have Administrator privileges to view this page.
+            </div>
+            <div className="mt-20">
+                <button className="btn outline" onClick={onClose}>Close and Go Back</button>
+            </div>
         </div>
-        <div className="right flex-row gap-12 items-center">
-            <div style={{ position: 'relative' }}>
-                <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+      ) : (
+        <>
+          <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+                <h2 className="clickable" style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }} onClick={onClose} title="Go back">User Management</h2>
+                <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
+            </div>
+            <div className="right flex-row gap-12 items-center">
+                <div style={{ position: 'relative' }}>
+                    <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                    </button>
+                    {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
+                </div>
+                <button className="iconbtn" onClick={fetchUsers} title="Refresh Data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                 </button>
-                {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
             </div>
-            <button className="iconbtn" onClick={fetchUsers} title="Refresh Data">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-            </button>
-        </div>
-      </div>
-
-      {error && <div className="banner error">{error}</div>}
-
-      {!isAdmin && (
-        <div className="banner warning admin-warning">Only Admins can create or delete users.</div>
-      )}
-
-      {isAdmin && (
-        <div className="section overflow-visible">
-          <div className="section-head"><span className="title">Create New User</span></div>
-          <form onSubmit={handleCreateUser}>
-            <div className="grid">
-              <div className="field">
-                <div className="meta"><label htmlFor="new_username">Username</label></div>
-                <div className="inputwrap">
-                  <input id="new_username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username" autoComplete="off" />
-                </div>
-              </div>
-              <FancySelect label="Role" options={roleOptions} value={role} onChange={setRole} placeholder="Select Role" />
-              <div className="field">
-                <div className="meta"><label htmlFor="new_password">Password</label></div>
-                <div className="inputwrap">
-                  <input id="new_password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter new password" autoComplete="new-password" />
-                </div>
-              </div>
-              <div className="field">
-                <div className="meta"><label htmlFor="confirm_password">Confirm Password</label></div>
-                <div className="inputwrap">
-                  <input id="confirm_password" type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Confirm new password" autoComplete="new-password" />
-                </div>
-              </div>
-            </div>
-            {formError && <div className="alert error small" style={{ margin: '0 20px 20px' }}>{formError}</div>}
-            <div className="action-bar">
-              <div className="spacer"></div>
-              <button type="submit" className="btn outline small" disabled={formBusy}>
-                {formBusy ? "Creating..." : "Create User"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {activeFilterCount > 0 && (
-          <div className="p-0-20-20" style={{ padding: '0 20px 20px' }}>
-              <div className="active-filter-banner active">
-                <div className="filter-tags">
-                  {filters.map((b, bIdx) => {
-                    const validConds = b.conds.filter(c => c.value);
-                    if (!validConds.length) return null;
-                    return (
-                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
-                        {validConds.map((c, cIdx) => (
-                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
-              </div>
           </div>
-      )}
 
-      <div className="section">
-        <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="title">Existing Users</span>
-          
-          <div style={{ display: 'flex', gap: '12px' }}>
-              <div className="dropdown" ref={colRef}>
-                  <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-                      &nbsp; Columns
-                  </button>
-                  {showColDrop && (
-                      <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                              {cols.map((col, i) => (
-                                  <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
-                                      <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
-                                          const next = [...cols]; next[i].show = e.target.checked; setCols(next);
-                                      }} />
-                                      <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
-                                  </label>
-                              ))}
-                          </div>
+          {error && <div className="banner error">{error}</div>}
+
+          <div className="section overflow-visible">
+            <div className="section-head"><span className="title">Create / Add New User</span></div>
+            
+            <form onSubmit={userType === "Local" ? handleCreateUser : handleCreateADUser}>
+              <div className="grid">
+                
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <div className="meta"><label>User Type</label></div>
+                  <div style={{ display: 'flex', gap: '20px', marginTop: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <input type="radio" name="userType" value="Local" checked={userType === "Local"} onChange={() => { setUserType("Local"); setFormError(""); }} /> 
+                      <span style={{ fontSize: '13px', fontWeight: 500 }}>Local User</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <input type="radio" name="userType" value="AD" checked={userType === "AD"} onChange={() => { setUserType("AD"); setFormError(""); setPassword(""); setConfirmPass(""); }} /> 
+                      <span style={{ fontSize: '13px', fontWeight: 500 }}>AD / LDAP User</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="field">
+                  <div className="meta"><label htmlFor="new_username">Username</label></div>
+                  <div className="inputwrap">
+                    <input id="new_username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={userType === "AD" ? "Enter AD username (e.g. jdoe)" : "Enter username"} autoComplete="off" />
+                  </div>
+                </div>
+                
+                <FancySelect label="Role" options={roleOptions} value={role} onChange={setRole} placeholder="Select Role" />
+                
+                {userType === "Local" && (
+                  <>
+                    <div className="field">
+                      <div className="meta"><label htmlFor="new_password">Password</label></div>
+                      <div className="inputwrap">
+                        <input id="new_password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter new password" autoComplete="new-password" />
                       </div>
-                  )}
-              </div>
-              <div className="dropdown" ref={expRef}>
-                  <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
-                      &nbsp; Export
-                  </button>
-                  {showExpDrop && (
-                      <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
-                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
-                              {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
-                              ))}
-                          </div>
-                          <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
-                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                          <button className="item" onClick={() => handleExport('page')}>Current Page</button>
-                          <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
-                          <button className="item" onClick={() => handleExport('all')}>All Data</button>
+                    </div>
+                    <div className="field">
+                      <div className="meta"><label htmlFor="confirm_password">Confirm Password</label></div>
+                      <div className="inputwrap">
+                        <input id="confirm_password" type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Confirm new password" autoComplete="new-password" />
                       </div>
-                  )}
-              </div>
-          </div>
-        </div>
-
-        <div className="gridusr">
-          {loading ? (
-            <p className="sub mgmt-loading">Loading users...</p>
-          ) : (
-            <>
-              <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
-                {filteredUsers.length === 0 ? (
-                  <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No users found matching filters.</div>
-                ) : (
-                  <table className="user-table">
-                    <thead className="kpi-th-sticky">
-                      <tr>
-                        {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Username{getSortIcon('LoginName')}</th>}
-                        {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortIcon('Role')}</th>}
-                        {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
-                        <th className="text-center w-100">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedUsers.map(user => {
-                        const isEditing = editingId === user.UserID;
-                        const isSelf = user.UserID === currentUserId;
-                        return (
-                         <tr key={user.UserID}>
-                            {cols.find(c=>c.id==='LoginName')?.show && <td>{user.LoginName}{isSelf && <span className="you-pill"> (You)</span>}</td>}
-                            
-                            {cols.find(c=>c.id==='Role')?.show && (
-                              <td className="min-w-140">
-                                {isEditing ? (
-                                  <div style={{width: 140}}>
-                                    <FancySelect options={roleOptions} value={editRole} onChange={setEditRole} placeholder="Select Role" disabled={editBusy} />
-                                  </div>
-                                ) : (
-                                  <span className={`pill ${getPillClass(user.Role)}`}>{user.Role || 'Windows'}</span>
-                                )}
-                              </td>
-                            )}
-
-                            {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(user.CreatedAt)}</td>}
-                            
-                            <td className="text-center">
-                              <div className="action-btns-center">
-                                {isEditing ? (
-                                  <>
-                                    <button className="btn-icon save" title="Save Role" onClick={() => saveRole(user.UserID)} disabled={editBusy}>✓</button>
-                                    <button className="btn-icon cancel" title="Cancel" onClick={cancelEditing} disabled={editBusy}>✕</button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <button className="btn-icon edit" title="Edit Role" onClick={() => startEditing(user)} disabled={!isAdmin}>✎</button>
-                                    <button className="btn-icon delete" title="Delete User" onClick={() => handleDeleteUser(user.UserID)} disabled={isSelf || !isAdmin}>🗑</button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                    </div>
+                  </>
                 )}
               </div>
+              
+              {formError && <div className="alert error small" style={{ margin: '0 20px 20px' }}>{formError}</div>}
+              
+              <div className="action-bar">
+                <div className="spacer"></div>
+                <button type="submit" className="btn outline small" disabled={formBusy}>
+                  {formBusy ? "Processing..." : (userType === "AD" ? "Add AD User" : "Create Local User")}
+                </button>
+              </div>
+            </form>
+          </div>
 
-              {filteredUsers.length > 0 && (
-                <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                        <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
-                        </select>
+          {activeFilterCount > 0 && (
+              <div className="p-0-20-20" style={{ padding: '0 20px 20px' }}>
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {filters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                        {filteredUsers.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredUsers.length)} of {filteredUsers.length}
-                    </span>
-                    <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                        <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
-                        <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
-                        {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
-                        {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                        {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-                        {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-                        <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
-                    </div>
-                </div>
-              )}
-            </>
+                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+                  </div>
+              </div>
           )}
-        </div>
-      </div>
 
-      <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
+          <div className="section">
+            <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="title">Existing Users</span>
+              
+              <div style={{ display: 'flex', gap: '12px' }}>
+                  <div className="dropdown" ref={colRef}>
+                      <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                          &nbsp; Columns
+                      </button>
+                      {showColDrop && (
+                          <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                  {cols.map((col, i) => (
+                                      <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                          <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                              const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                          }} />
+                                          <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                      </label>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+                  </div>
+                  <div className="dropdown" ref={expRef}>
+                      <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                          &nbsp; Export
+                      </button>
+                      {showExpDrop && (
+                          <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                                  {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                    <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                                  ))}
+                              </div>
+                              <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                              <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                              <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                              <button className="item" onClick={() => handleExport('all')}>All Data</button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+            </div>
+
+            <div className="gridusr">
+              {loading ? (
+                <p className="sub mgmt-loading">Loading users...</p>
+              ) : (
+                <>
+                  <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
+                    {filteredUsers.length === 0 ? (
+                      <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No users found matching filters.</div>
+                    ) : (
+                      <table className="user-table">
+                        <thead className="kpi-th-sticky">
+                          <tr>
+                            {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Username{getSortIcon('LoginName')}</th>}
+                            {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortIcon('Role')}</th>}
+                            {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
+                            <th className="text-center w-100">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedUsers.map(user => {
+                            const isEditing = editingId === user.UserID;
+                            const isSelf = user.UserID === currentUserId;
+                            return (
+                             <tr key={user.UserID}>
+                                {cols.find(c=>c.id==='LoginName')?.show && <td>{user.LoginName}{isSelf && <span className="you-pill"> (You)</span>}</td>}
+                                
+                                {cols.find(c=>c.id==='Role')?.show && (
+                                  <td className="min-w-140">
+                                    {isEditing ? (
+                                      <div style={{width: 140}}>
+                                        <FancySelect options={roleOptions} value={editRole} onChange={setEditRole} placeholder="Select Role" disabled={editBusy} />
+                                      </div>
+                                    ) : (
+                                      <span className={`pill ${getPillClass(user.Role)}`}>{user.Role || 'Windows'}</span>
+                                    )}
+                                  </td>
+                                )}
+
+                                {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(user.CreatedAt)}</td>}
+                                
+                                <td className="text-center">
+                                  <div className="action-btns-center">
+                                    {isEditing ? (
+                                      <>
+                                        <button className="btn-icon save" title="Save Role" onClick={() => saveRole(user.UserID)} disabled={editBusy}>✓</button>
+                                        <button className="btn-icon cancel" title="Cancel" onClick={cancelEditing} disabled={editBusy}>✕</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button className="btn-icon edit" title="Edit Role" onClick={() => startEditing(user)} disabled={!isAdmin}>✎</button>
+                                        <button className="btn-icon delete" title="Delete User" onClick={() => handleDeleteUser(user.UserID)} disabled={isSelf || !isAdmin}>🗑</button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  {filteredUsers.length > 0 && (
+                    <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                            <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+                                <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
+                            </select>
+                        </div>
+                        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                            {filteredUsers.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredUsers.length)} of {filteredUsers.length}
+                        </span>
+                        <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                            <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
+                            <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
+                            {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
+                            {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                            {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
+                            {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
+                            <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
+                        </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
+        </>
+      )}
     </div>
   );
 }
