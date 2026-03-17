@@ -113,7 +113,10 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
   }, [currentStage, completedStages, accessibleStages, onFlowUpdate]);
 
   const handleStageChange = useCallback((next) => { if (canGotoStage(next)) { setCurrentStage(next); postStageSignal(next, "active"); } }, [canGotoStage]);
-  const recordAction = (stage, id) => { if(id) setLastActions(p => ({ ...p, [stage]: { id, ts: Date.now() } })); };
+  
+  const recordAction = (stage, id, groupName) => { 
+      if(id) setLastActions(p => ({ ...p, [stage]: { id, group: groupName, ts: Date.now() } })); 
+  };
 
   useEffect(() => {
     const onReq = (e) => handleStageChange(e.detail.stage);
@@ -134,43 +137,41 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
 
   const handleSandboxDone = async (result) => {
     if (!result?.ok) return;
-    if (result?.actionId) recordAction(Stage.SANDBOX, result.actionId);
+    if (result?.actionId) recordAction(Stage.SANDBOX, result.actionId, env.sbxGroup);
     setSandboxTriggered(true); addCompleted(Stage.SANDBOX);
     setCurrentStage(env.enablePilot ? Stage.PILOT : Stage.PRODUCTION);
   };
 
   useEffect(() => {
-    const onPilotTrig = (e) => { if(e?.detail?.actionId) recordAction(Stage.PILOT, e.detail.actionId); setPilotTriggered(true); addCompleted(Stage.PILOT); setCurrentStage(Stage.PRODUCTION); };
-    const onProdTrig = (e) => { if(e?.detail?.actionId) recordAction(Stage.PRODUCTION, e.detail.actionId); addCompleted(Stage.PRODUCTION); addCompleted(Stage.FinalResult); setCurrentStage(Stage.FinalResult); };
+    const onPilotTrig = (e) => { if(e?.detail?.actionId) recordAction(Stage.PILOT, e.detail.actionId, e.detail.group); setPilotTriggered(true); addCompleted(Stage.PILOT); setCurrentStage(Stage.PRODUCTION); };
+    const onProdTrig = (e) => { if(e?.detail?.actionId) recordAction(Stage.PRODUCTION, e.detail.actionId, e.detail.group); addCompleted(Stage.PRODUCTION); addCompleted(Stage.FinalResult); setCurrentStage(Stage.FinalResult); };
     window.addEventListener("pilot:triggered", onPilotTrig); window.addEventListener("production:triggered", onProdTrig);
     return () => { window.removeEventListener("pilot:triggered", onPilotTrig); window.removeEventListener("production:triggered", onProdTrig); };
   }, [addCompleted]);
 
   useEffect(() => {
     const onResetSbx = () => {
-      setSandboxTriggered(false);
-      setPilotTriggered(false);
+      setSandboxTriggered(false); setPilotTriggered(false);
       setCompletedStages(p => p.filter(s => s !== Stage.SANDBOX && s !== Stage.PILOT && s !== Stage.PRODUCTION && s !== Stage.FinalResult));
-      setCurrentStage(Stage.SANDBOX);
-      postStageSignal(Stage.SANDBOX, "active");
+      // ALSO CLEAR UNLOCKED STATES
+      setEnv(p => ({ ...p, pilotEvaluated: false, prodEvaluated: false, pilotUnlocked: false, prodUnlocked: false }));
+      setCurrentStage(Stage.SANDBOX); postStageSignal(Stage.SANDBOX, "active");
     };
 
     const onResetPilot = () => {
       setPilotTriggered(false);
       setCompletedStages(p => p.filter(s => s !== Stage.PILOT && s !== Stage.PRODUCTION && s !== Stage.FinalResult));
-      setCurrentStage(Stage.PILOT);
-      postStageSignal(Stage.PILOT, "active");
+      // ALSO CLEAR UNLOCKED STATES
+      setEnv(p => ({ ...p, prodEvaluated: false, prodUnlocked: false }));
+      setCurrentStage(Stage.PILOT); postStageSignal(Stage.PILOT, "active");
     };
 
     const onResetAll = () => {
-      setSandboxTriggered(false);
-      setPilotTriggered(false);
-      setConfigSaved(false);
-      setConfigLocked(false);
-      setCompletedStages([]);
-      setLastActions({});
-      setCurrentStage(Stage.CONFIG);
-      postStageSignal(Stage.CONFIG, "active");
+      setSandboxTriggered(false); setPilotTriggered(false); setConfigSaved(false); setConfigLocked(false);
+      setCompletedStages([]); setLastActions({});
+      // ALSO CLEAR UNLOCKED STATES
+      setEnv(p => ({ ...p, pilotEvaluated: false, prodEvaluated: false, pilotUnlocked: false, prodUnlocked: false }));
+      setCurrentStage(Stage.CONFIG); postStageSignal(Stage.CONFIG, "active");
     };
 
     window.addEventListener("orchestrator:resetToSandbox", onResetSbx);
@@ -203,7 +204,13 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
         <Suspense fallback={<div className="app-loading-content">Loading Pilot Data...</div>}>
           <div className="stage-cards-row">
             <PilotEnvironment mode="pilot" />
-            {env.enableSandbox && <PilotSandboxResult title="Sandbox Result" actionId={lastActions?.SANDBOX?.id} onViewDetails={() => onNavigate('kpi-details', { type: 'sandbox', id: lastActions?.SANDBOX?.id })} />}
+            {env.enableSandbox && (
+              <PilotSandboxResult 
+                title="Sandbox Result" 
+                actionId={lastActions?.SANDBOX?.id} 
+                onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.SANDBOX?.id, group: lastActions?.SANDBOX?.group })} 
+              />
+            )}
             <PilotKPI title="Pilot KPI" lastActions={lastActions} onKpiClick={(type) => onNavigate('kpi-details', type)} />
           </div>
           <div className="stage-cards-row mt-20">
@@ -217,10 +224,18 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
           <div className="stage-cards-row">
             <PilotEnvironment mode="production" />
             {!isEUC && env.enablePilot && (
-                <PilotSandboxResult title="Pilot Result" actionId={lastActions?.PILOT?.id} onViewDetails={() => onNavigate('kpi-details', { type: 'sandbox', id: lastActions?.PILOT?.id })} />
+                <PilotSandboxResult 
+                  title="Pilot Result" 
+                  actionId={lastActions?.PILOT?.id} 
+                  onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.PILOT?.id, group: lastActions?.PILOT?.group })} 
+                />
             )}
             {!isEUC && !env.enablePilot && env.enableSandbox && (
-                <PilotSandboxResult title="Sandbox Result" actionId={lastActions?.SANDBOX?.id} onViewDetails={() => onNavigate('kpi-details', { type: 'sandbox', id: lastActions?.SANDBOX?.id })} />
+                <PilotSandboxResult 
+                  title="Sandbox Result" 
+                  actionId={lastActions?.SANDBOX?.id} 
+                  onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.SANDBOX?.id, group: lastActions?.SANDBOX?.group })} 
+                />
             )}
             <PilotKPI title="Production KPI" lastActions={lastActions} onKpiClick={(type) => onNavigate('kpi-details', type)} />
           </div>
@@ -233,9 +248,25 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
       {currentStage === Stage.FinalResult && (
         <Suspense fallback={null}>
           <div className="stage-cards-row">
-             {!isEUC && env.enableSandbox && <PilotSandboxResult title="Sandbox Result" actionId={lastActions?.SANDBOX?.id} onViewDetails={() => onNavigate('kpi-details', { type: 'sandbox', id: lastActions?.SANDBOX?.id })} />}
-             {!isEUC && env.enablePilot   && <PilotSandboxResult title="Pilot Result" actionId={lastActions?.PILOT?.id} onViewDetails={() => onNavigate('kpi-details', { type: 'sandbox', id: lastActions?.PILOT?.id })} />}
-             <PilotSandboxResult title="Production Result" actionId={lastActions?.PRODUCTION?.id} onViewDetails={() => onNavigate('kpi-details', { type: 'sandbox', id: lastActions?.PRODUCTION?.id })} />
+             {!isEUC && env.enableSandbox && (
+               <PilotSandboxResult 
+                 title="Sandbox Result" 
+                 actionId={lastActions?.SANDBOX?.id} 
+                 onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.SANDBOX?.id, group: lastActions?.SANDBOX?.group })} 
+               />
+             )}
+             {!isEUC && env.enablePilot && (
+               <PilotSandboxResult 
+                 title="Pilot Result" 
+                 actionId={lastActions?.PILOT?.id} 
+                 onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.PILOT?.id, group: lastActions?.PILOT?.group })} 
+               />
+             )}
+             <PilotSandboxResult 
+               title="Production Result" 
+               actionId={lastActions?.PRODUCTION?.id} 
+               onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.PRODUCTION?.id, group: lastActions?.PRODUCTION?.group })} 
+             />
           </div>
         </Suspense>
       )}
@@ -247,6 +278,7 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('orchestration'); 
   const [riskTab, setRiskTab] = useState('patches');
   const [riskSubTab, setRiskSubTab] = useState('overview');
+  const [kpiTab, setKpiTab] = useState('health'); 
   const [navHistory, setNavHistory] = useState(['orchestration']);
   const [historyIdx, setHistoryIdx] = useState(0);
   const [kpiContext, setKpiContext] = useState(null);
@@ -256,7 +288,11 @@ export default function App() {
   const [flowState, setFlowState] = useState({ current: 'CONFIG', completed: [], accessible: ['CONFIG'] });
 
   const handleNavigate = (route, context = null) => {
-    if (context) setKpiContext(context);
+    setKpiContext(context);
+    if (context && route === 'kpi-details') {
+        const cType = typeof context === 'string' ? context : context.type;
+        if (cType) setKpiTab(cType);
+    }
     const newHistory = navHistory.slice(0, historyIdx + 1);
     newHistory.push(route);
     setNavHistory(newHistory);
@@ -273,17 +309,8 @@ export default function App() {
   };
   
   const handleLogout = async () => { 
-    try { 
-      // Notify backend to destroy the cookie
-      await postJSON(`${API}/api/auth/logout`, {}); 
-    } catch {} 
-    
-    // Clear ALL local storage and session state
-    setSession(null); 
-    sessionStorage.clear(); 
-    localStorage.clear();
-    
-    // Hard refresh to completely wipe React memory and lingering tab states
+    try { await postJSON(`${API}/api/auth/logout`, {}); } catch {} 
+    setSession(null); sessionStorage.clear(); localStorage.clear();
     window.location.href = '/'; 
   };
 
@@ -310,13 +337,18 @@ export default function App() {
       <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", backgroundColor: "var(--bg)" }}>
         <Sidebar 
           activeMenu={activeMenu}
-          onNavigate={handleNavigate}
+          onNavigate={(route) => handleNavigate(route, null)}
           flowState={flowState}
           role={session?.role} 
           riskTab={riskTab}
           setRiskTab={setRiskTab}
           riskSubTab={riskSubTab}
           setRiskSubTab={setRiskSubTab}
+          kpiTab={kpiTab}
+          setKpiTab={(tab) => {
+              setKpiTab(tab);
+              setKpiContext(null); 
+          }}
         />
         
         <div className="main-wrapper">
@@ -349,7 +381,7 @@ export default function App() {
              activeMenu === 'calendar' ? <Suspense fallback={null}><PatchCalendar onClose={()=>handleNavigate('orchestration')} userRole={session?.role} /></Suspense> :
              activeMenu === 'settings' ? <Suspense fallback={null}><Management onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'users' ? <Suspense fallback={null}><UserManagement onClose={()=>handleNavigate('orchestration')} currentUserId={session?.userId}/></Suspense> :
-             activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} /></Suspense> :
+             activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} activeTab={kpiTab} /></Suspense> :
              activeMenu === 'orchestration' ? <Main userId={session?.userId} username={session?.username} role={session?.role} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> : null
             }
           </div>

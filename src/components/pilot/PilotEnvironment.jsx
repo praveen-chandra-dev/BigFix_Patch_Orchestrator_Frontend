@@ -19,6 +19,7 @@ function enhanceNativeSelect(selectEl) {
   
   const wrap = document.createElement("div");
   wrap.className = "fx-wrap";
+  if (selectEl.disabled) wrap.classList.add("disabled");
   selectEl.parentNode.insertBefore(wrap, selectEl);
   wrap.appendChild(selectEl);
   
@@ -29,6 +30,7 @@ function enhanceNativeSelect(selectEl) {
   const trigger = document.createElement("button");
   trigger.type = "button";
   trigger.className = "fx-trigger";
+  trigger.disabled = selectEl.disabled;
   trigger.setAttribute("aria-haspopup", "listbox");
   trigger.setAttribute("aria-expanded", "false");
   trigger.innerHTML = `
@@ -61,7 +63,6 @@ function enhanceNativeSelect(selectEl) {
     menuInner.innerHTML = "";
     const realItems = itemsOnly();
     
-    // Add Search Box
     const searchWrap = document.createElement("div");
     searchWrap.style.padding = "8px";
     searchWrap.style.borderBottom = "1px solid var(--border)";
@@ -98,7 +99,6 @@ function enhanceNativeSelect(selectEl) {
     searchWrap.appendChild(searchInput);
     menuInner.appendChild(searchWrap);
     
-    // Add List Wrap
     const listWrap = document.createElement("div");
     menuInner.appendChild(listWrap);
 
@@ -132,7 +132,6 @@ function enhanceNativeSelect(selectEl) {
 
     visibleItems = [...itemNodes];
 
-    // Search Logic
     searchInput.addEventListener("input", (e) => {
         const term = e.target.value.toLowerCase();
         visibleItems = [];
@@ -148,7 +147,6 @@ function enhanceNativeSelect(selectEl) {
     });
     
     setTimeout(() => searchInput.focus(), 10);
-    
     const currentIndex = visibleItems.findIndex(o => o.classList.contains("fx-active"));
     setHover(currentIndex >= 0 ? currentIndex : 0);
   }
@@ -235,8 +233,16 @@ function enhanceNativeSelect(selectEl) {
       valEl.textContent = displayText;
       valEl.classList.toggle("fx-placeholder", isPlaceholder);
     }
+    
+    if (selectEl.disabled) {
+      wrap.classList.add("disabled");
+      trigger.disabled = true;
+    } else {
+      wrap.classList.remove("disabled");
+      trigger.disabled = false;
+    }
   });
-  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected","value"] });
+  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected", "value", "disabled"] });
 }
 
 function enhanceNativeSelects(root = document) {
@@ -325,6 +331,10 @@ export default function PilotEnvironment({ mode = "pilot" }) {
   const baselineOptions = useMemo(() => baselines.map((x) => <option key={x} value={x}>{x}</option>), [baselines]);
   const groupOptions = useMemo(() => groups.map((x) => <option key={x} value={x}>{x}</option>), [groups]);
   const disabled = loading || (!baselines.length && !groups.length);
+  
+  // --- OVERRIDE UNLOCK FIX ---
+  // If the user chooses to override settings after a failure, this unlocks the inputs.
+  const inputsLocked = !env[`${mode}Unlocked`]; 
 
   return (
     <section className="card reveal mb-0" id="card-env" data-reveal>
@@ -341,7 +351,7 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       <div className={`env-inputs-row ${loading ? 'opacity-60' : ''}`}>
         <div className="field">
           <span className="label">Baseline</span>
-          <select className="control" value={env.baseline} onChange={on("baseline")} disabled={disabled || !baselines.length}>
+          <select className="control" value={env.baseline} onChange={on("baseline")} disabled={disabled || !baselines.length || inputsLocked}>
             {!baselines.length && <option value="">— loading… —</option>}
             {baselines.length > 0 && <option value="">— select baseline —</option>}
             {baselineOptions}
@@ -350,7 +360,12 @@ export default function PilotEnvironment({ mode = "pilot" }) {
 
         <div className="field">
           <span className="label">{inProduction ? "Production Group" : "Pilot Group"}</span>
-          <select className="control" value={inProduction ? env.prodGroup : env.pilotGroup} onChange={on(inProduction ? "prodGroup" : "pilotGroup")} disabled={disabled || !groups.length}>
+          <select 
+            className="control" 
+            value={inProduction ? env.prodGroup : env.pilotGroup} 
+            onChange={on(inProduction ? "prodGroup" : "pilotGroup")} 
+            disabled={disabled || !groups.length || (!env[`${mode}Evaluated`] && inputsLocked)}
+          >
             {!groups.length && <option value="">— loading… —</option>}
             {groups.length > 0 && <option value="">— select group —</option>}
             {groupOptions}
@@ -361,19 +376,19 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       {!isEUC && (
         <div className="row mt-14">
           <div className="field">
-            <div className="label">Success Threshold (%)</div>
-            <input type="number" className="control" min={0} max={100} value={env.successThreshold ?? 90} onChange={handleNumChange("successThreshold")} onBlur={handleBlur("successThreshold", 0, 100)} />
+            <div className="label">Success Threshold (%) {inputsLocked && <span title="Locked during deployment" style={{cursor:'help', opacity:0.6}}>🔒</span>}</div>
+            <input type="number" className={`control ${inputsLocked ? 'disabled' : ''}`} min={0} max={100} value={env.successThreshold ?? 90} onChange={handleNumChange("successThreshold")} onBlur={handleBlur("successThreshold", 0, 100)} disabled={inputsLocked} />
           </div>
           <div className="field">
-            <div className="label">Allowable Critical Health Failures</div>
-            <input type="number" className="control" min={0} value={env.allowableCriticalHF ?? 0} onChange={handleNumChange("allowableCriticalHF")} onBlur={handleBlur("allowableCriticalHF", 0, 999)} />
+            <div className="label">Allowable Critical Health Failures {inputsLocked && <span title="Locked during deployment" style={{cursor:'help', opacity:0.6}}>🔒</span>}</div>
+            <input type="number" className={`control ${inputsLocked ? 'disabled' : ''}`} min={0} value={env.allowableCriticalHF ?? 0} onChange={handleNumChange("allowableCriticalHF")} onBlur={handleBlur("allowableCriticalHF", 0, 999)} disabled={inputsLocked} />
           </div>
           <div className="field flex-15">
             <span className="label">Patch Window (Days / Hours / Mins)</span>
             <div className="env-patch-window-inputs">
-              <input type="number" className="control env-patch-input" title="Days" min={0} value={env.patchWindowDays ?? 0} onChange={handleNumChange("patchWindowDays")} onBlur={handleBlur("patchWindowDays", 0, 999)} disabled={loading} />
-              <input type="number" className="control env-patch-input" title="Hours" min={0} max={23} value={env.patchWindowHours ?? 0} onChange={handleNumChange("patchWindowHours")} onBlur={handleBlur("patchWindowHours", 0, 23)} disabled={loading} />
-              <input type="number" className="control env-patch-input" title="Minutes" min={0} max={59} value={env.patchWindowMinutes ?? 0} onChange={handleNumChange("patchWindowMinutes")} onBlur={handleBlur("patchWindowMinutes", 0, 59)} disabled={loading} />
+              <input type="number" className={`control env-patch-input ${inputsLocked ? 'disabled' : ''}`} title="Days" min={0} value={env.patchWindowDays ?? 0} onChange={handleNumChange("patchWindowDays")} onBlur={handleBlur("patchWindowDays", 0, 999)} disabled={inputsLocked} />
+              <input type="number" className={`control env-patch-input ${inputsLocked ? 'disabled' : ''}`} title="Hours" min={0} max={23} value={env.patchWindowHours ?? 0} onChange={handleNumChange("patchWindowHours")} onBlur={handleBlur("patchWindowHours", 0, 23)} disabled={inputsLocked} />
+              <input type="number" className={`control env-patch-input ${inputsLocked ? 'disabled' : ''}`} title="Minutes" min={0} max={59} value={env.patchWindowMinutes ?? 0} onChange={handleNumChange("patchWindowMinutes")} onBlur={handleBlur("patchWindowMinutes", 0, 59)} disabled={inputsLocked} />
             </div>
           </div>
         </div>

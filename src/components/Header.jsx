@@ -26,6 +26,7 @@ class NavManager {
                 this.current.flowState === state.flowState &&
                 this.current.riskTab === state.riskTab &&
                 this.current.riskSubTab === state.riskSubTab &&
+                this.current.kpiTab === state.kpiTab &&
                 this.current.localSnapTab === state.localSnapTab &&
                 this.current.localCloneTab === state.localCloneTab
             ) return; 
@@ -54,7 +55,7 @@ class NavManager {
 const navMgr = window.__navMgr = window.__navMgr || new NavManager();
 let isRestoring = false;
 
-export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setRiskTab, riskSubTab, setRiskSubTab }) {
+export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setRiskTab, riskSubTab, setRiskSubTab, kpiTab, setKpiTab }) {
   const { env } = useEnvironment();
   const isEUC = role === 'EUC';
 
@@ -65,9 +66,9 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
   // Push to history buffer whenever any sub-tab state changes (if it wasn't triggered by history itself)
   useEffect(() => {
     if (!isRestoring) {
-        navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, localSnapTab, localCloneTab });
+        navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab });
     }
-  }, [activeMenu, flowState?.current, riskTab, riskSubTab, localSnapTab, localCloneTab]);
+  }, [activeMenu, flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab]);
 
   // Handle incoming history restoration signals from Topbar
   useEffect(() => {
@@ -79,6 +80,7 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
         if (state.flowState !== flowState?.current) window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: state.flowState } }));
         if (state.riskTab !== riskTab && setRiskTab) setRiskTab(state.riskTab);
         if (state.riskSubTab !== riskSubTab && setRiskSubTab) setRiskSubTab(state.riskSubTab);
+        if (state.kpiTab !== kpiTab && setKpiTab) setKpiTab(state.kpiTab);
         if (state.localSnapTab !== localSnapTab) window.dispatchEvent(new CustomEvent('nav:snapshot', { detail: state.localSnapTab }));
         if (state.localCloneTab !== localCloneTab) window.dispatchEvent(new CustomEvent('nav:clone', { detail: state.localCloneTab }));
     };
@@ -174,9 +176,21 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
            </div>
         )}
 
-        <a className={`menu-item ${activeMenu === 'kpi-details' ? 'active' : ''}`} onClick={() => onNavigate('kpi-details')}>
+        {/* --- KPI DETAILS NOW HAS SUB-TABS --- */}
+        <a className={`menu-item ${activeMenu === 'kpi-details' ? 'active' : ''}`} onClick={() => { onNavigate('kpi-details'); if(setKpiTab) setKpiTab('health'); }}>
            <IconDashboard /> KPI Details
         </a>
+
+        {activeMenu === 'kpi-details' && (
+           <div className="sidebar-sub-menu">
+               <a className="menu-item sub-item step" style={{ fontWeight: kpiTab === 'health' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { if(setKpiTab) setKpiTab('health'); }}>
+                    Critical Health
+               </a>
+               <a className="menu-item sub-item step" style={{ fontWeight: kpiTab === 'reboot' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { if(setKpiTab) setKpiTab('reboot'); }}>
+                    Pending Reboots
+               </a>
+           </div>
+        )}
 
         <div className="menu-label">Patch Management</div>
         <a className={`menu-item ${activeMenu === 'baseline' ? 'active' : ''}`} onClick={() => onNavigate('baseline')}>

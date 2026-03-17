@@ -40,18 +40,19 @@ async function getActionResults(id, signal) {
   const j = await getJSON(`${API_BASE}/api/actions/${id}/results`, signal);
   return { actionId: id, ...j };
 }
-async function getCriticalHealth(signal) {
-  return getJSON(`${API_BASE}/api/health/critical`, signal);
+async function getCriticalHealth(scopeGroup, signal) {
+  const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
+  return getJSON(`${API_BASE}/api/health/critical${groupQuery}`, signal);
 }
-async function getTotalComputersMaybe(signal) {
+async function getTotalComputersMaybe(scopeGroup, signal) {
   try {
-    const j = await getJSON(`${API_BASE}/api/infra/total-computers`, signal);
+    const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
+    const j = await getJSON(`${API_BASE}/api/infra/total-computers${groupQuery}`, signal);
     if (typeof j?.total === "number") return Number(j.total) || 0;
   } catch {}
   return 0;
 }
 async function getActionMailStatus(id, signal) {
-  // Fallback return if ID is invalid
   if (!id || id === "null" || id === "undefined") return { state: "N/A", mailSent: true };
   try {
     const j = await getJSON(`${API_BASE}/api/actions/${id}/status`, signal);
@@ -76,6 +77,22 @@ const num = (v, d=0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const pick = (o, k, d=undefined) => (o && o[k] !== undefined ? o[k] : d);
 const isSuccess = (s) => /success|fixed|completed|succeeded|complete/i.test(String(s || ""));
 
+function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = false }) {
+  if (!open) return null;
+  return (
+    <div className="modal show" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="box max-w-520" onClick={(e) => e.stopPropagation()}>
+        <h3 className="kpi-modal-title">{title || "Confirm Action"}</h3>
+        <div className="sub kpi-confirm-sub">{children}</div>
+        <div className="flex-row justify-end gap-8 mt-10">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="btn pri" onClick={onConfirm} disabled={busy}>{busy ? "Processing..." : "Confirm"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PilotDecisionEngine({ 
   sbxDone = false, 
   pilotDone = false, 
@@ -87,7 +104,7 @@ export default function PilotDecisionEngine({
   onOpenSnapshot, 
   onOpenClone     
 }) {
-  const { env } = useEnvironment();
+  const { env, setEnv } = useEnvironment();
   const inProduction = String(mode).toLowerCase() === "production";
 
   const [busy, setBusy] = useState(false);
@@ -110,13 +127,12 @@ export default function PilotDecisionEngine({
   const [requireChg, setRequireChg] = useState(true);
   const [chgValidated, setChgValidated] = useState(false);
 
-  // Modal States
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false); // NEW UNLOCK MODAL
   const [baselineWarning, setBaselineWarning] = useState(null);
   const [checkingBaseline, setCheckingBaseline] = useState(false);
   const [prediction, setPrediction] = useState(null);
   
-  // PAGINATION STATE
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 5;
 
@@ -125,23 +141,19 @@ export default function PilotDecisionEngine({
   const [totalComputers, setTotalComputers] = useState(0);
   const [isPrevStageComplete, setIsPrevStageComplete] = useState(false);
 
-  // -- Role Check --
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const isEUC = userRole === "EUC";
 
   const handleValidationChange = useCallback((isValid) => { setValidationReady(isValid); }, []);
 
-  // Ensure Stage toggles fetch reliably from API
   const [localPilotEnabled, setLocalPilotEnabled] = useState(env?.enablePilot !== false && String(env?.enablePilot) !== "false");
   const [localSandboxEnabled, setLocalSandboxEnabled] = useState(env?.enableSandbox !== false && String(env?.enableSandbox) !== "false");
 
-  // Keep synced if environment changes externally
   useEffect(() => {
     if (env?.enablePilot !== undefined) setLocalPilotEnabled(String(env.enablePilot) !== "false");
     if (env?.enableSandbox !== undefined) setLocalSandboxEnabled(String(env.enableSandbox) !== "false");
   }, [env?.enablePilot, env?.enableSandbox]);
 
-  // Robust gate checking based strictly on active toggles
   let isGateSatisfied = false;
   if (inProduction) {
       if (localPilotEnabled) isGateSatisfied = !!pilotDone;
@@ -152,11 +164,9 @@ export default function PilotDecisionEngine({
       else isGateSatisfied = true;
   }
 
-  // Hide reset buttons appropriately
   const showResetToSandbox = !isEUC && localSandboxEnabled;
   const showResetToPilot = !isEUC && localPilotEnabled;
 
-  // Config Polling (fetches live states so we never lock incorrectly)
   useEffect(() => {
     const ctl = new AbortController();
     (async () => { 
@@ -171,7 +181,6 @@ export default function PilotDecisionEngine({
     return () => ctl.abort();
   }, []);
 
-  // AUTO-BYPASS EVALUATION IF ALL PRIOR STAGES WERE DISABLED
   useEffect(() => {
     const skippedPrevForProduction = inProduction && !localPilotEnabled && !localSandboxEnabled;
     const skippedPrevForPilot = !inProduction && !localSandboxEnabled;
@@ -183,15 +192,11 @@ export default function PilotDecisionEngine({
     }
   }, [inProduction, localPilotEnabled, localSandboxEnabled, isGateSatisfied]);
 
-  // CAREFULLY POLL ONLY WHEN THE PREVIOUS ACTION ID IS FULLY LOADED
   useEffect(() => {
     if (!isGateSatisfied || readOnly) { 
-        setIsPrevStageComplete(false); 
-        setEnableEvaluate(false); 
-        return; 
+        setIsPrevStageComplete(false); setEnableEvaluate(false); return; 
     }
 
-    // Determine what the previous action ID should be (If Pilot skipped, checks Sandbox action!)
     let prevActionId;
     if (inProduction) {
       prevActionId = localPilotEnabled ? lastActions?.PILOT?.id : lastActions?.SANDBOX?.id;
@@ -199,51 +204,52 @@ export default function PilotDecisionEngine({
       prevActionId = lastActions?.SANDBOX?.id;
     }
 
-    // If the stage was supposedly skipped, we don't poll. The bypass effect handles it.
     const skippedPrevForProduction = inProduction && !localPilotEnabled && !localSandboxEnabled;
     const skippedPrevForPilot = !inProduction && !localSandboxEnabled;
     if (skippedPrevForProduction || skippedPrevForPilot) return;
 
-    // CRITICAL FIX: Prevent polling if the action ID isn't in state yet!
-    if (!prevActionId) {
-        return; 
-    }
+    if (!prevActionId) return; 
 
-    if (isPrevStageComplete) { 
-        setEnableEvaluate(true); 
-        return; 
-    }
+    if (isPrevStageComplete) { setEnableEvaluate(true); return; }
 
-    let cancelled = false; 
-    let timer;
+    let cancelled = false; let timer;
     async function poll() {
       if (cancelled) return;
       const { mailSent, state } = await getActionMailStatus(prevActionId);
       if (mailSent || String(state).toLowerCase() === "expired") { 
           if (cancelled) return; 
-          setIsPrevStageComplete(true); 
-          setEnableEvaluate(true); 
+          setIsPrevStageComplete(true); setEnableEvaluate(true); 
           if (timer) clearInterval(timer); 
       }
     }
     
-    poll(); 
-    timer = setInterval(poll, 30000); 
+    poll(); timer = setInterval(poll, 30000); 
     return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [inProduction, lastActions, isPrevStageComplete, isGateSatisfied, readOnly, localPilotEnabled, localSandboxEnabled]);
 
   useEffect(() => {
-    const onCounts = (e) => { const d = e.detail || {}; setCounts(c => ({ ...c, reboot: num(d.reboot, counts.reboot), error1603: num(d.error1603, counts.error1603) })); };
-    window.addEventListener("pilot:miscKpisUpdated", onCounts); window.addEventListener("pilot:kpiCountsUpdated", onCounts);
-    return () => { window.removeEventListener("pilot:miscKpisUpdated", onCounts); window.removeEventListener("pilot:kpiCountsUpdated", onCounts); };
-  }, [counts.reboot, counts.error1603]);
+    const onCounts = (e) => { 
+        const d = e.detail || {}; 
+        setCounts(c => ({ ...c, reboot: num(d.reboot, c.reboot), error1603: num(d.error1603, c.error1603) })); 
+    };
+    const onCritical = (e) => {
+        const d = e.detail || {};
+        setCounts(c => ({ ...c, critical: num(d.count, c.critical) }));
+    };
 
-  // RESET PAGE WHEN MODAL OPENS
-  useEffect(() => {
-    if (showConfirmModal) setCurrentPage(1);
-  }, [showConfirmModal]);
+    window.addEventListener("pilot:miscKpisUpdated", onCounts); 
+    window.addEventListener("pilot:kpiCountsUpdated", onCounts);
+    window.addEventListener("pilot:criticalHealthUpdated", onCritical);
+    
+    return () => { 
+        window.removeEventListener("pilot:miscKpisUpdated", onCounts); 
+        window.removeEventListener("pilot:kpiCountsUpdated", onCounts); 
+        window.removeEventListener("pilot:criticalHealthUpdated", onCritical);
+    };
+  }, []);
 
-  // AUTO ENABLE TRIGGER FOR EUC 
+  useEffect(() => { if (showConfirmModal) setCurrentPage(1); }, [showConfirmModal]);
+
   useEffect(() => {
     if (isEUC && isGateSatisfied && isPrevStageComplete) {
        setEnableTriggerPilot(true);
@@ -255,21 +261,26 @@ export default function PilotDecisionEngine({
     if (refreshing) return; setRefreshing(true);
     const ab = new AbortController();
     try {
-      // Dynamically determine the action ID to evaluate
-      let actionId;
+      let actionId, scopeGroup;
       if (inProduction) {
         actionId = localPilotEnabled ? lastActions?.PILOT?.id : lastActions?.SANDBOX?.id;
+        scopeGroup = localPilotEnabled ? lastActions?.PILOT?.group : lastActions?.SANDBOX?.group;
       } else {
         actionId = lastActions?.SANDBOX?.id;
+        scopeGroup = lastActions?.SANDBOX?.group;
       }
 
       if (!actionId) { setEnableEvaluate(false); setDecision("Loading previous stage data..."); return; }
+      
       const results = await getActionResults(actionId, ab.signal);
       const rows = Array.isArray(results?.rows) ? results.rows : [];
       setSandbox({ success: num(pick(results, "success", rows.filter(r => isSuccess(r?.status)).length)), total: num(pick(results, "total", rows.length)), rows });
-      const ch = await getCriticalHealth(ab.signal);
+      
+      const ch = await getCriticalHealth(scopeGroup, ab.signal);
       setCounts(c => ({ ...c, critical: num(ch?.count, 0) }));
-      const tot = await getTotalComputersMaybe(ab.signal); if (tot > 0) setTotalComputers(tot);
+      const tot = await getTotalComputersMaybe(scopeGroup, ab.signal); 
+      if (tot > 0) setTotalComputers(tot);
+      
       setTimeout(() => { window.dispatchEvent(new CustomEvent("pilot:requestKpiCounts")); }, 0);
       setEnableEvaluate(isGateSatisfied && isPrevStageComplete); setEnableTriggerPilot(false); setEvaluated(false); setDecision("Evaluate to see gate status…"); setChgValidated(false);
     } catch (e) { console.error("Refresh KPIs failed:", e); } finally { setRefreshing(false); }
@@ -277,24 +288,42 @@ export default function PilotDecisionEngine({
 
   function evaluateAndDecide() {
     if (!isGateSatisfied || !enableEvaluate || readOnly) return;
-    const threshold = num(env?.successThreshold, 90); const allowableCHF = num(env?.allowableCriticalHF, 0);
+    
+    let threshold = num(env?.successThreshold, 90); 
+    let allowableCHF = num(env?.allowableCriticalHF, 0);
+
     const T = totalComputers > 0 ? totalComputers : Math.max(1, sandbox.total);
     const successPct = sandbox.total > 0 ? Math.round((sandbox.success / sandbox.total) * 100) : 0;
-    const healthPct  = Math.round(((T - (counts.critical || 0)) / T) * 100);
+    
     if (sandbox.total === 0 && (counts.critical === undefined)) { setDecision("FAIL: No data loaded."); setEnableTriggerPilot(false); setEvaluated(true); return; }
-    const okSuccess = successPct >= threshold; const okHealth = (counts.critical || 0) <= allowableCHF;
+    
+    const okSuccess = successPct >= threshold; 
+    const okHealth = (counts.critical || 0) <= allowableCHF;
     setEvaluated(true);
+    
     if (okSuccess && okHealth) {
+      setEnv(p => ({ ...p, [`${mode}Evaluated`]: true }));
       if (requireChg) { setDecision("PASS: Thresholds met. Validate CHG."); setShowChg(true); setChgErr(""); if (!chgNumber) setChgNumber("CHG"); setEnableTriggerPilot(false); } 
-      else { setDecision("PASS: Thresholds met."); setEnableTriggerPilot(true); }
-    } else { setDecision(`FAIL: Thresholds not met.`); setEnableTriggerPilot(false); }
+      else { setDecision("PASS: Thresholds met. Group Dropdown Unlocked."); setEnableTriggerPilot(true); }
+    } else { 
+      setEnv(p => ({ ...p, [`${mode}Evaluated`]: false }));
+      setDecision(`FAIL: Thresholds not met (Success: ${successPct}%, Critical Fails: ${counts.critical}).`); 
+      setEnableTriggerPilot(false); 
+    }
   }
 
-  // --- Trigger Logic ---
   async function submitChg(e) {
     e.preventDefault(); setChgErr(""); const cleaned = (chgUpper || "").trim();
     if (!(/^CHG/.test(cleaned) && cleaned.length > 3)) { setChgErr("Change number must start with CHG."); return; }
-    try { setChgChecking(true); const url = `${API_BASE}/api/sn/change/validate?number=${encodeURIComponent(cleaned)}`; const j = await getJSON(url); if (j.ok !== true || j.implement !== true) { setChgErr(j?.message || "Validation failed."); return; } setChgValidated(true); setShowChg(false); setEnableTriggerPilot(true); setDecision(`CHG validated.`); } catch (err) { setChgErr(err?.message || String(err)); } finally { setChgChecking(false); }
+    try { 
+        setChgChecking(true); 
+        const url = `${API_BASE}/api/sn/change/validate?number=${encodeURIComponent(cleaned)}`; 
+        const j = await getJSON(url); 
+        if (j.ok !== true || j.implement !== true) { setChgErr(j?.message || "Validation failed."); return; } 
+        setChgValidated(true); setShowChg(false); setEnableTriggerPilot(true); 
+        setDecision(`CHG validated. Group Dropdown Unlocked.`); 
+        setEnv(p => ({ ...p, [`${mode}Evaluated`]: true }));
+    } catch (err) { setChgErr(err?.message || String(err)); } finally { setChgChecking(false); }
   }
 
   async function checkBaselineStatus() {
@@ -304,7 +333,6 @@ export default function PilotDecisionEngine({
 
   async function handleTriggerClick() {
     const canProceed = enableTriggerPilot || (isEUC && isGateSatisfied);
-    
     if (!canProceed || busy || readOnly) return;
     if (requireChg && !chgValidated) { setShowChg(true); setChgErr(""); if (!chgNumber) setChgNumber("CHG"); return; }
 
@@ -330,10 +358,12 @@ export default function PilotDecisionEngine({
       const endpoint = inProduction ? (!requireChg ? "/api/production/actions/force" : "/api/production/actions") : (!requireChg ? "/api/pilot/actions/force" : "/api/pilot/actions");
       const payload = { baselineName, groupName, triggeredBy: username, environment: inProduction ? "Production" : "Pilot", autoMail: !!autoMail, patchWindow: { days: env?.patchWindowDays||0, hours: env?.patchWindowHours||0, minutes: env?.patchWindowMinutes||0 } };
       if (requireChg && chgValidated) { payload.chgNumber = chgUpper; payload.requireChg = true; } else { payload.requireChg = false; }
+      
       const trig = await postJSON(`${API_BASE}${endpoint}`, payload);
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
       setEnableTriggerPilot(false); setDecision(`${inProduction ? "Production" : "Pilot"} triggered. Action ${trig?.actionId || "?"}.`);
-      window.dispatchEvent(new CustomEvent(inProduction ? "production:triggered" : "pilot:triggered", { detail: { actionId: trig?.actionId } }));
+      
+      window.dispatchEvent(new CustomEvent(inProduction ? "production:triggered" : "pilot:triggered", { detail: { actionId: trig?.actionId, group: groupName } }));
     } catch (e) { setDecision(`Trigger failed: ${e?.message || e}`); } finally { setBusy(false); }
   }
 
@@ -386,10 +416,15 @@ export default function PilotDecisionEngine({
 
       <div className="row" style={{ gap: 8, flexWrap: "wrap", display: 'flex' }}>
         <button className="btn outline small" onClick={refreshKpis} disabled={refreshing}>{refreshing ? "Refreshing…" : ""}
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>        </button>
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>        </button>
         
         {!isEUC && (
           <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>
+        )}
+        
+        {/* UNLOCK OVERRIDE BUTTON */}
+        {evaluated && !enableTriggerPilot && !chgValidated && !readOnly && !isEUC && (
+           <button className="btn outline amber" onClick={() => setShowUnlockConfirm(true)}>Unlock Settings</button>
         )}
 
         <button 
@@ -401,7 +436,6 @@ export default function PilotDecisionEngine({
           {busy ? "Triggering…" : checkingBaseline ? "AI Analysis..." : (inProduction ? "Trigger Production" : "Trigger Pilot")}
         </button>
 
-        {/* --- EUC Reset Button nicely placed right next to Trigger --- */}
         {isEUC && (
           <button 
               className="btn outline dan" 
@@ -412,7 +446,6 @@ export default function PilotDecisionEngine({
           </button>
         )}
 
-        {/* Conditionally render admin reset buttons so we don't present blocked paths */}
         {!inProduction && showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
         
         {inProduction && (
@@ -422,6 +455,22 @@ export default function PilotDecisionEngine({
           </>
         )}
       </div>
+
+      {showUnlockConfirm && (
+        <ConfirmationModal
+          open={showUnlockConfirm}
+          title="Override Configuration Limits"
+          onClose={() => setShowUnlockConfirm(false)}
+          onConfirm={() => {
+             setEnv(p => ({ ...p, [`${mode}Unlocked`]: true }));
+             setShowUnlockConfirm(false);
+          }}
+        >
+          <p style={{ marginTop: 0 }}>The evaluation failed to meet the configured thresholds.</p>
+          <p style={{ marginTop: '10px' }}>Do you want to forcefully unlock and modify the configuration (Baseline, Group, Thresholds) for this stage?</p>
+          <p className="muted-text text-12" style={{ marginTop: '10px' }}>Note: To completely abandon this deployment and start over, we recommend using the <strong>Reset to Sandbox</strong> button instead.</p>
+        </ConfirmationModal>
+      )}
 
       {showChg && (
         <div className="modal show" role="dialog" aria-modal="true">

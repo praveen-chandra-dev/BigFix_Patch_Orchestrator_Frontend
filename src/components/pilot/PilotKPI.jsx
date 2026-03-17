@@ -338,6 +338,7 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
 
 export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiClick }) {
   const mode = /production/i.test(title) ? "production" : "pilot";
+  
   const getPinnedActionId = useCallback(() => {
     try {
       const la = lastActions || {};
@@ -346,6 +347,14 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     } catch {
       return null;
     }
+  }, [lastActions, mode]);
+
+  const scopeGroup = useMemo(() => {
+    try {
+      const la = lastActions || {};
+      if (mode === "production") return la?.PILOT?.group ?? la?.SANDBOX?.group ?? null;
+      return la?.SANDBOX?.group ?? null;
+    } catch { return null; }
   }, [lastActions, mode]);
 
   const [kpi, setKpi] = useState({ rebootPending: 0, critHealthFails: 0, successRate: 0, successCount: 0, totalCount: 0 });
@@ -374,7 +383,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const isEUC = userRole === "EUC";
 
-  // Re-used exact BigFix classifier
   function classify(raw) {
     const s = String(raw || "").trim();
     if (!s) return "Not Reported";
@@ -402,17 +410,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     window.addEventListener("pilot:sandboxResultsUpdated", onSandbox);
     window.addEventListener("pilot:criticalHealthUpdated", onHealth);
     window.addEventListener("pilot:totalsUpdated", onTotals);
-
-    if (window.__pilotCache?.sandboxResults) onSandbox({ detail: window.__pilotCache.sandboxResults });
-    if (window.__pilotCache?.criticalHealth) onHealth({ detail: window.__pilotCache.criticalHealth });
-    if (window.__pilotCache?.totals?.computers) setTotalComputers(Number(window.__pilotCache.totals.computers) || 0);
-
-    (async () => {
-      try {
-        const data = await getJson(`${API_BASE}/api/infra/total-computers`);
-        if (typeof data?.total === "number") setTotalComputers(Number(data.total) || 0);
-      } catch {}
-    })();
 
     return () => {
       window.removeEventListener("pilot:sandboxResultsUpdated", onSandbox);
@@ -469,6 +466,17 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     return { pct: pctFor(key), label: key.toLowerCase() };
   }, [hoverKey, kpi.successRate, kpi.rebootPending, kpi.critHealthFails, kpi.successCount, kpi.totalCount]);
 
+  // --- FIX: Pass the group into the KpiDetails component route ---
+  const handleKpiClick = (type) => {
+      if (onKpiClick) {
+          onKpiClick({ type, group: scopeGroup, id: getPinnedActionId() });
+      } else {
+          if (type === 'success') openSuccessModal();
+          else if (type === 'health') openHealthModal();
+          else if (type === 'reboot') openRebootModal();
+      }
+  };
+
   async function openSuccessModal() {
     setOpenSuccess(true);
     const id = getPinnedActionId();
@@ -476,64 +484,54 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     try {
       setSuccessLoading(true);
       const res = await getJson(`${API_BASE}/api/actions/${id}/results`);
-      
       let uniqueRows = [];
       if (Array.isArray(res?.rows)) {
           const map = new Map();
           for (const r of res.rows) {
-              if (r.server && !map.has(r.server)) {
-                  map.set(r.server, r);
-              }
+              if (r.server && !map.has(r.server)) { map.set(r.server, r); }
           }
           uniqueRows = Array.from(map.values());
       }
-      
       setSuccessRows(uniqueRows.filter((r) => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }));
     } catch { setSuccessRows([]); } finally { setSuccessLoading(false); }
   }
 
   async function openHealthModal() {
-    setOpenHealth(true);
-    setGlobalError("");
+    setOpenHealth(true); setGlobalError("");
     try {
       setHealthLoading(true);
-      const data = await getJson(`${API_BASE}/api/health/critical`);
+      const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
+      const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
       setHealthRows(Array.isArray(data?.rows) ? data.rows : []);
     } catch { setHealthRows([]); } finally { setHealthLoading(false); }
   }
 
   async function openRebootModal() {
-    setOpenReboot(true);
-    setGlobalError("");
-    setSelectedReboots(new Set()); 
+    setOpenReboot(true); setGlobalError(""); setSelectedReboots(new Set()); 
     try {
       setRebootLoading(true);
-      const data = await getJson(`${API_BASE}/api/health/reboot-pending`);
+      const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
+      const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
       setRebootRows(Array.isArray(data?.rows) ? data.rows : []);
     } catch { setRebootRows([]); } finally { setRebootLoading(false); }
   }
 
   const toggleRebootSelection = (serverName) => {
     const next = new Set(selectedReboots);
-    if (next.has(serverName)) next.delete(serverName);
-    else next.add(serverName);
+    if (next.has(serverName)) next.delete(serverName); else next.add(serverName);
     setSelectedReboots(next);
   };
 
   const toggleAllReboots = () => {
-    if (selectedReboots.size === rebootRows.length) {
-      setSelectedReboots(new Set());
-    } else {
-      setSelectedReboots(new Set(rebootRows.map(r => r.server)));
-    }
+    if (selectedReboots.size === rebootRows.length) setSelectedReboots(new Set());
+    else setSelectedReboots(new Set(rebootRows.map(r => r.server)));
   };
 
   async function executeRestart() {
     const serverName = confirmRestart;
     if (!serverName) return;
     setActionStatus((p) => ({ ...p, [serverName]: "loading" }));
-    setConfirmRestart(null);
-    setGlobalError("");
+    setConfirmRestart(null); setGlobalError("");
     try {
       const result = await postJSON(`${API_BASE}/api/actions/restart`, { computerName: serverName });
       setActionStatus((p) => ({ ...p, [serverName]: "success", [`__id_${serverName}`]: result.actionId }));
@@ -546,23 +544,15 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   async function executeBulkRestart() {
     if (selectedReboots.size === 0) return;
-    setBulkRebootStatus("Triggering...");
-    setConfirmBulkReboot(false);
-    
+    setBulkRebootStatus("Triggering..."); setConfirmBulkReboot(false);
     try {
       const names = Array.from(selectedReboots);
       const result = await postJSON(`${API_BASE}/api/actions/restart-bulk`, { computerNames: names });
-      
       const newStatus = { ...actionStatus };
-      names.forEach(name => {
-          newStatus[name] = "success";
-          newStatus[`__id_${name}`] = result.actionId;
-      });
+      names.forEach(name => { newStatus[name] = "success"; newStatus[`__id_${name}`] = result.actionId; });
       setActionStatus(newStatus);
-      
       setBulkRebootStatus(`Success! Action ID: ${result.actionId}`);
       setSelectedReboots(new Set()); 
-      
     } catch (e) {
       setBulkRebootStatus("Failed.");
       setGlobalError(`Bulk restart failed: ${e.message}`);
@@ -574,8 +564,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     if (!serverName) return;
     const key = `svc_${serverName}`;
     setActionStatus((p) => ({ ...p, [key]: "loading" }));
-    setConfirmService(null);
-    setGlobalError("");
+    setConfirmService(null); setGlobalError("");
     try {
       const result = await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: serverName });
       setActionStatus((p) => ({ ...p, [key]: "success", [`__id_${key}`]: result.actionId }));
@@ -587,25 +576,20 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
   }
 
   useEffect(() => {
-    let timer;
-    const ab = new AbortController();
+    let timer; const ab = new AbortController();
     async function tick() {
       try {
         let actionId = getPinnedActionId();
+        const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
+
         if (actionId) {
           const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
-          
           let uniqueRows = [];
           if (Array.isArray(res?.rows)) {
               const map = new Map();
-              for (const r of res.rows) {
-                  if (r.server && !map.has(r.server)) {
-                      map.set(r.server, r);
-                  }
-              }
+              for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
               uniqueRows = Array.from(map.values());
           }
-          
           const success = uniqueRows.length > 0 
               ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
               : Number(res?.success ?? 0);
@@ -615,30 +599,27 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
           
           setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
           const payload = { actionId, success, total, rows: uniqueRows };
-          window.__pilotCache = window.__pilotCache || {};
-          window.__pilotCache.sandboxResults = payload;
           window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: payload }));
         } else {
           setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
           window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: { actionId: null, success: 0, total: 0, rows: [] } }));
         }
 
-        const ch = await getJson(`${API_BASE}/api/health/critical`, ab.signal);
+        const ch = await getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal);
         const healthPayload = { count: Number(ch?.count || 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
         setKpi((p) => ({ ...p, critHealthFails: healthPayload.count }));
         window.dispatchEvent(new CustomEvent("pilot:criticalHealthUpdated", { detail: healthPayload }));
 
         try {
-          const rp = await getJson(`${API_BASE}/api/health/reboot-pending`, ab.signal);
+          const rp = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal);
           const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
           const rpCount = Number(rp?.count ?? (rpRows.length || 0));
           setKpi((p) => ({ ...p, rebootPending: rpCount }));
           setRebootRows(rpRows);
-          window.dispatchEvent(new CustomEvent("pilot:rebootPendingUpdated", { detail: { count: rpCount, rows: rpRows } }));
         } catch (e) {}
 
         try {
-          const tot = await getJson(`${API_BASE}/api/infra/total-computers`, ab.signal);
+          const tot = await getJson(`${API_BASE}/api/infra/total-computers${groupQuery}`, ab.signal);
           if (typeof tot?.total === "number") {
             setTotalComputers(Number(tot.total) || 0);
             window.dispatchEvent(new CustomEvent("pilot:totalsUpdated", { detail: { totalComputers: Number(tot.total) || 0 } }));
@@ -649,10 +630,9 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
         if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
       }
     }
-    tick();
-    timer = setInterval(tick, 10000);
+    tick(); timer = setInterval(tick, 10000);
     return () => { clearInterval(timer); ab.abort(); };
-  }, [mode, getPinnedActionId]);
+  }, [mode, getPinnedActionId, scopeGroup]);
 
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
@@ -661,26 +641,20 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
         <div className="flex-1 min-w-220">
           <div className="kpis kpi-row-wrap">
             {!isEUC && (
-              <MetricTile label="Success Rate" value={`${kpi.successRate}%`} tone={toneForSuccess(kpi.successRate)} onClick={() => onKpiClick ? onKpiClick('success') : openSuccessModal()} />
+              <MetricTile label="Success Rate" value={`${kpi.successRate}%`} tone={toneForSuccess(kpi.successRate)} onClick={() => handleKpiClick('success')} />
             )}
-            <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => onKpiClick ? onKpiClick('health') : openHealthModal()} />
-            <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => onKpiClick ? onKpiClick('reboot') : openRebootModal()} />
+            <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => handleKpiClick('health')} />
+            <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => handleKpiClick('reboot')} />
           </div>
           <div className="sep"></div>
           <DonutChart 
-              donut={donut} 
-              center={center} 
-              hoverKey={hoverKey} 
-              setHoverKey={setHoverKey} 
-              onClickMap={{
-                  success: () => onKpiClick ? onKpiClick('success') : openSuccessModal(),
-                  health: () => onKpiClick ? onKpiClick('health') : openHealthModal(),
-                  reboot: () => onKpiClick ? onKpiClick('reboot') : openRebootModal()
-              }}
+              donut={donut} center={center} hoverKey={hoverKey} setHoverKey={setHoverKey} 
+              onClickMap={{ success: () => handleKpiClick('success'), health: () => handleKpiClick('health'), reboot: () => handleKpiClick('reboot') }}
           />
         </div>
       </div>
 
+      {/* MODALS RETAINED FOR WHEN THEY ARE USED INSTEAD OF THE ROUTED PAGE */}
       <EnhancedModal 
         open={openSuccess} onClose={() => setOpenSuccess(false)} title={`${title.replace("KPI", "Success Details")}`} 
         rows={successRows} loading={successLoading} 

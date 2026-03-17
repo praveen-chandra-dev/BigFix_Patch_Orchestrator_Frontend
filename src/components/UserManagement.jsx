@@ -91,7 +91,7 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder })
                 {options.map((opt) => (
                   <div key={opt} className={`fx-item ${opt === value ? "fx-active" : ""}`} onClick={() => { onChange(opt); setOpen(false); }}>
                     <span className="fx-label">{opt}</span>
-                    {opt === value && <span className="fx-tick">✓</span>}
+                    {opt === value }
                   </div>
                 ))}
               </div>

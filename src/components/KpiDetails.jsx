@@ -1,9 +1,10 @@
 // src/components/KpiDetails.jsx
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import FilterDrawer from "./FilterDrawer";
 
 const API_BASE = window.env?.VITE_API_BASE || "http://localhost:5174";
 
+/* ------------------------------- helpers ------------------------------- */
 function getHeaders() {
   return {
     "Content-Type": "application/json",
@@ -18,102 +19,19 @@ async function getJson(url, signal) {
   const r = await fetch(url, { headers, cache: "no-store", signal });
   const t = await r.text();
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${t.slice(0, 400)}`);
-  try { return JSON.parse(t); } catch { throw new Error(`Unexpected: ${t.slice(0, 400)}`); }
+  try { return JSON.parse(t); } catch { throw new Error(`Unexpected (not JSON): ${t.slice(0, 400)}`); }
 }
 
 async function postJSON(url, body) {
-  const r = await fetch(url, { method: "POST", headers: getHeaders(), body: JSON.stringify(body) });
+  const r = await fetch(url, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify(body),
+  });
   const t = await r.text();
   let j; try { j = JSON.parse(t); } catch { throw new Error(`Unexpected response: ${t.slice(0, 400)}`); }
   if (!r.ok || j?.ok === false) throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
   return j;
-}
-
-const fmtTime = (s) => {
-  if (!s || s === "N/A") return "—";
-  const m = s.match(/\b(\d{2}:\d{2}:\d{2})\b/);
-  return m ? m[1] : s;
-};
-
-// Ensure classification logic perfectly matches PilotSandboxResult
-const BUCKETS = [
-  "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
-  "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login", 
-  "Pending Offer Acceptance", "Failed", "error", "Download Failed", "Cancelled", 
-  "Locked", "Constrained", "Postponed", "Invalid Signature", "Offers Disabled", 
-  "Disk Limited", "Disk Free Limited", "Hash Mismatch", "Transcoding Error", 
-  "Not Relevant", "Not Reported"
-];
-
-function classify(raw) {
-  const s = String(raw || "").trim();
-  if (!s) return "Not Reported";
-  const L = s.toLowerCase();
-  
-  const exactBucket = BUCKETS.find(b => b.toLowerCase() === L);
-  if (exactBucket) return exactBucket;
-
-  if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
-  if (/^completed$/i.test(s)) return "Completed";
-  if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
-  if (/^not reported$/i.test(s)) return "Not Reported";
-  
-  if (/waiting for restart/i.test(L) || /pending restart/i.test(L)) return "Pending Restart";
-  if (/pending downloads/i.test(L) || /waiting for downloads/i.test(L)) return "Pending Downloads";
-  if (/pending message/i.test(L) || /waiting for user to respond/i.test(L)) return "Pending Message";
-  if (/pending login/i.test(L) || /waiting for user to log in/i.test(L)) return "Pending Login";
-  if (/pending offer/i.test(L) || /waiting for user to accept/i.test(L)) return "Pending Offer Acceptance";
-  if (/pending client restart/i.test(L) || /waiting for client restart/i.test(L)) return "Pending Client Restart";
-
-  if (/constrained/i.test(L) || /constraint/i.test(L)) return "Constrained";
-  if (/postponed/i.test(L)) return "Postponed";
-  if (/invalid signature/i.test(L)) return "Invalid Signature";
-  if (/not relevant/i.test(L)) return "Not Relevant";
-  if (/offers disabled/i.test(L)) return "Offers Disabled";
-  if (/disk limited/i.test(L)) return "Disk Limited";
-  if (/disk free limited/i.test(L)) return "Disk Free Limited";
-  if (/hash mismatch/i.test(L)) return "Hash Mismatch";
-  if (/transcoding error/i.test(L) || /failed transcoding/i.test(L)) return "Transcoding Error";
-  if (/unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i.test(L)) return "error";
-
-  if (/fail|error/i.test(L)) return "Failed";
-  if (/wait|pending/i.test(L)) return "Waiting";
-  
-  return s; 
-}
-
-function evaluateCondition(f, operator, s, colId) {
-    if (!s) return true;
-    const dateFields = ['date', 'month', 'CreatedAt', 'lastReportTime', 'issued', 'stopped', 'start', 'end', 'createdAt'];
-    if (dateFields.includes(colId) || (!isNaN(Date.parse(f)) && isNaN(f))) {
-        const dateF = new Date(f).getTime(); const dateS = new Date(s).getTime();
-        if (!isNaN(dateF) && !isNaN(dateS)) {
-            if (operator === "=") return new Date(f).toDateString() === new Date(s).toDateString();
-            if (operator === "!=") return new Date(f).toDateString() !== new Date(s).toDateString();
-            if (operator === ">") return dateF > dateS;
-            if (operator === "<") return dateF < dateS;
-            if (operator === ">=") return dateF >= dateS;
-            if (operator === "<=") return dateF <= dateS;
-        }
-    }
-    const numF = Number(f); const numS = Number(s);
-    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
-        if (operator === "=") return numF === numS;
-        if (operator === "!=") return numF !== numS;
-        if (operator === ">") return numF > numS;
-        if (operator === "<") return numF < numS;
-        if (operator === ">=") return numF >= numS;
-        if (operator === "<=") return numF <= numS;
-    }
-    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
-    if (operator === "contains") return strF.includes(strS);
-    if (operator === "=") return strF === strS;
-    if (operator === "!=") return strF !== strS;
-    if (operator === ">") return strF > strS;
-    if (operator === "<") return strF < strS;
-    if (operator === ">=") return strF >= strS;
-    if (operator === "<=") return strF <= strS;
-    return true;
 }
 
 function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
@@ -164,21 +82,15 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
-const NoDataSVG = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', padding: '60px 0' }}>
-      <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text)', fontFamily: '"HCL BOOMER", sans-serif' }}>No Data Available</div>
-    </div>
-);
-
-function ConfirmationModal({ open, title, children, onClose, onConfirm, busy }) {
+function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = false }) {
   if (!open) return null;
   return (
-    <div className="modal show" role="dialog" aria-modal="true" onClick={onClose} style={{ zIndex: 9999 }}>
+    <div className="modal show" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="box max-w-520" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "var(--text)" }}>{title}</h3>
-        <div className="sub" style={{ marginBottom: "24px", fontSize: "14px", color: "var(--muted)", lineHeight: 1.5 }}>{children}</div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-          <button type="button" className="btn outline" onClick={onClose} disabled={busy}>Cancel</button>
+        <h3 className="kpi-modal-title">{title || "Confirm Action"}</h3>
+        <div className="sub kpi-confirm-sub">{children}</div>
+        <div className="flex-row justify-end gap-8 mt-10">
+          <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="button" className="btn pri" onClick={onConfirm} disabled={busy}>{busy ? "Processing..." : "Confirm"}</button>
         </div>
       </div>
@@ -186,41 +98,79 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy }) 
   );
 }
 
-export default function KpiDetails({ context, onBack }) {
+// Ensure activeTab is accepted as a prop!
+export default function KpiDetails({ context, activeTab }) {
+  
+  // --- SECURE CONTEXT PARSING ---
+  // If context explicitly defines a type (because of a click in PilotKPI), it takes priority!
+  const type = (typeof context === 'object' ? context?.type : (typeof context === 'string' ? context : null)) || activeTab || 'health';
+  
+  // Scope is ONLY passed if navigating from Pilot/Prod. Otherwise, it queries ALL servers.
+  const groupName = context?.group || '';
+  const actionId = context?.id || null;
+
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState("");
   const [error, setError] = useState("");
-  const [sysConfig, setSysConfig] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState("");
+
+  const [selectedReboots, setSelectedReboots] = useState(new Set());
+  const [selectedHealth, setSelectedHealth] = useState(new Set());
   
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [sortConfig, setSortConfig] = useState({ key: null, dir: "asc" });
+  const [actionStatus, setActionStatus] = useState({});
+  const [confirmRestart, setConfirmRestart] = useState(null);
+  const [confirmService, setConfirmService] = useState(null);
+  
+  const [confirmBulkReboot, setConfirmBulkReboot] = useState(false);
+  const [bulkRebootStatus, setBulkRebootStatus] = useState("");
+  
+  const [confirmBulkService, setConfirmBulkService] = useState(false);
+  const [bulkServiceStatus, setBulkServiceStatus] = useState("");
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
   const [exportFormat, setExportFormat] = useState('CSV');
-
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
 
-  const [actionStatus, setActionStatus] = useState({});
-  const [confirmRestart, setConfirmRestart] = useState(null);
-  const [confirmService, setConfirmService] = useState(null);
-  const [confirmBulkReboot, setConfirmBulkReboot] = useState(false);
-  const [selectedReboots, setSelectedReboots] = useState(new Set());
-  const [bulkRebootStatus, setBulkRebootStatus] = useState("");
+  const colRef = useRef(null);
+  const expRef = useRef(null);
 
-  const colRef = useRef(null); const expRef = useRef(null);
+  const userRole = sessionStorage.getItem("user_role") || "Admin";
+  const showService = userRole !== "Linux";
 
-  const [cols, setCols] = useState([
-    { id: 'server', label: 'Server Name', show: true }, { id: 'status', label: 'Status', show: true },
-    { id: 'issue', label: 'Issue', show: true }, { id: 'serviceStatus', label: 'Service Status', show: true },
-    { id: 'lastReportTime', label: 'Last Report', show: true }, { id: 'ip', label: 'IP Address', show: true },
-    { id: 'uptime', label: 'UpTime', show: true }, { id: 'besRelay', label: 'BES Relay', show: true },
-    { id: 'patch', label: 'Patch Name', show: true }, { id: 'start', label: 'Start', show: true },
-    { id: 'end', label: 'End', show: true }, { id: 'issuer', label: 'Issuer', show: true }, { id: 'action', label: 'Action', show: true }
-  ]);
+  // Dynamic columns based on KPI type
+  const [cols, setCols] = useState([]);
+  useEffect(() => {
+      if (type === 'success') {
+          setCols([
+              { id: 'server', label: 'Server', show: true },
+              { id: 'status', label: 'Status', show: true }
+          ]);
+      } else if (type === 'health') {
+          setCols([
+              { id: 'server', label: 'Server', show: true },
+              { id: 'issues', label: 'Issue', show: true },
+              ...(showService ? [{ id: 'serviceStatus', label: 'Service Status', show: true }] : []),
+              { id: 'lastReportTime', label: 'Last Report', show: true }
+          ]);
+      } else if (type === 'reboot') {
+          setCols([
+              { id: 'server', label: 'Server', show: true },
+              { id: 'pendingRestart', label: 'Pending Restart', show: true },
+              { id: 'ip', label: 'IP Address', show: true },
+              { id: 'uptime', label: 'UpTime', show: true },
+              { id: 'besRelay', label: 'BES Relay', show: true }
+          ]);
+      }
+  }, [type, showService]);
+
+  const propertyOptions = cols.map(c => ({ value: c.id, label: c.label }));
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -231,260 +181,352 @@ export default function KpiDetails({ context, onBack }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  const type = typeof context === 'string' ? context : (context?.type || 'health');
-  const actionId = context && typeof context === 'object' ? context.id : null;
+  function classify(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "Not Reported";
+    const L = s.toLowerCase();
+    if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
+    if (/^completed$/i.test(s)) return "Completed";
+    return s;
+  }
 
-  // Handle incoming detailed filter passing seamlessly and bypassing parent state drops
-  useEffect(() => {
-    let f = context && typeof context === 'object' ? context.filters : null;
-    
-    // Check session storage if the parent component failed to pass the 'filters' object correctly
-    if (!f || (Array.isArray(f) && f.length === 0)) {
-        try {
-            const stored = sessionStorage.getItem("kpi_pending_filter");
-            if (stored) {
-                f = JSON.parse(stored);
-                sessionStorage.removeItem("kpi_pending_filter");
-            }
-        } catch(e) {}
-    }
-
-    if (f && Array.isArray(f) && f.length > 0) {
-      setFilters(f);
-    } else if (typeof f === 'string') {
-      // Fallback if the parent passes just a raw string instead of the array object
-      setFilters([{ logic: "Single", conds: [{ column: "status", operator: "contains", value: f }] }]);
-    } else {
-      setFilters([]);
-    }
-  }, [context]);
-
-  const relevantColIds = useMemo(() => {
-    if (type === 'health') return ['server', 'issue', 'serviceStatus', 'lastReportTime', 'action'];
-    if (type === 'reboot') return ['server', 'ip', 'uptime', 'besRelay', 'action'];
-    if (type === 'success') return ['server', 'status'];
-    if (type === 'sandbox') return ['server', 'patch', 'start', 'end', 'status', 'issuer'];
-    return [];
-  }, [type]);
-
-  const titleMap = { 'success': 'Success Rate Details', 'health': 'Critical Health Failures', 'reboot': 'Reboot Pending Servers', 'sandbox': `Action Results ${actionId ? `(#${actionId})` : ''}` };
-
-  const propertyOptionsMap = {
-    'health': [{ value: "server", label: "Server Name" }, { value: "issues", label: "Issue" }, { value: "serviceStatus", label: "Service Status" }, { value: "lastReportTime", label: "Last Report" }],
-    'reboot': [{ value: "server", label: "Server Name" }, { value: "ip", label: "IP Address" }, { value: "besRelay", label: "BES Relay" }],
-    'success': [{ value: "server", label: "Server Name" }, { value: "status", label: "Status" }],
-    'sandbox': [{ value: "server", label: "Server Name" }, { value: "patch", label: "Patch Name" }, { value: "status", label: "Status" }, { value: "issuer", label: "Issuer" }]
-  };
-
-  const propertyOptions = propertyOptionsMap[type] || propertyOptionsMap['health'];
-
-  const fetchData = async (signal) => {
-    try {
-      setLoading(true); setError(""); setSelectedReboots(new Set()); setBulkRebootStatus("");
-      if (!sysConfig) { try { const conf = await getJson(`${API_BASE}/api/config`, signal); setSysConfig(conf); } catch(e) {} }
-      if (!context) { setData([]); return; }
-      let url = "";
-      if (type === 'health') url = `${API_BASE}/api/health/critical`;
-      else if (type === 'reboot') url = `${API_BASE}/api/health/reboot-pending`;
-      else if (type === 'success' || type === 'sandbox') {
-        let targetId = actionId;
-        if (!targetId) { const last = await getJson(`${API_BASE}/api/actions/last`, signal); targetId = last?.actionId; }
-        if (!targetId) { setData([]); return; }
-        url = `${API_BASE}/api/actions/${targetId}/results`;
-      }
-      const res = await getJson(url, signal);
-      let rows = Array.isArray(res?.rows) ? res.rows : [];
-
-      if (type === 'success') {
-          const map = new Map();
-          for (const r of rows) {
-              if (r.server && !map.has(r.server)) map.set(r.server, r);
-          }
-          rows = Array.from(map.values()).filter((r) => /success/i.test(r?.status || ""));
-      }
+  const fetchData = async () => {
+      setLoading(true); 
+      setError(""); 
+      setSelectedReboots(new Set());
+      setSelectedHealth(new Set());
       
-      // Sandbox intentionally skips deduplication here to show ALL rows!
-      setData(rows); setLastUpdated(new Date().toLocaleString());
-    } catch (err) { if (err.name !== "AbortError") setError(err.message); } finally { setLoading(false); }
+      try {
+          // STRICT BLAST RADIUS QUERY INJECTION
+          const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
+          let fetchedData = [];
+
+          if (type === 'success') {
+              if (!actionId) {
+                  setError("No Action ID was pinned for the previous deployment.");
+                  setLoading(false);
+                  return;
+              }
+              const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`);
+              if (Array.isArray(res?.rows)) {
+                  const map = new Map();
+                  for (const r of res.rows) {
+                      if (r.server && !map.has(r.server)) { map.set(r.server, r); }
+                  }
+                  fetchedData = Array.from(map.values()).filter((r) => { 
+                      const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; 
+                  });
+              }
+          } else if (type === 'health') {
+              const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
+              fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+          } else if (type === 'reboot') {
+              const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
+              fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+          }
+
+          setData(fetchedData);
+          setLastUpdated(new Date().toLocaleString());
+      } catch (e) {
+          setError(e.message || "Failed to fetch KPI data.");
+      } finally {
+          setLoading(false);
+      }
   };
 
-  useEffect(() => { const ab = new AbortController(); fetchData(ab.signal); return () => ab.abort(); }, [type, actionId, context]);
+  useEffect(() => {
+      fetchData();
+  }, [type, groupName, actionId]);
 
-  const applyFilters = (row) => {
+  const applyFilters = (item) => {
     if (!filters.length) return true;
     let globalMatch = globalLogic === "OR" ? false : true;
-    let validBlocks = 0;
     for (let b of filters) {
       let blockMatch = true; let validConds = 0;
-      for (let c of b?.conds || []) {
+      for (let c of b.conds) {
         if (!c.value) continue;
-        validConds++;
-        
-        let condition = true;
-        const search = String(c.value).toLowerCase();
-
+        validConds++; let condition = true;
+        const query = String(c.value).toLowerCase();
         let field = "";
-        if (c.column === "status") {
-            const shortStatus = classify(row.status);
-            field = shortStatus.toLowerCase();
-            
-            // Text matching fallbacks just like in PatchCalendar's evaluateCondition
-            if (c.operator === "contains" && !field.includes(search)) {
-                 field = String(row.status || "").toLowerCase();
-            }
+        
+        if (c.column === 'issues' && Array.isArray(item.issues)) {
+            field = item.issues.join(", ").toLowerCase();
+        } else if (c.column === 'pendingRestart') {
+            field = String(item.pendingRestart ?? item.pending ?? item.restart ?? "").toLowerCase();
+        } else {
+            field = String(item[c.column] || "").toLowerCase();
         }
-        else if (c.column === "issues") field = (row.issues || []).join(", ");
-        else field = String(row[c.column] || "");
 
-        blockMatch = blockMatch && evaluateCondition(field, c.operator, c.value, c.column);
+        if (c.operator === "contains") condition = field.includes(query);
+        else if (c.operator === "=") condition = field === query;
+        else if (c.operator === "!=") condition = field !== query;
+        blockMatch = blockMatch && condition;
       }
-      if (validConds > 0) { validBlocks++; globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch); }
+      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
     }
-    return validBlocks === 0 ? true : globalMatch;
+    return globalMatch;
   };
 
-  const filtered = useMemo(() => data.filter(applyFilters), [data, filters, globalLogic]);
+  const visibleData = useMemo(() => data.filter(applyFilters), [data, filters, globalLogic]);
 
-  const sorted = useMemo(() => {
-    if (!sortConfig.key) return filtered;
-    return [...filtered].sort((a, b) => {
-      let valA = ""; let valB = "";
-      if (sortConfig.key === 'status') { valA = classify(a.status).toLowerCase(); valB = classify(b.status).toLowerCase(); }
-      else if (sortConfig.key === 'issue') { valA = (a.issues || []).join(",").toLowerCase(); valB = (b.issues || []).join(",").toLowerCase(); }
-      else { valA = String(a[sortConfig.key] || "").toLowerCase(); valB = String(b[sortConfig.key] || "").toLowerCase(); }
-      if (valA < valB) return sortConfig.dir === "asc" ? -1 : 1;
-      if (valA > valB) return sortConfig.dir === "asc" ? 1 : -1;
-      return 0;
-    });
-  }, [filtered, sortConfig]);
+  const sortedData = useMemo(() => {
+    let sortableItems = [...visibleData];
+    if (sortConfig.key) {
+      sortableItems.sort((a, b) => {
+        let aVal = a[sortConfig.key] || "";
+        let bVal = b[sortConfig.key] || "";
+        
+        if (sortConfig.key === 'issues') {
+            aVal = Array.isArray(a.issues) ? a.issues.join(", ") : "";
+            bVal = Array.isArray(b.issues) ? b.issues.join(", ") : "";
+        } else if (sortConfig.key === 'pendingRestart') {
+            aVal = String(a.pendingRestart ?? a.pending ?? a.restart ?? "");
+            bVal = String(b.pendingRestart ?? b.pending ?? b.restart ?? "");
+        }
 
-  const totalPages = pageSize === 'all' ? 1 : Math.ceil(sorted.length / pageSize);
-  const paginated = useMemo(() => pageSize === 'all' ? sorted : sorted.slice((page - 1) * pageSize, page * pageSize), [sorted, page, pageSize]);
+        aVal = String(aVal).toLowerCase();
+        bVal = String(bVal).toLowerCase();
 
-  const handleSort = (key) => setSortConfig(c => ({ key, dir: c.key === key && c.dir === "asc" ? "desc" : "asc" }));
-  const getSortIcon = (key) => { if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>; return <span className="ml-6">{sortConfig.dir === "asc" ? "↑" : "↓"}</span>; };
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [visibleData, sortConfig]);
+
+  const totalPages = Math.ceil(sortedData.length / rowsPerPage);
+  const paginatedData = sortedData.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
+
+  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
   const handleExport = (scope) => { 
     setShowExpDrop(false); 
     let dataToExport = [];
-    if (scope === 'page') dataToExport = paginated;
-    else if (scope === 'filtered') dataToExport = sorted;
+    if (scope === 'page') dataToExport = paginatedData;
+    else if (scope === 'filtered') dataToExport = sortedData;
     else dataToExport = data;
 
-    const visibleCols = cols.filter(c => c.show && relevantColIds.includes(c.id));
-    performExport(dataToExport, visibleCols, exportFormat, "kpi_details", (r, cId) => {
-        if (cId === 'issue') return (r.issues || []).join(', ');
-        if (cId === 'status') return classify(r.status);
-        if (cId === 'start' || cId === 'end') return fmtTime(r[cId]);
-        return r[cId];
+    performExport(dataToExport, cols, exportFormat, `${type}_kpi_report`, (r, cId) => {
+        if (cId === 'issues') return Array.isArray(r.issues) ? r.issues.join(", ") : "";
+        if (cId === 'pendingRestart') return String(r.pendingRestart ?? r.pending ?? r.restart ?? "");
+        if (type === 'success' && cId === 'status') return "Success";
+        return r[cId] || "N/A";
     });
   };
 
+  // --- REBOOT ACTIONS ---
   const toggleRebootSelection = (serverName) => {
     const next = new Set(selectedReboots);
     if (next.has(serverName)) next.delete(serverName); else next.add(serverName);
     setSelectedReboots(next);
   };
 
-  const isAllSelected = filtered.length > 0 && filtered.every(r => selectedReboots.has(r.server));
-
   const toggleAllReboots = () => {
-    if (isAllSelected) {
-      setSelectedReboots(new Set());
+    const allSelected = paginatedData.length > 0 && paginatedData.every(r => selectedReboots.has(r.server));
+    const next = new Set(selectedReboots);
+    if (allSelected) {
+        paginatedData.forEach(r => next.delete(r.server));
     } else {
-      setSelectedReboots(new Set(filtered.map(r => r.server)));
+        paginatedData.forEach(r => next.add(r.server));
     }
+    setSelectedReboots(next);
   };
 
   async function executeRestart() {
-    const serverName = confirmRestart; if (!serverName) return;
-    setActionStatus((p) => ({ ...p, [serverName]: "loading" })); setConfirmRestart(null); setError("");
-    try { await postJSON(`${API_BASE}/api/actions/restart`, { computerName: serverName }); setActionStatus((p) => ({ ...p, [serverName]: "success" })); } 
-    catch (e) { setActionStatus((p) => ({ ...p, [serverName]: "error" })); setError(`Failed to restart ${serverName}: ${e.message}`); }
+    const serverName = confirmRestart;
+    if (!serverName) return;
+    setActionStatus((p) => ({ ...p, [serverName]: "loading" }));
+    setConfirmRestart(null); setError("");
+    try {
+      const result = await postJSON(`${API_BASE}/api/actions/restart`, { computerName: serverName });
+      setActionStatus((p) => ({ ...p, [serverName]: "success", [`__id_${serverName}`]: result.actionId }));
+    } catch (e) {
+      const errorMsg = e.message || "Failed to trigger restart.";
+      setActionStatus((p) => ({ ...p, [serverName]: "error", [`__msg_${serverName}`]: errorMsg }));
+      setError(`Failed to restart ${serverName}: ${errorMsg}`);
+    }
   }
 
   async function executeBulkRestart() {
     if (selectedReboots.size === 0) return;
-    setBulkRebootStatus("Triggering..."); setConfirmBulkReboot(false); setError("");
+    setBulkRebootStatus("Triggering..."); setConfirmBulkReboot(false);
     try {
       const names = Array.from(selectedReboots);
-      await postJSON(`${API_BASE}/api/actions/restart-bulk`, { computerNames: names });
-      const newStatus = { ...actionStatus }; names.forEach(name => { newStatus[name] = "success"; });
-      setActionStatus(newStatus); setBulkRebootStatus(`Successfully triggered restart for ${names.length} servers.`);
-      setSelectedReboots(new Set()); setTimeout(() => setBulkRebootStatus(""), 5000);
-    } catch (e) { setBulkRebootStatus("Failed."); setError(`Bulk restart failed: ${e.message}`); }
+      const result = await postJSON(`${API_BASE}/api/actions/restart-bulk`, { computerNames: names });
+      const newStatus = { ...actionStatus };
+      names.forEach(name => { newStatus[name] = "success"; newStatus[`__id_${name}`] = result.actionId; });
+      setActionStatus(newStatus);
+      setBulkRebootStatus(`Success! Action ID: ${result.actionId}`);
+      setSelectedReboots(new Set()); 
+    } catch (e) {
+      setBulkRebootStatus("Failed.");
+      setError(`Bulk restart failed: ${e.message}`);
+    }
   }
+
+  // --- HEALTH (SERVICE RESTART) ACTIONS ---
+  const isHealthRestartable = (row) => {
+      const isWindows = String(row.os || "").toLowerCase().includes("win");
+      return isWindows && row.serviceStatus && row.serviceStatus.toLowerCase() !== "running" && row.serviceStatus !== "N/A" && row.serviceStatus !== "Not Applicable";
+  };
+
+  const toggleHealthSelection = (serverName) => {
+    const next = new Set(selectedHealth);
+    if (next.has(serverName)) next.delete(serverName); else next.add(serverName);
+    setSelectedHealth(next);
+  };
+
+  const toggleAllHealth = () => {
+    const restartableRows = paginatedData.filter(isHealthRestartable);
+    if (restartableRows.length === 0) return;
+    
+    const allSelected = restartableRows.every(r => selectedHealth.has(r.server));
+    const next = new Set(selectedHealth);
+    
+    if (allSelected) {
+        restartableRows.forEach(r => next.delete(r.server));
+    } else {
+        restartableRows.forEach(r => next.add(r.server));
+    }
+    setSelectedHealth(next);
+  };
 
   async function executeServiceRestart() {
-    const serverName = confirmService; if (!serverName) return;
+    const serverName = confirmService;
+    if (!serverName) return;
     const key = `svc_${serverName}`;
-    setActionStatus((p) => ({ ...p, [key]: "loading" })); setConfirmService(null); setError("");
-    try { await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: serverName }); setActionStatus((p) => ({ ...p, [key]: "success" })); } 
-    catch (e) { setActionStatus((p) => ({ ...p, [key]: "error" })); setError(`Failed to restart service on ${serverName}: ${e.message}`); }
+    setActionStatus((p) => ({ ...p, [key]: "loading" }));
+    setConfirmService(null); setError("");
+    try {
+      const result = await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: serverName });
+      setActionStatus((p) => ({ ...p, [key]: "success", [`__id_${key}`]: result.actionId }));
+    } catch (e) {
+      const errorMsg = e.message || "Failed to trigger service restart.";
+      setActionStatus((p) => ({ ...p, [key]: "error", [`__msg_${key}`]: errorMsg }));
+      setError(`Failed to restart service on ${serverName}: ${errorMsg}`);
+    }
   }
 
-  const role = sessionStorage.getItem("user_role") || "Admin";
-  const checkServiceConfig = sysConfig?.checkServiceStatus || sysConfig?.config?.checkServiceStatus || false;
-  const activeFilterCount = filters.reduce((acc, b) => acc + (b?.conds ? b.conds.filter(c => c.value).length : 0), 0);
+  async function executeBulkServiceRestart() {
+    if (selectedHealth.size === 0) return;
+    setBulkServiceStatus("Triggering..."); setConfirmBulkService(false);
+    try {
+      const names = Array.from(selectedHealth);
+      const newStatus = { ...actionStatus };
+      
+      // Fire requests in parallel
+      await Promise.all(names.map(async (name) => {
+          const key = `svc_${name}`;
+          try {
+              const result = await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: name });
+              newStatus[key] = "success";
+              newStatus[`__id_${key}`] = result.actionId;
+          } catch(e) {
+              newStatus[key] = "error";
+              newStatus[`__msg_${key}`] = e.message;
+          }
+      }));
+      
+      setActionStatus(newStatus);
+      setBulkServiceStatus(`Completed!`);
+      setSelectedHealth(new Set()); 
+    } catch (e) {
+      setBulkServiceStatus("Failed.");
+      setError(`Bulk service restart failed: ${e.message}`);
+    }
+  }
+
+  const getTitle = () => {
+      if (type === 'success') return "Deployment Success Details";
+      if (type === 'health') return "Critical Health Failures";
+      if (type === 'reboot') return "Pending Reboots";
+      return "KPI Details";
+  };
 
   return (
-    <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
-      
-      <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{titleMap[type] || 'KPI Details'}</h2>
-          <div className="text-13 muted-text" style={{ marginTop: '4px' }}>Updated: {lastUpdated || "—"}</div>
+    <div className="mgmtenv" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+               <h2 className="m-0">{getTitle()}</h2>
+               <span className="pill gray">Target Group: {groupName || "All Servers"}</span>
+            </div>
+            <div className="sub mt-4 text-13 muted-text">
+               Updated: {lastUpdated || "—"}
+            </div>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <div style={{ position: 'relative' }}>
-            <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+        <div className="right flex-row gap-12 items-center">
+            <div style={{ position: 'relative' }}>
+                <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                </button>
+                {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
+            </div>
+            <button className="iconbtn" onClick={fetchData} disabled={loading} title="Refresh Data">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             </button>
-            {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
-          </div>
-          <button className="iconbtn" onClick={() => fetchData(null)} title="Refresh Data">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          
-        {activeFilterCount > 0 && (
-          <div className="active-filter-banner active" style={{ marginBottom: "16px" }}>
-            <div className="filter-tags">
-              {filters.map((b, bIdx) => {
-                const validConds = b?.conds?.filter(c => c.value) || [];
-                if (!validConds.length) return null;
-                return (
-                  <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                    {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
-                    {validConds.map((c, cIdx) => (
-                      <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
-                        {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                        <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
-                      </span>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-            <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
-          </div>
-        )}
+      {error && <div className="banner error m-20" style={{ marginBottom: 0 }}>{error}</div>}
 
-        <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0 }}>
-            <div className="grid-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      {activeFilterCount > 0 && (
+          <div className="p-0-20-20" style={{ marginTop: '20px' }}>
+              <div className="active-filter-banner active">
+                <div className="filter-tags">
+                  {filters.map((b, bIdx) => {
+                    const validConds = b.conds.filter(c => c.value);
+                    if (!validConds.length) return null;
+                    return (
+                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                        {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                        {validConds.map((c, cIdx) => (
+                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+              </div>
+          </div>
+      )}
+
+      <div className="section" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', marginTop: '20px' }}>
+        <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span className="title">Results</span>
+                
+                {/* BULK ACTION: Pending Reboots */}
                 {type === 'reboot' && selectedReboots.size > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className="pill amber">{selectedReboots.size} selected</span>
-                        <button className="btn outline sec small" onClick={() => setConfirmBulkReboot(true)}>Restart Selected</button>
-                        {bulkRebootStatus && <span className="text-13" style={{color: bulkRebootStatus.includes('Failed') ? 'var(--danger)' : 'var(--success)'}}>{bulkRebootStatus}</span>}
-                    </div>
+                   <>
+                     <span className="pill amber">{selectedReboots.size} selected</span>
+                     <button className="btn pri h-32 px-12 text-12" onClick={() => setConfirmBulkReboot(true)}>Restart Selected</button>
+                   </>
                 )}
+                {type === 'reboot' && bulkRebootStatus && <span className="text-12 text-success">{bulkRebootStatus}</span>}
+
+                {/* BULK ACTION: Critical Health (Service Restarts) */}
+                {type === 'health' && selectedHealth.size > 0 && (
+                   <>
+                     <span className="pill amber">{selectedHealth.size} selected</span>
+                     <button className="btn pri h-32 px-12 text-12" onClick={() => setConfirmBulkService(true)}>Restart Services</button>
+                   </>
+                )}
+                {type === 'health' && bulkServiceStatus && <span className="text-12 text-success">{bulkServiceStatus}</span>}
             </div>
-            <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ fontWeight: 600, color: 'var(--text)', alignSelf: 'center', marginRight: '8px' }}>Showing {filtered.length} Entries</div>
+            
+            <div style={{ display: 'flex', gap: '12px' }}>
                 <div className="dropdown" ref={colRef}>
                     <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -493,22 +535,18 @@ export default function KpiDetails({ context, onBack }) {
                     {showColDrop && (
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                {cols.map((col, i) => {
-                                    if (!relevantColIds.includes(col.id)) return null;
-                                    return (
-                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
-                                            <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
-                                                const next = [...cols]; next[i].show = e.target.checked; setCols(next);
-                                            }} />
-                                            <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
-                                        </label>
-                                    );
-                                })}
+                                {cols.map((col, i) => (
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                            const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                        }} />
+                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                    </label>
+                                ))}
                             </div>
                         </div>
                     )}
                 </div>
-
                 <div className="dropdown" ref={expRef}>
                     <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
@@ -533,134 +571,190 @@ export default function KpiDetails({ context, onBack }) {
             </div>
         </div>
 
-        <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
+        <div className="tableWrap" style={{ flex: 1, borderTop: 'none', borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflowY: 'auto' }}>
             {loading ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading records...</div>
-            ) : error ? (
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>{error}</div>
-            ) : !context || data.length === 0 ? (
-                <NoDataSVG />
+                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading KPI details...</div>
+            ) : paginatedData.length === 0 ? (
+                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No data found.</div>
             ) : (
                 <table>
                     <thead className="kpi-th-sticky">
                         <tr>
-                            {type === 'reboot' && <th style={{ width: 40, textAlign: 'center', pointerEvents: 'auto' }}><input type="checkbox" className="custom-checkbox" onChange={toggleAllReboots} checked={isAllSelected} /></th>}
-                            {cols.filter(c => c.show && relevantColIds.includes(c.id)).map(c => {
-                                if (c.id === 'action') return <th key={c.id} style={{ textAlign: "center", width: "140px" }}>Action</th>;
+                            {/* Checkbox Header for Reboots OR Health Services */}
+                            {(type === 'reboot' || (type === 'health' && showService)) && (
+                                <th className="w-40 kpi-td-center">
+                                    {type === 'reboot' && (
+                                        <input 
+                                            type="checkbox" 
+                                            className="custom-checkbox" 
+                                            onChange={toggleAllReboots} 
+                                            checked={paginatedData.length > 0 && paginatedData.every(r => selectedReboots.has(r.server))} 
+                                        />
+                                    )}
+                                    {type === 'health' && (
+                                        <input 
+                                            type="checkbox" 
+                                            className="custom-checkbox" 
+                                            onChange={toggleAllHealth} 
+                                            disabled={paginatedData.filter(isHealthRestartable).length === 0}
+                                            checked={
+                                                paginatedData.filter(isHealthRestartable).length > 0 && 
+                                                paginatedData.filter(isHealthRestartable).every(r => selectedHealth.has(r.server))
+                                            } 
+                                        />
+                                    )}
+                                </th>
+                            )}
+                            
+                            {cols.map(c => {
+                                if (!c.show) return null;
                                 return (
-                                  <th key={c.id} className="cursor-pointer" onClick={() => handleSort(c.id)}>
-                                      {c.label} {getSortIcon(c.id)}
-                                  </th>
-                                )
+                                    <th key={c.id} className="cursor-pointer" onClick={() => handleSort(c.id)}>
+                                        {c.label}{getSortIcon(c.id)}
+                                    </th>
+                                );
                             })}
+                            
+                            {(type === 'health' || type === 'reboot') && showService && (
+                                <th className="w-140 kpi-td-center">Action</th>
+                            )}
                         </tr>
                     </thead>
                     <tbody>
-                        {paginated.length === 0 ? (
-                            <tr><td colSpan={relevantColIds.length + (type==='reboot'?1:0)} style={{ padding: 0 }}><NoDataSVG /></td></tr>
-                        ) : (
-                            paginated.map((r, i) => {
-                                const issueList = r.issues || [];
-                                const svcStatusStr = String(r.serviceStatus || "").toLowerCase();
-                                const isNotReporting = issueList.some(iss => /not reporting/i.test(iss));
-                                const svcIsNA = svcStatusStr === "n/a" || svcStatusStr === "not available";
+                        {paginatedData.map((row, i) => {
+                            const canRestartSvc = type === 'health' && isHealthRestartable(row);
+                            
+                            return (
+                                <tr 
+                                    key={i} 
+                                    onClick={
+                                        type === 'reboot' ? () => toggleRebootSelection(row.server) : 
+                                        (type === 'health' && canRestartSvc ? () => toggleHealthSelection(row.server) : undefined)
+                                    } 
+                                    className={
+                                        type === 'reboot' ? (selectedReboots.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : 
+                                        (type === 'health' && canRestartSvc ? (selectedHealth.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : "")
+                                    }
+                                >
+                                    
+                                    {(type === 'reboot' || (type === 'health' && showService)) && (
+                                        <td className="kpi-td-center">
+                                            {type === 'reboot' ? (
+                                                <input type="checkbox" className="custom-checkbox no-events" checked={selectedReboots.has(row.server)} readOnly />
+                                            ) : (
+                                                canRestartSvc ? <input type="checkbox" className="custom-checkbox no-events" checked={selectedHealth.has(row.server)} readOnly /> : null
+                                            )}
+                                        </td>
+                                    )}
 
-                                const shortStatus = classify(r.status);
-                                let displayStatus = shortStatus;
-                                if ((shortStatus === 'Waiting' || shortStatus === 'error' || shortStatus === 'Failed') && r.status && r.status.toLowerCase() !== shortStatus.toLowerCase()) {
-                                    displayStatus = `${shortStatus} (${r.status})`;
-                                }
+                                    {cols.map(c => {
+                                        if (!c.show) return null;
+                                        let val = row[c.id];
+                                        
+                                        if (type === 'success' && c.id === 'status') {
+                                            return <td key={c.id}><span className="pill green">Success</span></td>;
+                                        }
+                                        
+                                        if (c.id === 'issues') {
+                                            return (
+                                                <td key={c.id}>
+                                                    {(row.issues || []).map((issue, idx) => (
+                                                        <span key={idx} className="pill red mr-10 text-11">{issue}</span>
+                                                    ))}
+                                                </td>
+                                            );
+                                        }
 
-                                const isSuccess = shortStatus === 'Success' || shortStatus === 'Fixed' || shortStatus === 'Completed';
+                                        if (c.id === 'serviceStatus' && type === 'health') {
+                                            const isWindows = String(row.os || "").toLowerCase().includes("win");
+                                            return <td key={c.id}>{isWindows ? (row.serviceStatus || "N/A") : "—"}</td>;
+                                        }
 
-                                return (
-                                  <tr key={i} onClick={() => type === 'reboot' && toggleRebootSelection(r.server)} className={type === 'reboot' && selectedReboots.has(r.server) ? 'selected-row cursor-pointer' : ''}>
-                                      {type === 'reboot' && <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}><input type="checkbox" className="custom-checkbox" checked={selectedReboots.has(r.server)} onChange={() => toggleRebootSelection(r.server)} /></td>}
-                                      {cols.filter(c => c.show && relevantColIds.includes(c.id)).map(c => {
-                                          if (c.id === 'issue') return <td key={c.id}>{issueList.map((iss, idx) => (<span key={idx} className="pill red mr-10 text-11">{iss}</span>))}</td>;
-                                          if (c.id === 'status') return <td key={c.id}><span className={`pill ${isSuccess ? 'green' : 'red'}`}>{displayStatus}</span></td>;
-                                          if (c.id === 'start' || c.id === 'end') return <td key={c.id}>{fmtTime(r[c.id])}</td>;
-                                          if (c.id === 'action') {
-                                              if (type === 'reboot') {
-                                                  const status = actionStatus[r.server];
-                                                  return (
-                                                      <td key={c.id} onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
-                                                          <button className="btn outline sec small" style={{ height: '32px' }} onClick={() => setConfirmRestart(r.server)} disabled={!!status}>
-                                                              {status === "loading" ? "..." : status === "success" ? "Sent" : "Restart"}
-                                                          </button>
-                                                      </td>
-                                                  );
-                                              }
-                                              if (type === 'health' && role !== "Linux") {
-                                                  const isWindows = String(r.os || "").toLowerCase().includes("win");
-                                                  // Prevent rendering the Restart button if Not Reporting or Service Status is N/A
-                                                  const canRestart = isWindows && !isNotReporting && !svcIsNA && svcStatusStr === "stopped" && checkServiceConfig;                                                
-                                                  const svcKey = `svc_${r.server}`;
-                                                  const status = actionStatus[svcKey];
-                                                  return (
-                                                      <td key={c.id} onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
-                                                          {canRestart ? (
-                                                              <button className="btn outline sec small" style={{ height: '32px' }} onClick={() => setConfirmService(r.server)} disabled={!!status}>
-                                                                  {status === "loading" ? "..." : status === "success" ? "Sent" : "Restart Service"}
-                                                              </button>
-                                                          ) : "—"}
-                                                      </td>
-                                                  );
-                                              }
-                                              return <td key={c.id}>—</td>;
-                                          }
-                                          return <td key={c.id}>{r[c.id] || "—"}</td>;
-                                      })}
-                                  </tr>
-                                );
-                            })
-                        )}
+                                        if (c.id === 'pendingRestart') {
+                                            return <td key={c.id}>{String(row.pendingRestart ?? row.pending ?? row.restart ?? "N/A")}</td>;
+                                        }
+
+                                        return <td key={c.id}>{val || "N/A"}</td>;
+                                    })}
+
+                                    {type === 'health' && showService && (
+                                        <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
+                                            {canRestartSvc && (
+                                                <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmService(row.server); }} disabled={!!actionStatus[`svc_${row.server}`]}>
+                                                    {actionStatus[`svc_${row.server}`] === "loading" ? "..." : actionStatus[`svc_${row.server}`] === "success" ? "Sent" : "Restart"}
+                                                </button>
+                                            )}
+                                        </td>
+                                    )}
+
+                                    {type === 'reboot' && showService && (
+                                        <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
+                                            <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmRestart(row.server); }} disabled={!!actionStatus[row.server]}>
+                                                {actionStatus[row.server] === "loading" ? "..." : actionStatus[row.server] === "success" ? "Sent" : "Restart"}
+                                            </button>
+                                        </td>
+                                    )}
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             )}
         </div>
 
-        <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
+        <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)', borderTop: '1px solid var(--border)' }}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={pageSize} onChange={(e) => { setPageSize(e.target.value === 'all' ? 'all' : Number(e.target.value)); setPage(1); }}>
-                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option><option value="all">All</option>
+                <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
                 </select>
             </div>
             <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                {sorted.length > 0 ? (page - 1) * (pageSize === 'all' ? sorted.length : pageSize) + 1 : 0}-{Math.min(page * (pageSize === 'all' ? sorted.length : pageSize), sorted.length)} of {sorted.length}
+                {sortedData.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedData.length)} of {sortedData.length}
             </span>
             <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt;</button>
-                <button className={`pager-btn ${page === 1 ? 'active' : ''}`} onClick={() => setPage(1)}>1</button>
-                {totalPages > 1 && <button className={`pager-btn ${page === 2 ? 'active' : ''}`} onClick={() => setPage(2)}>2</button>}
+                <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
+                <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
+                {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
                 {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                {totalPages > 2 && page > 2 && page < totalPages && <button className="pager-btn active">{page}</button>}
-                {totalPages > 2 && <button className={`pager-btn ${page === totalPages ? 'active' : ''}`} onClick={() => setPage(totalPages)}>{totalPages}</button>}
-                <button className="pager-btn" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>&gt;</button>
+                {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
+                {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
+                <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
             </div>
         </div>
-
       </div>
 
       <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
 
-      {/* ACTION CONFIRMATION MODALS */}
-      <ConfirmationModal open={!!confirmRestart} title="Confirm Server Restart" onClose={() => setConfirmRestart(null)} onConfirm={executeRestart} busy={actionStatus[confirmRestart] === "loading"}>
-        Are you sure you want to restart the server: <strong>{confirmRestart}</strong>?
-      </ConfirmationModal>
+      {confirmRestart && (
+        <ConfirmationModal open={!!confirmRestart} title="Confirm Server Restart" onClose={() => setConfirmRestart(null)} onConfirm={executeRestart} busy={actionStatus[confirmRestart] === "loading"}>
+          Are you sure you want to restart the server: <strong>{confirmRestart}</strong>?
+        </ConfirmationModal>
+      )}
 
-      <ConfirmationModal open={!!confirmService} title="Confirm Service Restart" onClose={() => setConfirmService(null)} onConfirm={executeServiceRestart} busy={actionStatus[`svc_${confirmService}`] === "loading"}>
-        Are you sure you want to restart the "Window Update" service on: <strong>{confirmService}</strong>?
-      </ConfirmationModal>
+      {confirmService && (
+        <ConfirmationModal open={!!confirmService} title="Confirm Service Restart" onClose={() => setConfirmService(null)} onConfirm={executeServiceRestart} busy={actionStatus[`svc_${confirmService}`] === "loading"}>
+          Are you sure you want to restart "Window Update" service on: <strong>{confirmService}</strong>?
+        </ConfirmationModal>
+      )}
 
-      <ConfirmationModal open={confirmBulkReboot} title={`Confirm Bulk Restart (${selectedReboots.size})`} onClose={() => setConfirmBulkReboot(false)} onConfirm={executeBulkRestart} busy={bulkRebootStatus === "Triggering..."}>
-        Are you sure you want to restart <strong>{selectedReboots.size}</strong> selected servers immediately?
-        <div style={{ marginTop: '12px', padding: '12px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '4px', maxHeight: '100px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px' }}>
-            {Array.from(selectedReboots).join(", ")}
-        </div>
-      </ConfirmationModal>
+      {confirmBulkReboot && (
+        <ConfirmationModal open={confirmBulkReboot} title={`Confirm Bulk Restart (${selectedReboots.size})`} onClose={() => setConfirmBulkReboot(false)} onConfirm={executeBulkRestart} busy={bulkRebootStatus === "Triggering..."}>
+           Are you sure you want to restart <strong>{selectedReboots.size}</strong> selected servers immediately?
+           <div className="kpi-bulk-box" style={{ maxHeight: '100px', overflowY: 'auto', background: '#f3f4f6', padding: '8px', borderRadius: '4px', fontSize: '12px', marginTop: '10px' }}>
+              {Array.from(selectedReboots).join(", ")}
+           </div>
+        </ConfirmationModal>
+      )}
 
+      {confirmBulkService && (
+        <ConfirmationModal open={confirmBulkService} title={`Confirm Bulk Service Restart (${selectedHealth.size})`} onClose={() => setConfirmBulkService(false)} onConfirm={executeBulkServiceRestart} busy={bulkServiceStatus === "Triggering..."}>
+           Are you sure you want to restart the "Window Update" service on <strong>{selectedHealth.size}</strong> selected servers immediately?
+           <div className="kpi-bulk-box" style={{ maxHeight: '100px', overflowY: 'auto', background: '#f3f4f6', padding: '8px', borderRadius: '4px', fontSize: '12px', marginTop: '10px' }}>
+              {Array.from(selectedHealth).join(", ")}
+           </div>
+        </ConfirmationModal>
+      )}
     </div>
   );
 }
