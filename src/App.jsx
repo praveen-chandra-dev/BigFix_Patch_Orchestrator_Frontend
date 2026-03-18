@@ -16,6 +16,7 @@ const PilotKPI = lazy(() => import("./components/pilot/PilotKPI.jsx"));
 const PilotDecisionEngine = lazy(() => import("./components/pilot/PilotDecisionEngine.jsx"));
 const Management = lazy(() => import("./components/Management.jsx"));
 const UserManagement = lazy(() => import("./components/UserManagement.jsx"));
+const RoleManagement = lazy(() => import("./components/RoleManagement.jsx")); 
 const BaselineManager = lazy(() => import("./components/BaselineManager.jsx"));
 const GroupManager = lazy(() => import("./components/GroupManager.jsx"));
 const SnapshotManager = lazy(() => import("./components/SnapshotSelector.jsx"));
@@ -67,19 +68,33 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
         if (s?.sandboxTriggered) setSandboxTriggered(true);
         if (s?.pilotTriggered) setPilotTriggered(true);
         if (s?.lastActions) setLastActions(s.lastActions);
+        
+        // PULL DOWN UNLOCK STATES FROM DATABASE
+        if (s?.pilotUnlocked) setEnv(p => ({ ...p, pilotUnlocked: true }));
+        if (s?.productionUnlocked) setEnv(p => ({ ...p, productionUnlocked: true }));
       }
     } catch {} finally { setStateLoading(false); setTimeout(() => { isInitialMount.current = false; }, 50); }
-  }, [userId, sharedStateId, apiBase]);
+  }, [userId, sharedStateId, apiBase, setEnv]);
 
   useEffect(() => { fetchState(); }, [fetchState]);
 
   useEffect(() => {
     if (stateLoading || isInitialMount.current || !userId) return;
     if (currentStage === Stage.HISTORY) return;
+    
+    // PUSH UNLOCK STATES TO DATABASE
     postJSON(`${apiBase}/api/auth/state/${sharedStateId}`, {
-      currentStage, completedStages, configSaved, configLocked, sandboxTriggered, pilotTriggered, lastActions
+      currentStage, 
+      completedStages, 
+      configSaved, 
+      configLocked, 
+      sandboxTriggered, 
+      pilotTriggered, 
+      lastActions,
+      pilotUnlocked: env.pilotUnlocked,
+      productionUnlocked: env.productionUnlocked
     }).catch(console.error);
-  }, [stateLoading, userId, currentStage, completedStages, configSaved, configLocked, sandboxTriggered, pilotTriggered, lastActions, sharedStateId, apiBase]);
+  }, [stateLoading, userId, currentStage, completedStages, configSaved, configLocked, sandboxTriggered, pilotTriggered, lastActions, env.pilotUnlocked, env.productionUnlocked, sharedStateId, apiBase]);
 
   const postStageSignal = async (stage, status) => { try { await fetch(`${apiBase}/orchestrator/stages/${stage}`, { method: "POST", body: JSON.stringify({ status }) }); } catch {} };
   const addCompleted = (stage) => { setCompletedStages(p => p.includes(stage) ? p : [...p, stage]); postStageSignal(stage, "completed"); };
@@ -153,7 +168,6 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
     const onResetSbx = () => {
       setSandboxTriggered(false); setPilotTriggered(false);
       setCompletedStages(p => p.filter(s => s !== Stage.SANDBOX && s !== Stage.PILOT && s !== Stage.PRODUCTION && s !== Stage.FinalResult));
-      // ALSO CLEAR UNLOCKED STATES
       setEnv(p => ({ ...p, pilotEvaluated: false, prodEvaluated: false, pilotUnlocked: false, prodUnlocked: false }));
       setCurrentStage(Stage.SANDBOX); postStageSignal(Stage.SANDBOX, "active");
     };
@@ -161,7 +175,6 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
     const onResetPilot = () => {
       setPilotTriggered(false);
       setCompletedStages(p => p.filter(s => s !== Stage.PILOT && s !== Stage.PRODUCTION && s !== Stage.FinalResult));
-      // ALSO CLEAR UNLOCKED STATES
       setEnv(p => ({ ...p, prodEvaluated: false, prodUnlocked: false }));
       setCurrentStage(Stage.PILOT); postStageSignal(Stage.PILOT, "active");
     };
@@ -169,7 +182,6 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
     const onResetAll = () => {
       setSandboxTriggered(false); setPilotTriggered(false); setConfigSaved(false); setConfigLocked(false);
       setCompletedStages([]); setLastActions({});
-      // ALSO CLEAR UNLOCKED STATES
       setEnv(p => ({ ...p, pilotEvaluated: false, prodEvaluated: false, pilotUnlocked: false, prodUnlocked: false }));
       setCurrentStage(Stage.CONFIG); postStageSignal(Stage.CONFIG, "active");
     };
@@ -183,7 +195,7 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
       window.removeEventListener("orchestrator:resetToPilot", onResetPilot);
       window.removeEventListener("orchestrator:resetAll", onResetAll);
     };
-  }, []);
+  }, [setEnv]);
 
   if (stateLoading) return <div className="app-loading-content">Loading Orchestration Flow...</div>;
 
@@ -379,8 +391,9 @@ export default function App() {
              activeMenu === 'snapshot' ? <Suspense fallback={null}><SnapshotManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
              activeMenu === 'clone' ? <Suspense fallback={null}><CloneManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
              activeMenu === 'calendar' ? <Suspense fallback={null}><PatchCalendar onClose={()=>handleNavigate('orchestration')} userRole={session?.role} /></Suspense> :
-             activeMenu === 'settings' ? <Suspense fallback={null}><Management onClose={()=>handleNavigate('orchestration')}/></Suspense> :
+             activeMenu === 'settings' ? <Suspense fallback={null}><Management onClose={()=>handleNavigate('orchestration')} role={session?.role} /></Suspense> :
              activeMenu === 'users' ? <Suspense fallback={null}><UserManagement onClose={()=>handleNavigate('orchestration')} currentUserId={session?.userId}/></Suspense> :
+             activeMenu === 'roles' ? <Suspense fallback={null}><RoleManagement onClose={()=>handleNavigate('orchestration')} role={session?.role} username={session?.username} /></Suspense> :
              activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} activeTab={kpiTab} /></Suspense> :
              activeMenu === 'orchestration' ? <Main userId={session?.userId} username={session?.username} role={session?.role} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> : null
             }

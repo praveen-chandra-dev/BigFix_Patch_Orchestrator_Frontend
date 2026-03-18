@@ -128,7 +128,7 @@ export default function PilotDecisionEngine({
   const [chgValidated, setChgValidated] = useState(false);
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false); // NEW UNLOCK MODAL
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false); 
   const [baselineWarning, setBaselineWarning] = useState(null);
   const [checkingBaseline, setCheckingBaseline] = useState(false);
   const [prediction, setPrediction] = useState(null);
@@ -360,6 +360,10 @@ export default function PilotDecisionEngine({
       if (requireChg && chgValidated) { payload.chgNumber = chgUpper; payload.requireChg = true; } else { payload.requireChg = false; }
       
       const trig = await postJSON(`${API_BASE}${endpoint}`, payload);
+      
+      // Clear the override lock to reset evaluation behavior for the next run
+      setEnv(p => ({ ...p, [`${mode}Unlocked`]: false }));
+      
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
       setEnableTriggerPilot(false); setDecision(`${inProduction ? "Production" : "Pilot"} triggered. Action ${trig?.actionId || "?"}.`);
       
@@ -367,8 +371,16 @@ export default function PilotDecisionEngine({
     } catch (e) { setDecision(`Trigger failed: ${e?.message || e}`); } finally { setBusy(false); }
   }
 
-  function resetToSandbox() { window.dispatchEvent(new CustomEvent("orchestrator:resetToSandbox")); }
-  function resetToPilot()   { window.dispatchEvent(new CustomEvent("orchestrator:resetToPilot")); }
+  function resetToSandbox() { 
+    setEnv(p => ({ ...p, pilotUnlocked: false, productionUnlocked: false }));
+    window.dispatchEvent(new CustomEvent("orchestrator:resetToSandbox")); 
+  }
+  
+  function resetToPilot() { 
+    setEnv(p => ({ ...p, productionUnlocked: false }));
+    window.dispatchEvent(new CustomEvent("orchestrator:resetToPilot")); 
+  }
+
   const handleSnapshotClick = () => { if (onOpenSnapshot) onOpenSnapshot(); setSnapshotDone(true); };
   const handleCloneClick = () => { if (onOpenClone) onOpenClone(); setCloneDone(true); };
 
@@ -462,6 +474,8 @@ export default function PilotDecisionEngine({
           title="Override Configuration Limits"
           onClose={() => setShowUnlockConfirm(false)}
           onConfirm={() => {
+             // By setting this in the global env context, App.jsx will capture it 
+             // and push it to the database's `AppState` JSON.
              setEnv(p => ({ ...p, [`${mode}Unlocked`]: true }));
              setShowUnlockConfirm(false);
           }}

@@ -108,7 +108,7 @@ function Field({ item, value, onChange, invalid, disabled = false }) {
 function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x).trim()); }
 function listValidEmails(s) { if (!s) return true; return String(s).split(",").map(v => v.trim()).filter(Boolean).every(isEmail); }
 
-export default function Management({ onClose }) {
+export default function Management({ onClose, role }) {
   const [values, setValues] = useState({});
   const [originalValues, setOriginalValues] = useState({});
   const [editingSection, setEditingSection] = useState(null); 
@@ -116,15 +116,23 @@ export default function Management({ onClose }) {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
 
+  const isAdmin = role === 'Admin';
+
   const sections = useMemo(() => {
     const ord = { BIGFIX_: ["BIGFIX_BASE_URL","BIGFIX_USER","BIGFIX_PASS","BIGFIX_ALLOW_SELF_SIGNED"], LDAP_: ["LDAP_ENABLED", "LDAP_URL", "LDAP_DOMAIN", "LDAP_ALLOW_SELF_SIGNED"], SMTP_: ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_PORT","SMTP_SECURE","SMTP_CC","SMTP_BCC","SMTP_ALLOW_SELF_SIGNED"], SN_: ["SN_URL","SN_USER","SN_PASSWORD","SN_ALLOW_SELF_SIGNED"], VCENTER_:["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD", "VCENTER_ALLOW_SELF_SIGNED"], DEBUG_: ["DEBUG_LOG"] };
     const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
+    
+    // IF NOT ADMIN, ONLY RETURN BIGFIX SECTION
+    if (!isAdmin) {
+        return { BIGFIX: pick("BIGFIX_") };
+    }
+    
     return { BIGFIX: pick("BIGFIX_"), LDAP: pick("LDAP_"), SMTP: pick("SMTP_"), SN: pick("SN_"), VCENTER:pick("VCENTER_"), DEBUG: pick("DEBUG_") };
-  }, []);
+  }, [isAdmin]);
 
-  const smtpTouched = useMemo(() => ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_CC","SMTP_BCC"].some(k => (values[k] ?? "").toString().trim() !== ""), [values]);
-  const vcenterTouched = useMemo(() => ["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD"].some(k => (values[k] ?? "").toString().trim() !== ""), [values]);
-  const ldapEnabled = useMemo(() => String(values["LDAP_ENABLED"] ?? "false").toLowerCase() === "true", [values]);
+  const smtpTouched = useMemo(() => isAdmin ? ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_CC","SMTP_BCC"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isAdmin]);
+  const vcenterTouched = useMemo(() => isAdmin ? ["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isAdmin]);
+  const ldapEnabled = useMemo(() => isAdmin ? String(values["LDAP_ENABLED"] ?? "false").toLowerCase() === "true" : false, [values, isAdmin]);
 
   const invalidMap = useMemo(() => {
     const m = {};
@@ -134,13 +142,25 @@ export default function Management({ onClose }) {
         m[it.key] = (values[it.key] ?? it.value ?? "").toString().trim() === "";
       }
     }
-    if (smtpTouched) { m.SMTP_HOST = (values.SMTP_HOST ?? "").trim() === ""; m.SMTP_FROM = !isEmail((values.SMTP_FROM ?? "").trim()); m.SMTP_TO = !listValidEmails(values.SMTP_TO); }
-    if (vcenterTouched) m.VCENTER_URL = (values.VCENTER_URL ?? "").trim() === "";
-    if (ldapEnabled) { m.LDAP_URL = (values.LDAP_URL ?? "").trim() === ""; m.LDAP_DOMAIN = (values.LDAP_DOMAIN ?? "").trim() === ""; }
+    if (isAdmin) {
+        if (smtpTouched) { m.SMTP_HOST = (values.SMTP_HOST ?? "").trim() === ""; m.SMTP_FROM = !isEmail((values.SMTP_FROM ?? "").trim()); m.SMTP_TO = !listValidEmails(values.SMTP_TO); }
+        if (vcenterTouched) m.VCENTER_URL = (values.VCENTER_URL ?? "").trim() === "";
+        if (ldapEnabled) { m.LDAP_URL = (values.LDAP_URL ?? "").trim() === ""; m.LDAP_DOMAIN = (values.LDAP_DOMAIN ?? "").trim() === ""; }
+    }
     return m;
-  }, [values, smtpTouched, vcenterTouched, ldapEnabled, editingSection]);
+  }, [values, smtpTouched, vcenterTouched, ldapEnabled, editingSection, isAdmin]);
 
-  const validationMap = { BIGFIX: sections.BIGFIX.every(it => !invalidMap[it.key]), LDAP: sections.LDAP.every(it => !invalidMap[it.key]), SMTP: sections.SMTP.every(it => !(smtpTouched ? invalidMap[it.key] : false)), SN: true, VCENTER: sections.VCENTER.every(it => !(vcenterTouched ? invalidMap[it.key] : false)), DEBUG: true };
+  const validationMap = useMemo(() => {
+      const map = { BIGFIX: sections.BIGFIX.every(it => !invalidMap[it.key]) };
+      if (isAdmin) {
+          map.LDAP = sections.LDAP.every(it => !invalidMap[it.key]);
+          map.SMTP = sections.SMTP.every(it => !(smtpTouched ? invalidMap[it.key] : false));
+          map.SN = true;
+          map.VCENTER = sections.VCENTER.every(it => !(vcenterTouched ? invalidMap[it.key] : false));
+          map.DEBUG = true;
+      }
+      return map;
+  }, [sections, invalidMap, smtpTouched, vcenterTouched, isAdmin]);
 
   async function fetchEnv() {
     setMsg(""); setLoading(true);
@@ -200,89 +220,84 @@ export default function Management({ onClose }) {
         </div>
       )}
 
-      {!loading && (
-        <details className="section overflow-visible" open>
-            <summary className="section-head">
-                <span className="title">Directory Services (LDAP)</span><span className="pill soft">Optional</span><div className="spacer" />
-                {editingSection === 'LDAP' ? (
-                <div className="actions">
-                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                    <button className="btn primary" onClick={() => onSave('LDAP')} disabled={saving || !validationMap['LDAP']}>{saving?"Saving…":"Save"}</button>
+      {/* RENDER REMAINING SECTIONS ONLY FOR ADMINS */}
+      {!loading && isAdmin && (
+        <>
+            <details className="section overflow-visible" open>
+                <summary className="section-head">
+                    <span className="title">Directory Services (LDAP)</span><span className="pill soft">Optional</span><div className="spacer" />
+                    {editingSection === 'LDAP' ? (
+                    <div className="actions">
+                        <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                        <button className="btn primary" onClick={() => onSave('LDAP')} disabled={saving || !validationMap['LDAP']}>{saving?"Saving…":"Save"}</button>
+                    </div>
+                    ) : <button className="btn" onClick={() => setEditingSection('LDAP')} disabled={saving || editingSection !== null}>Edit</button>}
+                </summary>
+                <div className="grid">
+                    {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP' || (it.key !== 'LDAP_ENABLED' && !ldapEnabled)} />)}
                 </div>
-                ) : <button className="btn" onClick={() => setEditingSection('LDAP')} disabled={saving || editingSection !== null}>Edit</button>}
-            </summary>
-            <div className="grid">
-                {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP' || (it.key !== 'LDAP_ENABLED' && !ldapEnabled)} />)}
+            </details>
+
+            <div className="section overflow-visible">
+              <div className="section-head">
+                <span className="title">SMTP / Email</span><span className="pill soft">Optional</span><div className="spacer" />
+                {editingSection === 'SMTP' ? (
+                  <div className="actions">
+                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                    <button className="btn primary" onClick={() => onSave('SMTP')} disabled={saving || !validationMap['SMTP']}>{saving?"Saving…":"Save"}</button>
+                  </div>
+                ) : <button className="btn" onClick={() => setEditingSection('SMTP')} disabled={saving || editingSection !== null}>Edit</button>}
+              </div>
+              <div className="grid">
+                {sections.SMTP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={smtpTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'SMTP'} />)}
+              </div>
             </div>
-        </details>
-      )}
 
-      {!loading && (
-        <div className="section overflow-visible">
-          <div className="section-head">
-            <span className="title">SMTP / Email</span><span className="pill soft">Optional</span><div className="spacer" />
-            {editingSection === 'SMTP' ? (
-              <div className="actions">
-                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                <button className="btn primary" onClick={() => onSave('SMTP')} disabled={saving || !validationMap['SMTP']}>{saving?"Saving…":"Save"}</button>
+            <details className="section overflow-visible" open>
+              <summary className="section-head">
+                <span className="title">ServiceNow</span><span className="pill soft">Optional</span><div className="spacer" />
+                {editingSection === 'SN' ? (
+                  <div className="actions">
+                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                    <button className="btn primary" onClick={() => onSave('SN')} disabled={saving || !validationMap['SN']}>{saving?"Saving…":"Save"}</button>
+                  </div>
+                ) : <button className="btn" onClick={() => setEditingSection('SN')} disabled={saving || editingSection !== null}>Edit</button>}
+              </summary>
+              <div className="grid">
+                {sections.SN.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'SN'} />)}
               </div>
-            ) : <button className="btn" onClick={() => setEditingSection('SMTP')} disabled={saving || editingSection !== null}>Edit</button>}
-          </div>
-          <div className="grid">
-            {sections.SMTP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={smtpTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'SMTP'} />)}
-          </div>
-        </div>
-      )}
+            </details>
 
-      {!loading && (
-        <details className="section overflow-visible" open>
-          <summary className="section-head">
-            <span className="title">ServiceNow</span><span className="pill soft">Optional</span><div className="spacer" />
-            {editingSection === 'SN' ? (
-              <div className="actions">
-                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                <button className="btn primary" onClick={() => onSave('SN')} disabled={saving || !validationMap['SN']}>{saving?"Saving…":"Save"}</button>
+            <details className="section overflow-visible" open>
+              <summary className="section-head">
+                <span className="title">VCenter</span><span className="pill soft">Optional</span><div className="spacer" />
+                {editingSection === 'VCENTER' ? (
+                  <div className="actions">
+                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                    <button className="btn primary" onClick={() => onSave('VCENTER')} disabled={saving || !validationMap['VCENTER']}>{saving?"Saving…":"Save"}</button>
+                  </div>
+                ) : <button className="btn" onClick={() => setEditingSection('VCENTER')} disabled={saving || editingSection !== null}>Edit</button>}
+              </summary>
+              <div className="grid">
+                {sections.VCENTER.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={vcenterTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'VCENTER'} />)}
               </div>
-            ) : <button className="btn" onClick={() => setEditingSection('SN')} disabled={saving || editingSection !== null}>Edit</button>}
-          </summary>
-          <div className="grid">
-            {sections.SN.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'SN'} />)}
-          </div>
-        </details>
-      )}
+            </details>
 
-      {!loading && (
-        <details className="section overflow-visible" open>
-          <summary className="section-head">
-            <span className="title">VCenter</span><span className="pill soft">Optional</span><div className="spacer" />
-            {editingSection === 'VCENTER' ? (
-              <div className="actions">
-                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                <button className="btn primary" onClick={() => onSave('VCENTER')} disabled={saving || !validationMap['VCENTER']}>{saving?"Saving…":"Save"}</button>
+            <details className="section overflow-visible" open>
+              <summary className="section-head">
+                <span className="title">Logging</span><span className="pill soft">Optional</span><div className="spacer" />
+                {editingSection === 'DEBUG' ? (
+                  <div className="actions">
+                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                    <button className="btn primary" onClick={() => onSave('DEBUG')} disabled={saving || !validationMap['DEBUG']}>{saving?"Saving…":"Save"}</button>
+                  </div>
+                ) : <button className="btn" onClick={() => setEditingSection('DEBUG')} disabled={saving || editingSection !== null}>Edit</button>}
+              </summary>
+              <div className="grid">
+                {sections.DEBUG.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'DEBUG'} />)}
               </div>
-            ) : <button className="btn" onClick={() => setEditingSection('VCENTER')} disabled={saving || editingSection !== null}>Edit</button>}
-          </summary>
-          <div className="grid">
-            {sections.VCENTER.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={vcenterTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'VCENTER'} />)}
-          </div>
-        </details>
-      )}
-
-      {!loading && (
-        <details className="section overflow-visible" open>
-          <summary className="section-head">
-            <span className="title">Logging</span><span className="pill soft">Optional</span><div className="spacer" />
-            {editingSection === 'DEBUG' ? (
-              <div className="actions">
-                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                <button className="btn primary" onClick={() => onSave('DEBUG')} disabled={saving || !validationMap['DEBUG']}>{saving?"Saving…":"Save"}</button>
-              </div>
-            ) : <button className="btn" onClick={() => setEditingSection('DEBUG')} disabled={saving || editingSection !== null}>Edit</button>}
-          </summary>
-          <div className="grid">
-            {sections.DEBUG.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'DEBUG'} />)}
-          </div>
-        </details>
+            </details>
+        </>
       )}
     </div>
   );

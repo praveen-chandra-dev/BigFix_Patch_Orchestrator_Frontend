@@ -4,8 +4,16 @@ import FilterDrawer from "./FilterDrawer";
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
+// UPDATED: Now dynamically injects x-active-user and x-user-role on every request
 async function apiFetch(url, options = {}) {
-  const r = await fetch(`${API}${url}`, options);
+  const headers = {
+    "Content-Type": "application/json",
+    "x-user-role": sessionStorage.getItem("user_role") || "Admin",
+    "x-active-user": sessionStorage.getItem("username"),
+    ...(options.headers || {})
+  };
+  
+  const r = await fetch(`${API}${url}`, { ...options, headers });
   let j;
   try { j = await r.json(); } catch (e) { j = { ok: false, error: "Failed to parse server response." }; }
   if (!r.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${r.status}`);
@@ -120,6 +128,9 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [formBusy, setFormBusy] = useState(false);
   
   const [userType, setUserType] = useState("Local"); 
+  
+  // NEW: State for BigFix operator provisioning
+  const [createBfOp, setCreateBfOp] = useState(true);
 
   const [editingId, setEditingId] = useState(null);
   const [editRole, setEditRole] = useState("");
@@ -187,7 +198,10 @@ export default function UserManagement({ onClose, currentUserId }) {
     
     setFormBusy(true);
     try {
-      const data = await apiFetch("/api/auth/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password, role }), });
+      const data = await apiFetch("/api/auth/signup", { 
+          method: "POST", 
+          body: JSON.stringify({ username, password, role, createBfOp }) // Passed BigFix Checkbox state
+      });
       const newUser = data.userData ? { ...data.userData, Role: role } : { UserID: data.userId, LoginName: username, Role: role, CreatedAt: new Date().toISOString() };
       setUsers([...users, newUser]);
       setUsername(""); setPassword(""); setConfirmPass(""); setRole("Windows"); 
@@ -207,8 +221,7 @@ export default function UserManagement({ onClose, currentUserId }) {
     try {
       const response = await apiFetch("/api/auth/admin/add-user", { 
         method: "POST", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ username, role }) 
+        body: JSON.stringify({ username, role, createBfOp }) // Passed BigFix Checkbox state
       });
       
       await fetchUsers(); 
@@ -228,7 +241,10 @@ export default function UserManagement({ onClose, currentUserId }) {
     if (!window.confirm("Are you sure you want to delete this user? This action cannot be undone.")) return;
 
     try {
-      await apiFetch(`/api/auth/users/${userId}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentUserId: currentUserId }) });
+      await apiFetch(`/api/auth/users/${userId}`, { 
+          method: "DELETE", 
+          body: JSON.stringify({ currentUserId: currentUserId }) 
+      });
       setUsers(users.filter(u => u.UserID !== userId));
     } catch (e) { setError(`Failed to delete user: ${e.message}`); }
   }
@@ -240,7 +256,10 @@ export default function UserManagement({ onClose, currentUserId }) {
     if (!editRole) return;
     setEditBusy(true);
     try {
-      await apiFetch(`/api/auth/users/${userId}/role`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: editRole }) });
+      await apiFetch(`/api/auth/users/${userId}/role`, { 
+          method: "PUT", 
+          body: JSON.stringify({ role: editRole }) 
+      });
       setUsers(users.map(u => u.UserID === userId ? { ...u, Role: editRole } : u));
       setEditingId(null);
     } catch (e) { alert(`Failed to update role: ${e.message}`); } 
@@ -403,6 +422,15 @@ export default function UserManagement({ onClose, currentUserId }) {
                     </div>
                   </>
                 )}
+
+                {/* THE NEW CHECKBOX FOR BIGFIX PROVISIONING */}
+                <div className="field" style={{ gridColumn: '1 / -1', marginTop: '10px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input type="checkbox" className="custom-checkbox" checked={createBfOp} onChange={(e) => setCreateBfOp(e.target.checked)} /> 
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>Also provision this user in the BigFix Console (Passthrough Auth)</span>
+                  </label>
+                </div>
+
               </div>
               
               {formError && <div className="alert error small" style={{ margin: '0 20px 20px' }}>{formError}</div>}

@@ -111,13 +111,11 @@ export default function Login({ onSuccess }) {
         body: JSON.stringify({ username: u.trim(), password: p }),
     });
       
-    // Safely parse response whether it is JSON or plain text
     const text = await r.text();
     let j;
     try { 
         j = JSON.parse(text); 
     } catch (err) { 
-        // If it's not JSON, throw the raw text (e.g. "User doesn't exist")
         throw new Error(text || "Invalid response from server."); 
     }
       
@@ -134,6 +132,10 @@ export default function Login({ onSuccess }) {
       
     const userRole = j.role || "Windows";
     sessionStorage.setItem("user_role", userRole);
+    
+    // --- SECURITY FIX: SAVE USERNAME FOR PASSTHROUGH AUTH ---
+    sessionStorage.setItem("username", j.username);
+    
     onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
     setBusy(false);
   }
@@ -153,6 +155,10 @@ export default function Login({ onSuccess }) {
 
     const userRole = j.role;
     sessionStorage.setItem("user_role", userRole);
+    
+    // --- SECURITY FIX: SAVE USERNAME FOR PASSTHROUGH AUTH ---
+    sessionStorage.setItem("username", j.username);
+    
     onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
     setBusy(false);
   }

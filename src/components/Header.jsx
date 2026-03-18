@@ -12,7 +12,6 @@ const IconCalendar = () => (<svg width="18" height="18" viewBox="0 0 24 24" fill
 const IconSettings = () => (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 0 2.83 2 2 0 0 1 0-2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>);
 const IconLogout = () => (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>);
 
-// Global Navigation Manager to intercept and log sub-tab history uniformly across the app.
 class NavManager {
     constructor() {
         this.past = [];
@@ -28,7 +27,8 @@ class NavManager {
                 this.current.riskSubTab === state.riskSubTab &&
                 this.current.kpiTab === state.kpiTab &&
                 this.current.localSnapTab === state.localSnapTab &&
-                this.current.localCloneTab === state.localCloneTab
+                this.current.localCloneTab === state.localCloneTab &&
+                this.current.localRoleTab === state.localRoleTab
             ) return; 
             this.past.push(this.current);
         }
@@ -59,18 +59,16 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
   const { env } = useEnvironment();
   const isEUC = role === 'EUC';
 
-  // State to track current active tabs in Clone/Snapshot modules
   const [localSnapTab, setLocalSnapTab] = useState('TARGETS');
   const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
+  const [localRoleTab, setLocalRoleTab] = useState('LIST');
 
-  // Push to history buffer whenever any sub-tab state changes (if it wasn't triggered by history itself)
   useEffect(() => {
     if (!isRestoring) {
-        navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab });
+        navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab });
     }
-  }, [activeMenu, flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab]);
+  }, [activeMenu, flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab]);
 
-  // Handle incoming history restoration signals from Topbar
   useEffect(() => {
     const handleRestore = (e) => {
         const state = e.detail;
@@ -83,6 +81,7 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
         if (state.kpiTab !== kpiTab && setKpiTab) setKpiTab(state.kpiTab);
         if (state.localSnapTab !== localSnapTab) window.dispatchEvent(new CustomEvent('nav:snapshot', { detail: state.localSnapTab }));
         if (state.localCloneTab !== localCloneTab) window.dispatchEvent(new CustomEvent('nav:clone', { detail: state.localCloneTab }));
+        if (state.localRoleTab !== localRoleTab) window.dispatchEvent(new CustomEvent('nav:roles', { detail: state.localRoleTab }));
     };
     window.addEventListener('nav:restore', handleRestore);
     return () => window.removeEventListener('nav:restore', handleRestore);
@@ -91,11 +90,14 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
   useEffect(() => {
     const handleSnap = (e) => setLocalSnapTab(e.detail);
     const handleClone = (e) => setLocalCloneTab(e.detail);
+    const handleRole = (e) => setLocalRoleTab(e.detail);
     window.addEventListener('sync:snapshot_tab', handleSnap);
     window.addEventListener('sync:clone_tab', handleClone);
+    window.addEventListener('sync:roles_tab', handleRole);
     return () => {
         window.removeEventListener('sync:snapshot_tab', handleSnap);
         window.removeEventListener('sync:clone_tab', handleClone);
+        window.removeEventListener('sync:roles_tab', handleRole);
     };
   }, []);
 
@@ -176,7 +178,6 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
            </div>
         )}
 
-        {/* --- KPI DETAILS NOW HAS SUB-TABS --- */}
         <a className={`menu-item ${activeMenu === 'kpi-details' ? 'active' : ''}`} onClick={() => { onNavigate('kpi-details'); if(setKpiTab) setKpiTab('health'); }}>
            <IconDashboard /> KPI Details
         </a>
@@ -207,7 +208,6 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
         
         {role !== 'EUC' && (
           <>
-            {/* Snapshot Menu & Vertical Tabs */}
             <a className={`menu-item ${activeMenu === 'snapshot' ? 'active' : ''}`} onClick={() => onNavigate('snapshot')}>
                <IconFolder /> Take Snapshot
             </a>
@@ -225,7 +225,6 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
                </div>
             )}
 
-            {/* Clone Menu & Vertical Tabs */}
             <a className={`menu-item ${activeMenu === 'clone' ? 'active' : ''}`} onClick={() => onNavigate('clone')}>
                <IconFolder /> Clone VM
             </a>
@@ -245,17 +244,41 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
           </>
         )}
 
+        <div className="menu-label">Administration</div>
         {role === 'Admin' && (
           <>
-            <div className="menu-label">Administration</div>
             <a className={`menu-item ${activeMenu === 'users' ? 'active' : ''}`} onClick={() => onNavigate('users')}>
                <IconGroup /> User Management
             </a>
-            <a className={`menu-item ${activeMenu === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
-               <IconSettings /> Environment Settings
+            
+            <a className={`menu-item ${activeMenu === 'roles' ? 'active' : ''}`} onClick={() => onNavigate('roles')}>
+               <IconShield /> Role Management
             </a>
+            {activeMenu === 'roles' && (
+               <div className="sidebar-sub-menu">
+                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'LIST' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'LIST'}))}>
+                         Role List
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'DETAILS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'DETAILS'}))}>
+                         Details
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'COMPUTERS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'COMPUTERS'}))}>
+                         Computer Assignments
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'SITES' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'SITES'}))}>
+                         Sites
+                   </a>
+                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'OPERATORS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'OPERATORS'}))}>
+                         Operators
+                   </a>
+               </div>
+            )}
           </>
         )}
+        
+        <a className={`menu-item ${activeMenu === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
+           <IconSettings /> Environment Settings
+        </a>
       </div>
     </nav>
   );
@@ -269,7 +292,7 @@ export function Topbar({ onNavHistory, username, role, onLogout }) {
         window.dispatchEvent(new CustomEvent('nav:restore', { detail: state }));
         setTimeout(() => { isRestoring = false; }, 100);
     } else {
-        onNavHistory(-1); // Hand control over to the main app if local sub-tab history is empty
+        onNavHistory(-1); 
     }
   };
 
@@ -280,7 +303,7 @@ export function Topbar({ onNavHistory, username, role, onLogout }) {
         window.dispatchEvent(new CustomEvent('nav:restore', { detail: state }));
         setTimeout(() => { isRestoring = false; }, 100);
     } else {
-        onNavHistory(1); // Hand control over to the main app if local sub-tab future is empty
+        onNavHistory(1); 
     }
   };
 
