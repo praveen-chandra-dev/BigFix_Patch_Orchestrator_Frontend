@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useMemo, useCallback, useEffect, Suspense, lazy, useRef } from "react";
+import { useState, useMemo, useCallback, useEffect, Suspense, lazy } from "react";
 import "./styles/Style.css";
 import DeploymentHistory, { Stage } from "./components/FlowCard.jsx";
 import Environment, { EnvironmentProvider, useEnvironment } from "./components/Environment.jsx";
@@ -9,6 +9,8 @@ import Login from "./components/auth/Login.jsx";
 
 // Import new Sidebar/Topbar
 import { Sidebar, Topbar } from "./components/Header.jsx";
+// Import the new hook for DB state
+import { useTeamState } from "./hooks/useTeamState.js";
 
 const PilotEnvironment = lazy(() => import("./components/pilot/PilotEnvironment.jsx"));
 const PilotSandboxResult = lazy(() => import("./components/pilot/PilotSandboxResult.jsx"));
@@ -30,23 +32,13 @@ const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 async function getJSON(url) { const r = await fetch(url, { headers: { Accept: "application/json" } }); return r.json(); }
 async function postJSON(url, body) { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return r.json(); }
 
-const STATE_ID_MAP = { 'Admin': 1, 'Windows': 9002, 'Linux': 9003, 'EUC': 9004 };
-
-function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate }) {
+function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate }) {
   const { env, setEnv } = useEnvironment();
-  const [stateLoading, setStateLoading] = useState(true);
-  const isInitialMount = useRef(true);
-  const [currentStage, setCurrentStage] = useState(Stage.CONFIG);
-  const [sandboxTriggered, setSandboxTriggered] = useState(false);
-  const [pilotTriggered, setPilotTriggered] = useState(false);
-  const [configLocked, setConfigLocked] = useState(false);
-  const [configSaved, setConfigSaved] = useState(false);
-  const [completedStages, setCompletedStages] = useState([]);
-  const [lastActions, setLastActions] = useState({});
+  
+  // REPLACE OLD LOCAL STORAGE / DIRECT FETCH WITH DB HOOK
+  const { state: teamState, saveState: updateTeamState, loading: stateLoading } = useTeamState();
 
-  const isEUC = role === 'EUC';
   const apiBase = useMemo(() => API, []);
-  const sharedStateId = STATE_ID_MAP[role] || 1;
 
   useEffect(() => {
     getJSON(`${apiBase}/api/config`).then(res => {
@@ -54,61 +46,36 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
     }).catch(console.error);
   }, [apiBase, setEnv]);
 
-  const fetchState = useCallback(async () => {
-    if (!userId) { setStateLoading(false); return; }
-    setStateLoading(true);
-    try {
-      const data = await getJSON(`${apiBase}/api/auth/state/${sharedStateId}`);
-      if (data.state) {
-        const s = data.state;
-        if (s?.currentStage && s.currentStage !== Stage.HISTORY) setCurrentStage(s.currentStage);
-        if (Array.isArray(s?.completedStages)) setCompletedStages(s.completedStages);
-        if (s?.configSaved) setConfigSaved(true);
-        if (s?.configLocked) setConfigLocked(true);
-        if (s?.sandboxTriggered) setSandboxTriggered(true);
-        if (s?.pilotTriggered) setPilotTriggered(true);
-        if (s?.lastActions) setLastActions(s.lastActions);
-        
-        // PULL DOWN UNLOCK STATES FROM DATABASE
-        if (s?.pilotUnlocked) setEnv(p => ({ ...p, pilotUnlocked: true }));
-        if (s?.productionUnlocked) setEnv(p => ({ ...p, productionUnlocked: true }));
-      }
-    } catch {} finally { setStateLoading(false); setTimeout(() => { isInitialMount.current = false; }, 50); }
-  }, [userId, sharedStateId, apiBase, setEnv]);
+  // Extract fields from shared DB state
+  const s = teamState || {};
+  const currentStage = s.currentStage || Stage.CONFIG;
+  const completedStages = s.completedStages || [];
+  const configSaved = !!s.configSaved;
+  const configLocked = !!s.configLocked;
+  const sandboxTriggered = !!s.sandboxTriggered;
+  const pilotTriggered = !!s.pilotTriggered;
+  const lastActions = s.lastActions || {};
 
-  useEffect(() => { fetchState(); }, [fetchState]);
-
+  // Sync unlocks from DB to local env state
   useEffect(() => {
-    if (stateLoading || isInitialMount.current || !userId) return;
-    if (currentStage === Stage.HISTORY) return;
-    
-    // PUSH UNLOCK STATES TO DATABASE
-    postJSON(`${apiBase}/api/auth/state/${sharedStateId}`, {
-      currentStage, 
-      completedStages, 
-      configSaved, 
-      configLocked, 
-      sandboxTriggered, 
-      pilotTriggered, 
-      lastActions,
-      pilotUnlocked: env.pilotUnlocked,
-      productionUnlocked: env.productionUnlocked
-    }).catch(console.error);
-  }, [stateLoading, userId, currentStage, completedStages, configSaved, configLocked, sandboxTriggered, pilotTriggered, lastActions, env.pilotUnlocked, env.productionUnlocked, sharedStateId, apiBase]);
+    if (s.pilotUnlocked !== undefined || s.productionUnlocked !== undefined) {
+      setEnv(p => ({ 
+        ...p, 
+        pilotUnlocked: s.pilotUnlocked ?? p.pilotUnlocked, 
+        productionUnlocked: s.productionUnlocked ?? p.productionUnlocked 
+      }));
+    }
+  }, [s.pilotUnlocked, s.productionUnlocked, setEnv]);
 
   const postStageSignal = async (stage, status) => { try { await fetch(`${apiBase}/orchestrator/stages/${stage}`, { method: "POST", body: JSON.stringify({ status }) }); } catch {} };
-  const addCompleted = (stage) => { setCompletedStages(p => p.includes(stage) ? p : [...p, stage]); postStageSignal(stage, "completed"); };
 
   const canGotoStage = useCallback((next) => {
     if (next === Stage.HISTORY) return true;
     if (next === Stage.CONFIG) return true;
-    if (isEUC) {
-        if (next === Stage.PRODUCTION) return (configSaved || completedStages.includes(Stage.CONFIG));
-        if (next === Stage.FinalResult) return completedStages.includes(Stage.PRODUCTION);
-        return false;
-    }
+    
     if (next === Stage.SANDBOX && !env.enableSandbox) return false;
     if (next === Stage.PILOT && !env.enablePilot) return false;
+    
     if (next === Stage.SANDBOX) return (configSaved || completedStages.includes(Stage.CONFIG));
     if (next === Stage.PILOT) return env.enableSandbox ? completedStages.includes(Stage.SANDBOX) : (configSaved || completedStages.includes(Stage.CONFIG));
     if (next === Stage.PRODUCTION) {
@@ -118,21 +85,23 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
     }
     if (next === Stage.FinalResult) return completedStages.includes(Stage.PRODUCTION);
     return false;
-  }, [configSaved, completedStages, isEUC, env.enableSandbox, env.enablePilot]);
+  }, [configSaved, completedStages, env.enableSandbox, env.enablePilot]);
 
   const accessibleStages = useMemo(() => Object.values(Stage).filter(canGotoStage), [canGotoStage]);
+  
   useEffect(() => {
     if (onFlowUpdate) {
         onFlowUpdate({ current: currentStage, completed: completedStages, accessible: accessibleStages });
     }
   }, [currentStage, completedStages, accessibleStages, onFlowUpdate]);
 
-  const handleStageChange = useCallback((next) => { if (canGotoStage(next)) { setCurrentStage(next); postStageSignal(next, "active"); } }, [canGotoStage]);
+  const handleStageChange = useCallback((next) => { 
+      if (canGotoStage(next)) { 
+          updateTeamState({ currentStage: next }); 
+          postStageSignal(next, "active"); 
+      } 
+  }, [canGotoStage, updateTeamState]);
   
-  const recordAction = (stage, id, groupName) => { 
-      if(id) setLastActions(p => ({ ...p, [stage]: { id, group: groupName, ts: Date.now() } })); 
-  };
-
   useEffect(() => {
     const onReq = (e) => handleStageChange(e.detail.stage);
     window.addEventListener('flow:request_stage', onReq);
@@ -140,50 +109,127 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
   }, [handleStageChange]);
 
   function handleConfigSaved(newConfig) {
-    setConfigSaved(true); setConfigLocked(true); addCompleted(Stage.CONFIG);
     const sbxEnabled = newConfig?.enableSandbox ?? env.enableSandbox;
     const pilotEnabled = newConfig?.enablePilot ?? env.enablePilot;
+    
     let next = Stage.PRODUCTION;
-    if (isEUC) next = Stage.PRODUCTION;
-    else if (sbxEnabled) next = Stage.SANDBOX;
+    if (sbxEnabled) next = Stage.SANDBOX;
     else if (pilotEnabled) next = Stage.PILOT;
-    setCurrentStage(next); postStageSignal(next, "active");
+
+    const newCompleted = completedStages.includes(Stage.CONFIG) ? completedStages : [...completedStages, Stage.CONFIG];
+
+    updateTeamState({
+        configSaved: true,
+        configLocked: true,
+        completedStages: newCompleted,
+        currentStage: next
+    });
+
+    postStageSignal(Stage.CONFIG, "completed");
+    postStageSignal(next, "active");
   }
 
   const handleSandboxDone = async (result) => {
     if (!result?.ok) return;
-    if (result?.actionId) recordAction(Stage.SANDBOX, result.actionId, env.sbxGroup);
-    setSandboxTriggered(true); addCompleted(Stage.SANDBOX);
-    setCurrentStage(env.enablePilot ? Stage.PILOT : Stage.PRODUCTION);
+    
+    let newActions = lastActions;
+    if (result?.actionId) {
+        newActions = { ...lastActions, [Stage.SANDBOX]: { id: result.actionId, group: env.sbxGroup, ts: Date.now() } };
+    }
+    
+    const newCompleted = completedStages.includes(Stage.SANDBOX) ? completedStages : [...completedStages, Stage.SANDBOX];
+    const next = env.enablePilot ? Stage.PILOT : Stage.PRODUCTION;
+
+    updateTeamState({
+        sandboxTriggered: true,
+        completedStages: newCompleted,
+        lastActions: newActions,
+        currentStage: next
+    });
+    
+    postStageSignal(Stage.SANDBOX, "completed");
+    postStageSignal(next, "active");
   };
 
   useEffect(() => {
-    const onPilotTrig = (e) => { if(e?.detail?.actionId) recordAction(Stage.PILOT, e.detail.actionId, e.detail.group); setPilotTriggered(true); addCompleted(Stage.PILOT); setCurrentStage(Stage.PRODUCTION); };
-    const onProdTrig = (e) => { if(e?.detail?.actionId) recordAction(Stage.PRODUCTION, e.detail.actionId, e.detail.group); addCompleted(Stage.PRODUCTION); addCompleted(Stage.FinalResult); setCurrentStage(Stage.FinalResult); };
-    window.addEventListener("pilot:triggered", onPilotTrig); window.addEventListener("production:triggered", onProdTrig);
-    return () => { window.removeEventListener("pilot:triggered", onPilotTrig); window.removeEventListener("production:triggered", onProdTrig); };
-  }, [addCompleted]);
+    const onPilotTrig = (e) => { 
+        let newActions = lastActions;
+        if(e?.detail?.actionId) {
+            newActions = { ...lastActions, [Stage.PILOT]: { id: e.detail.actionId, group: e.detail.group, ts: Date.now() } };
+        }
+        const newCompleted = completedStages.includes(Stage.PILOT) ? completedStages : [...completedStages, Stage.PILOT];
+        
+        updateTeamState({
+            pilotTriggered: true,
+            lastActions: newActions,
+            completedStages: newCompleted,
+            currentStage: Stage.PRODUCTION
+        });
+        
+        postStageSignal(Stage.PILOT, "completed");
+        postStageSignal(Stage.PRODUCTION, "active");
+    };
+
+    const onProdTrig = (e) => { 
+        let newActions = lastActions;
+        if(e?.detail?.actionId) {
+            newActions = { ...lastActions, [Stage.PRODUCTION]: { id: e.detail.actionId, group: e.detail.group, ts: Date.now() } };
+        }
+        let newCompleted = completedStages.includes(Stage.PRODUCTION) ? completedStages : [...completedStages, Stage.PRODUCTION];
+        if (!newCompleted.includes(Stage.FinalResult)) newCompleted = [...newCompleted, Stage.FinalResult];
+
+        updateTeamState({
+            lastActions: newActions,
+            completedStages: newCompleted,
+            currentStage: Stage.FinalResult
+        });
+        
+        postStageSignal(Stage.PRODUCTION, "completed");
+    };
+    
+    window.addEventListener("pilot:triggered", onPilotTrig); 
+    window.addEventListener("production:triggered", onProdTrig);
+    
+    return () => { 
+        window.removeEventListener("pilot:triggered", onPilotTrig); 
+        window.removeEventListener("production:triggered", onProdTrig); 
+    };
+  }, [lastActions, completedStages, updateTeamState]);
 
   useEffect(() => {
     const onResetSbx = () => {
-      setSandboxTriggered(false); setPilotTriggered(false);
-      setCompletedStages(p => p.filter(s => s !== Stage.SANDBOX && s !== Stage.PILOT && s !== Stage.PRODUCTION && s !== Stage.FinalResult));
+      updateTeamState({
+          sandboxTriggered: false, 
+          pilotTriggered: false,
+          completedStages: completedStages.filter(st => st !== Stage.SANDBOX && st !== Stage.PILOT && st !== Stage.PRODUCTION && st !== Stage.FinalResult),
+          pilotUnlocked: false,
+          productionUnlocked: false,
+          currentStage: Stage.SANDBOX
+      });
       setEnv(p => ({ ...p, pilotEvaluated: false, prodEvaluated: false, pilotUnlocked: false, prodUnlocked: false }));
-      setCurrentStage(Stage.SANDBOX); postStageSignal(Stage.SANDBOX, "active");
+      postStageSignal(Stage.SANDBOX, "active");
     };
 
     const onResetPilot = () => {
-      setPilotTriggered(false);
-      setCompletedStages(p => p.filter(s => s !== Stage.PILOT && s !== Stage.PRODUCTION && s !== Stage.FinalResult));
+      updateTeamState({
+          pilotTriggered: false,
+          completedStages: completedStages.filter(st => st !== Stage.PILOT && st !== Stage.PRODUCTION && st !== Stage.FinalResult),
+          productionUnlocked: false,
+          currentStage: Stage.PILOT
+      });
       setEnv(p => ({ ...p, prodEvaluated: false, prodUnlocked: false }));
-      setCurrentStage(Stage.PILOT); postStageSignal(Stage.PILOT, "active");
+      postStageSignal(Stage.PILOT, "active");
     };
 
     const onResetAll = () => {
-      setSandboxTriggered(false); setPilotTriggered(false); setConfigSaved(false); setConfigLocked(false);
-      setCompletedStages([]); setLastActions({});
+      updateTeamState({
+          sandboxTriggered: false, pilotTriggered: false, configSaved: false, configLocked: false,
+          completedStages: [], lastActions: {},
+          pilotUnlocked: false, productionUnlocked: false,
+          currentStage: Stage.CONFIG
+      });
       setEnv(p => ({ ...p, pilotEvaluated: false, prodEvaluated: false, pilotUnlocked: false, prodUnlocked: false }));
-      setCurrentStage(Stage.CONFIG); postStageSignal(Stage.CONFIG, "active");
+      postStageSignal(Stage.CONFIG, "active");
     };
 
     window.addEventListener("orchestrator:resetToSandbox", onResetSbx);
@@ -195,7 +241,7 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
       window.removeEventListener("orchestrator:resetToPilot", onResetPilot);
       window.removeEventListener("orchestrator:resetAll", onResetAll);
     };
-  }, [setEnv]);
+  }, [completedStages, updateTeamState, setEnv]);
 
   if (stateLoading) return <div className="app-loading-content">Loading Orchestration Flow...</div>;
 
@@ -205,14 +251,15 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
       {currentStage === Stage.HISTORY && <DeploymentHistory />}
       {currentStage === Stage.CONFIG && <Configuration onSaved={handleConfigSaved} />}
 
-      {currentStage === Stage.SANDBOX && !isEUC && env.enableSandbox && (
+      {/* HARDCODED OS/EUC CHECKS COMPLETELY REMOVED! */}
+      {currentStage === Stage.SANDBOX && env.enableSandbox && (
         <div className="stage-cards-row">
           <Environment />
           <DecisionEngine apiBase={apiBase} baseline={env.baseline} group={env.sbxGroup} autoMail={env.autoMail} onDone={handleSandboxDone} disabled={sandboxTriggered} username={username} />
         </div>
       )}
 
-      {currentStage === Stage.PILOT && !isEUC && env.enablePilot && (
+      {currentStage === Stage.PILOT && env.enablePilot && (
         <Suspense fallback={<div className="app-loading-content">Loading Pilot Data...</div>}>
           <div className="stage-cards-row">
             <PilotEnvironment mode="pilot" />
@@ -235,14 +282,14 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
         <Suspense fallback={<div className="app-loading-content">Loading Production Data...</div>}>
           <div className="stage-cards-row">
             <PilotEnvironment mode="production" />
-            {!isEUC && env.enablePilot && (
+            {env.enablePilot && (
                 <PilotSandboxResult 
                   title="Pilot Result" 
                   actionId={lastActions?.PILOT?.id} 
                   onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.PILOT?.id, group: lastActions?.PILOT?.group })} 
                 />
             )}
-            {!isEUC && !env.enablePilot && env.enableSandbox && (
+            {!env.enablePilot && env.enableSandbox && (
                 <PilotSandboxResult 
                   title="Sandbox Result" 
                   actionId={lastActions?.SANDBOX?.id} 
@@ -252,7 +299,7 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
             <PilotKPI title="Production KPI" lastActions={lastActions} onKpiClick={(type) => onNavigate('kpi-details', type)} />
           </div>
           <div className="stage-cards-row mt-20">
-            <PilotDecisionEngine sbxDone={true} pilotDone={true} mode="production" autoMail={env.autoMail} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} role={role} />
+            <PilotDecisionEngine sbxDone={true} pilotDone={true} mode="production" autoMail={env.autoMail} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} />
           </div>
         </Suspense>
       )}
@@ -260,14 +307,14 @@ function Main({ userId, username, role, onOpenSnapshot, onOpenClone, onFlowUpdat
       {currentStage === Stage.FinalResult && (
         <Suspense fallback={null}>
           <div className="stage-cards-row">
-             {!isEUC && env.enableSandbox && (
+             {env.enableSandbox && (
                <PilotSandboxResult 
                  title="Sandbox Result" 
                  actionId={lastActions?.SANDBOX?.id} 
                  onViewDetails={() => onNavigate('kpi-details', { type: 'success', id: lastActions?.SANDBOX?.id, group: lastActions?.SANDBOX?.group })} 
                />
              )}
-             {!isEUC && env.enablePilot && (
+             {env.enablePilot && (
                <PilotSandboxResult 
                  title="Pilot Result" 
                  actionId={lastActions?.PILOT?.id} 
@@ -351,7 +398,6 @@ export default function App() {
           activeMenu={activeMenu}
           onNavigate={(route) => handleNavigate(route, null)}
           flowState={flowState}
-          role={session?.role} 
           riskTab={riskTab}
           setRiskTab={setRiskTab}
           riskSubTab={riskSubTab}
@@ -366,10 +412,7 @@ export default function App() {
         <div className="main-wrapper">
           <Topbar 
             onNavHistory={handleHistory} 
-            canGoBack={historyIdx > 0}
-            canGoForward={historyIdx < navHistory.length - 1}
             username={session?.username} 
-            role={session?.role} 
             onLogout={handleLogout} 
           />
 
@@ -395,7 +438,7 @@ export default function App() {
              activeMenu === 'users' ? <Suspense fallback={null}><UserManagement onClose={()=>handleNavigate('orchestration')} currentUserId={session?.userId}/></Suspense> :
              activeMenu === 'roles' ? <Suspense fallback={null}><RoleManagement onClose={()=>handleNavigate('orchestration')} role={session?.role} username={session?.username} /></Suspense> :
              activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} activeTab={kpiTab} /></Suspense> :
-             activeMenu === 'orchestration' ? <Main userId={session?.userId} username={session?.username} role={session?.role} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> : null
+             activeMenu === 'orchestration' ? <Main username={session?.username} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> : null
             }
           </div>
         </div>

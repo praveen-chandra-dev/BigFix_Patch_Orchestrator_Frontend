@@ -43,6 +43,21 @@ const TEMPLATE = [
   { key: "DEBUG_LOG", value: "0", type: "enum-map", secret: false, hint: "", options: [{ value: "0", label: "Info" }, { value: "1", label: "Debug" }] },
 ];
 
+function getHeaders() {
+    return { "Content-Type": "application/json", "Accept": "application/json", "x-user-role": sessionStorage.getItem("user_role") || "Admin" };
+}
+
+// Special helper for auth routes that require the secure HTTP-Only cookie
+async function fetchAuth(endpoint, body) {
+    const res = await fetch(`${API}${endpoint}`, {
+        method: "POST",
+        headers: getHeaders(),
+        credentials: "include",
+        body: JSON.stringify(body)
+    });
+    return res.json();
+}
+
 function Switch({ checked, onChange, id, disabled = false }) {
   return (
     <button type="button" role="switch" aria-checked={checked} id={id} onClick={() => onChange(!checked)} className={`sw ${checked ? "on" : ""}`} title={checked ? "On" : "Off"} disabled={disabled}>
@@ -108,31 +123,37 @@ function Field({ item, value, onChange, invalid, disabled = false }) {
 function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x).trim()); }
 function listValidEmails(s) { if (!s) return true; return String(s).split(",").map(v => v.trim()).filter(Boolean).every(isEmail); }
 
-export default function Management({ onClose, role }) {
+export default function Management({ onClose }) {
   const [values, setValues] = useState({});
   const [originalValues, setOriginalValues] = useState({});
   const [editingSection, setEditingSection] = useState(null); 
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
 
-  const isAdmin = role === 'Admin';
+  // My Account State
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [myBfPassword, setMyBfPassword] = useState("");
+  const [savingPersonal, setSavingPersonal] = useState(false);
+  const [personalCreds, setPersonalCreds] = useState({ username: "Loading...", hasCreds: false });
+
+  // ONLY SHOW ADVANCED SETTINGS IF USER IS MASTER OPERATOR
+  const isMO = sessionStorage.getItem("isMO") === "true";
 
   const sections = useMemo(() => {
     const ord = { BIGFIX_: ["BIGFIX_BASE_URL","BIGFIX_USER","BIGFIX_PASS","BIGFIX_ALLOW_SELF_SIGNED"], LDAP_: ["LDAP_ENABLED", "LDAP_URL", "LDAP_DOMAIN", "LDAP_ALLOW_SELF_SIGNED"], SMTP_: ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_PORT","SMTP_SECURE","SMTP_CC","SMTP_BCC","SMTP_ALLOW_SELF_SIGNED"], SN_: ["SN_URL","SN_USER","SN_PASSWORD","SN_ALLOW_SELF_SIGNED"], VCENTER_:["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD", "VCENTER_ALLOW_SELF_SIGNED"], DEBUG_: ["DEBUG_LOG"] };
     const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
-    
-    // IF NOT ADMIN, ONLY RETURN BIGFIX SECTION
-    if (!isAdmin) {
-        return { BIGFIX: pick("BIGFIX_") };
-    }
-    
+    if (!isMO) return { BIGFIX: [], LDAP: [], SMTP: [], SN: [], VCENTER: [], DEBUG: [] };
     return { BIGFIX: pick("BIGFIX_"), LDAP: pick("LDAP_"), SMTP: pick("SMTP_"), SN: pick("SN_"), VCENTER:pick("VCENTER_"), DEBUG: pick("DEBUG_") };
-  }, [isAdmin]);
+  }, [isMO]);
 
-  const smtpTouched = useMemo(() => isAdmin ? ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_CC","SMTP_BCC"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isAdmin]);
-  const vcenterTouched = useMemo(() => isAdmin ? ["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isAdmin]);
-  const ldapEnabled = useMemo(() => isAdmin ? String(values["LDAP_ENABLED"] ?? "false").toLowerCase() === "true" : false, [values, isAdmin]);
+  const smtpTouched = useMemo(() => isMO ? ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_CC","SMTP_BCC"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isMO]);
+  const vcenterTouched = useMemo(() => isMO ? ["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isMO]);
+  const ldapEnabled = useMemo(() => isMO ? String(values["LDAP_ENABLED"] ?? "false").toLowerCase() === "true" : false, [values, isMO]);
 
   const invalidMap = useMemo(() => {
     const m = {};
@@ -142,17 +163,17 @@ export default function Management({ onClose, role }) {
         m[it.key] = (values[it.key] ?? it.value ?? "").toString().trim() === "";
       }
     }
-    if (isAdmin) {
+    if (isMO) {
         if (smtpTouched) { m.SMTP_HOST = (values.SMTP_HOST ?? "").trim() === ""; m.SMTP_FROM = !isEmail((values.SMTP_FROM ?? "").trim()); m.SMTP_TO = !listValidEmails(values.SMTP_TO); }
         if (vcenterTouched) m.VCENTER_URL = (values.VCENTER_URL ?? "").trim() === "";
         if (ldapEnabled) { m.LDAP_URL = (values.LDAP_URL ?? "").trim() === ""; m.LDAP_DOMAIN = (values.LDAP_DOMAIN ?? "").trim() === ""; }
     }
     return m;
-  }, [values, smtpTouched, vcenterTouched, ldapEnabled, editingSection, isAdmin]);
+  }, [values, smtpTouched, vcenterTouched, ldapEnabled, editingSection, isMO]);
 
   const validationMap = useMemo(() => {
       const map = { BIGFIX: sections.BIGFIX.every(it => !invalidMap[it.key]) };
-      if (isAdmin) {
+      if (isMO) {
           map.LDAP = sections.LDAP.every(it => !invalidMap[it.key]);
           map.SMTP = sections.SMTP.every(it => !(smtpTouched ? invalidMap[it.key] : false));
           map.SN = true;
@@ -160,144 +181,258 @@ export default function Management({ onClose, role }) {
           map.DEBUG = true;
       }
       return map;
-  }, [sections, invalidMap, smtpTouched, vcenterTouched, isAdmin]);
+  }, [sections, invalidMap, smtpTouched, vcenterTouched, isMO]);
 
-  async function fetchEnv() {
-    setMsg(""); setLoading(true);
+  async function fetchAllSettings() {
+    setMsg(""); setErr(""); setLoading(true);
     try {
-      const r = await fetch(`${API}/api/env`); const j = await r.json(); const apiValues = j.values || {}; const dict = {};
-      TEMPLATE.forEach(t => dict[t.key] = t.secret ? "" : (apiValues[t.key] ?? t.value ?? ""));
-      setValues(dict); setOriginalValues(dict);
+      // 1. Fetch Personal Credentials (For Everyone)
+      const pRes = await fetch(`${API}/api/auth/my-bigfix-creds`, { credentials: 'include' }).catch(()=>({}));
+      if (pRes.ok) {
+          const pData = await pRes.json();
+          if (pData.ok) setPersonalCreds({ username: pData.username, hasCreds: pData.hasCreds });
+          else setPersonalCreds({ username: "Authentication Error", hasCreds: false });
+      }
+
+      // 2. Fetch System Environment Configs (Only if Master Operator)
+      if (isMO) {
+          const eRes = await fetch(`${API}/api/env`, { headers: getHeaders() });
+          if (eRes.ok) {
+              const eData = await eRes.json();
+              const apiValues = eData.values || {}; 
+              const dict = {};
+              TEMPLATE.forEach(t => dict[t.key] = t.secret ? "" : (apiValues[t.key] ?? t.value ?? ""));
+              setValues(dict); 
+              setOriginalValues(dict);
+          }
+      }
     } catch (e) {
-      setMsg(`Error: ${e.message}`); const dict = {}; TEMPLATE.forEach(t => dict[t.key] = t.value ?? ""); setValues(dict); setOriginalValues(dict);
-    } finally { setLoading(false); }
+      setErr(`Error loading settings: ${e.message}`); 
+    } finally { 
+      setLoading(false); 
+    }
   }
   
-  useEffect(() => { fetchEnv(); }, []);
+  useEffect(() => { fetchAllSettings(); }, []);
   const onChange = (k, v) => setValues(prev => ({ ...prev, [k]: v }));
 
   async function onSave(sectionKey) {
-    setSaving(true); setMsg("");
+    setSaving(true); setMsg(""); setErr("");
     try {
       const outgoing = {}; sections[sectionKey].forEach(it => outgoing[it.key] = values[it.key] ?? "");
-      const r = await fetch(`${API}/api/env`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ updates: outgoing }) });
+      const r = await fetch(`${API}/api/env`, { method: "POST", headers: getHeaders(), body: JSON.stringify({ updates: outgoing }) });
       if (!r.ok && r.status !== 204) {
-        const j = await r.json().catch(()=>({})); setMsg(j.message || "Save failed");
+        const j = await r.json().catch(()=>({})); setErr(j.message || "Save failed");
       } else {
         const newOriginals = { ...values }; TEMPLATE.forEach(t => { if (t.secret) newOriginals[t.key] = ""; });
         setValues(newOriginals); setOriginalValues(newOriginals); setEditingSection(null);
-        setMsg("Saved successfully!"); setTimeout(() => setMsg(""), 2000);
+        setMsg("System settings saved successfully!"); setTimeout(() => setMsg(""), 2000);
       }
-    } catch (e) { setMsg(e?.message || "Save failed"); } finally { setSaving(false); }
+    } catch (e) { setErr(e?.message || "Save failed"); } finally { setSaving(false); }
   }
 
-  function onCancel() { setValues(originalValues); setEditingSection(null); setMsg(""); }
+  function onCancel() { setValues(originalValues); setEditingSection(null); setMsg(""); setErr(""); }
+
+  // --- MY ACCOUNT HANDLERS ---
+  const handleChangePassword = async (e) => {
+      e.preventDefault();
+      setErr(""); setMsg("");
+      if (newPassword !== confirmPassword) return setErr("New passwords do not match.");
+      
+      setSavingPassword(true);
+      try {
+          const data = await fetchAuth('/api/auth/change-password', { currentPassword, newPassword });
+          if (data.ok) {
+              setMsg(data.message || "Password updated successfully.");
+              setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+          } else {
+              setErr(data.error || "Failed to update password.");
+          }
+      } catch(e) { setErr(e.message); } finally { setSavingPassword(false); }
+  };
+
+  const handleVerifyBf = async (e) => {
+      e.preventDefault();
+      setErr(""); setMsg("");
+      setSavingPersonal(true);
+      try {
+          const data = await fetchAuth('/api/auth/my-bigfix-creds', { bfPassword: myBfPassword });
+          if (data.ok) {
+              setMsg(data.message || "Credentials verified & saved to vault.");
+              setPersonalCreds(prev => ({ ...prev, hasCreds: true }));
+              setMyBfPassword("");
+          } else {
+              setErr(data.error || "Verification failed. Check password.");
+          }
+      } catch(e) { setErr(e.message); } finally { setSavingPersonal(false); }
+  };
 
   return (
     <div className="mgmtenv">
       <div className="topbar">
-        <div className="left"><h2 className="clickable" onClick={onClose}>Environment Settings</h2></div>
+        <div className="left"><h2 className="clickable" onClick={onClose}>{isMO ? "Environment Settings" : "My Account"}</h2></div>
         <div className="right"><button className="btn" onClick={onClose}>Close</button></div>
       </div>
 
-      {msg && <div className={`banner ${msg.includes("failed")||msg.includes("Error") ? "error" : "success"}`}>{msg}</div>}
-      {loading && <div className="sub mgmt-loading">Loading settings...</div>}
+      {err && <div className="banner error">{err}</div>}
+      {msg && <div className="banner success">{msg}</div>}
+      
+      {loading && <div className="sub mgmt-loading" style={{ padding: '40px' }}>Loading settings...</div>}
 
       {!loading && (
-        <div className="section overflow-visible">
-          <div className="section-head">
-            <span className="title">BigFix</span><span className="pill">Required</span><div className="spacer" />
-            {editingSection === 'BIGFIX' ? (
-              <div className="actions">
-                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                <button className="btn primary" onClick={() => onSave('BIGFIX')} disabled={saving || !validationMap['BIGFIX']}>{saving?"Saving…":"Save"}</button>
-              </div>
-            ) : <button className="btn" onClick={() => setEditingSection('BIGFIX')} disabled={saving || editingSection !== null}>Edit</button>}
-          </div>
-          <div className="grid">
-            {sections.BIGFIX.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'BIGFIX'} />)}
-          </div>
-        </div>
-      )}
-
-      {/* RENDER REMAINING SECTIONS ONLY FOR ADMINS */}
-      {!loading && isAdmin && (
-        <>
-            <details className="section overflow-visible" open>
-                <summary className="section-head">
-                    <span className="title">Directory Services (LDAP)</span><span className="pill soft">Optional</span><div className="spacer" />
-                    {editingSection === 'LDAP' ? (
-                    <div className="actions">
-                        <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                        <button className="btn primary" onClick={() => onSave('LDAP')} disabled={saving || !validationMap['LDAP']}>{saving?"Saving…":"Save"}</button>
-                    </div>
-                    ) : <button className="btn" onClick={() => setEditingSection('LDAP')} disabled={saving || editingSection !== null}>Edit</button>}
-                </summary>
-                <div className="grid">
-                    {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP' || (it.key !== 'LDAP_ENABLED' && !ldapEnabled)} />)}
-                </div>
-            </details>
-
-            <div className="section overflow-visible">
+          <>
+            {/* ------------------------------------------------------------- */}
+            {/* MY ACCOUNT SECTION (VISIBLE TO EVERYONE)                        */}
+            {/* ------------------------------------------------------------- */}
+            <div className="section overflow-visible" style={{ border: !personalCreds.hasCreds ? '1px solid #ff9800' : '' }}>
               <div className="section-head">
-                <span className="title">SMTP / Email</span><span className="pill soft">Optional</span><div className="spacer" />
-                {editingSection === 'SMTP' ? (
-                  <div className="actions">
-                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                    <button className="btn primary" onClick={() => onSave('SMTP')} disabled={saving || !validationMap['SMTP']}>{saving?"Saving…":"Save"}</button>
-                  </div>
-                ) : <button className="btn" onClick={() => setEditingSection('SMTP')} disabled={saving || editingSection !== null}>Edit</button>}
+                <span className="title">My Account</span>
+                {!personalCreds.hasCreds && <span className="pill soft" style={{ backgroundColor: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>Action Required</span>}
               </div>
-              <div className="grid">
-                {sections.SMTP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={smtpTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'SMTP'} />)}
+
+              <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '40px', padding: '0 24px 24px' }}>
+                 {/* Left Column: Local Password */}
+                 <div>
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)' }}>Change Local Password</h3>
+                    <form onSubmit={handleChangePassword}>
+                        <div className="field">
+                            <span className="label">Current Password</span>
+                            <input type="password" placeholder="••••••••" className="control" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} required />
+                        </div>
+                        <div className="field">
+                            <span className="label">New Password</span>
+                            <input type="password" placeholder="••••••••" className="control" value={newPassword} onChange={e=>setNewPassword(e.target.value)} required />
+                        </div>
+                        <div className="field" style={{ marginBottom: '20px' }}>
+                            <span className="label">Confirm New Password</span>
+                            <input type="password" placeholder="••••••••" className="control" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} required />
+                        </div>
+                        <button type="submit" className="btn pri small" disabled={savingPassword}>{savingPassword ? "Updating..." : "Update Password"}</button>
+                    </form>
+                 </div>
+
+                 {/* Right Column: BigFix Vault */}
+                 <div>
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        Personal BigFix Vault
+                        {personalCreds.hasCreds && <span className="pill succ" style={{ fontSize: '11px', padding: '2px 6px' }}>Verified</span>}
+                        {!personalCreds.hasCreds && <span className="pill err" style={{ fontSize: '11px', padding: '2px 6px', backgroundColor: '#ff9800', color: 'white', border: 'none' }}>Missing/Invalid</span>}
+                    </h3>
+                    <p className="text-13 muted-text" style={{ marginBottom: '20px' }}>Store your personal BigFix password in the secure vault to allow Patch Setu to seamlessly perform orchestration actions on your behalf.</p>
+                    
+                    {!personalCreds.hasCreds && (
+                        <div style={{ padding: '12px', backgroundColor: '#fff3e0', border: '1px solid #ffcc80', borderRadius: '6px', color: '#e65100', fontSize: '12px', marginBottom: '20px' }}>
+                           ⚠️ BigFix rejected the stored credentials or you have not configured them yet. Provide your active BigFix password to continue using the app.
+                        </div>
+                    )}
+
+                    <form onSubmit={handleVerifyBf}>
+                        <div className="field">
+                            <span className="label">BigFix Username</span>
+                            <input type="text" className="control" value={personalCreds.username} disabled style={{ backgroundColor: 'var(--bg)', cursor: 'not-allowed', opacity: 0.8 }} />
+                        </div>
+                        <div className="field" style={{ marginBottom: '20px' }}>
+                            <span className="label">BigFix Password</span>
+                            <input type="password" placeholder={personalCreds.hasCreds ? "•••••••• (Saved Securely)" : "Enter BigFix Password"} className="control" value={myBfPassword} onChange={e=>setMyBfPassword(e.target.value)} required />
+                        </div>
+                        <button type="submit" className="btn outline small" disabled={savingPersonal}>{savingPersonal ? "Verifying with BigFix..." : "Verify & Save to Vault"}</button>
+                    </form>
+                 </div>
               </div>
             </div>
 
-            <details className="section overflow-visible" open>
-              <summary className="section-head">
-                <span className="title">ServiceNow</span><span className="pill soft">Optional</span><div className="spacer" />
-                {editingSection === 'SN' ? (
-                  <div className="actions">
-                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                    <button className="btn primary" onClick={() => onSave('SN')} disabled={saving || !validationMap['SN']}>{saving?"Saving…":"Save"}</button>
-                  </div>
-                ) : <button className="btn" onClick={() => setEditingSection('SN')} disabled={saving || editingSection !== null}>Edit</button>}
-              </summary>
-              <div className="grid">
-                {sections.SN.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'SN'} />)}
-              </div>
-            </details>
-
-            <details className="section overflow-visible" open>
-              <summary className="section-head">
-                <span className="title">VCenter</span><span className="pill soft">Optional</span><div className="spacer" />
-                {editingSection === 'VCENTER' ? (
-                  <div className="actions">
-                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                    <button className="btn primary" onClick={() => onSave('VCENTER')} disabled={saving || !validationMap['VCENTER']}>{saving?"Saving…":"Save"}</button>
-                  </div>
-                ) : <button className="btn" onClick={() => setEditingSection('VCENTER')} disabled={saving || editingSection !== null}>Edit</button>}
-              </summary>
-              <div className="grid">
-                {sections.VCENTER.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={vcenterTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'VCENTER'} />)}
-              </div>
-            </details>
-
-            <details className="section overflow-visible" open>
-              <summary className="section-head">
-                <span className="title">Logging</span><span className="pill soft">Optional</span><div className="spacer" />
-                {editingSection === 'DEBUG' ? (
-                  <div className="actions">
-                    <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-                    <button className="btn primary" onClick={() => onSave('DEBUG')} disabled={saving || !validationMap['DEBUG']}>{saving?"Saving…":"Save"}</button>
-                  </div>
-                ) : <button className="btn" onClick={() => setEditingSection('DEBUG')} disabled={saving || editingSection !== null}>Edit</button>}
-              </summary>
-              <div className="grid">
-                {sections.DEBUG.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'DEBUG'} />)}
-              </div>
-            </details>
-        </>
+            {/* ------------------------------------------------------------- */}
+            {/* GLOBAL SETTINGS (VISIBLE TO MASTER OPERATORS ONLY)            */}
+            {/* ------------------------------------------------------------- */}
+            {isMO && (
+                <>
+                    <details className="section overflow-visible" open>
+                        <summary className="section-head">
+                            <span className="title">Global BigFix Settings</span><span className="pill soft">Required</span><div className="spacer" />
+                            {editingSection === 'BIGFIX' ? (
+                            <div className="actions">
+                                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                                <button className="btn primary" onClick={() => onSave('BIGFIX')} disabled={saving || !validationMap['BIGFIX']}>{saving?"Saving…":"Save"}</button>
+                            </div>
+                            ) : <button className="btn" onClick={() => setEditingSection('BIGFIX')} disabled={saving || editingSection !== null}>Edit</button>}
+                        </summary>
+                        <div className="grid">
+                            {sections.BIGFIX.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'BIGFIX'} />)}
+                        </div>
+                    </details>
+                    <details className="section overflow-visible" open>
+                        <summary className="section-head">
+                            <span className="title">Directory Services (LDAP)</span><span className="pill soft">Optional</span><div className="spacer" />
+                            {editingSection === 'LDAP' ? (
+                            <div className="actions">
+                                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                                <button className="btn primary" onClick={() => onSave('LDAP')} disabled={saving || !validationMap['LDAP']}>{saving?"Saving…":"Save"}</button>
+                            </div>
+                            ) : <button className="btn" onClick={() => setEditingSection('LDAP')} disabled={saving || editingSection !== null}>Edit</button>}
+                        </summary>
+                        <div className="grid">
+                            {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP' || (it.key !== 'LDAP_ENABLED' && !ldapEnabled)} />)}
+                        </div>
+                    </details>
+                    <details className="section overflow-visible" open>
+                      <summary className="section-head">
+                        <span className="title">SMTP / Email</span><span className="pill soft">Optional</span><div className="spacer" />
+                        {editingSection === 'SMTP' ? (
+                          <div className="actions">
+                            <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                            <button className="btn primary" onClick={() => onSave('SMTP')} disabled={saving || !validationMap['SMTP']}>{saving?"Saving…":"Save"}</button>
+                          </div>
+                        ) : <button className="btn" onClick={() => setEditingSection('SMTP')} disabled={saving || editingSection !== null}>Edit</button>}
+                      </summary>
+                      <div className="grid">
+                        {sections.SMTP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={smtpTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'SMTP'} />)}
+                      </div>
+                    </details>
+                    <details className="section overflow-visible" open>
+                      <summary className="section-head">
+                        <span className="title">ServiceNow</span><span className="pill soft">Optional</span><div className="spacer" />
+                        {editingSection === 'SN' ? (
+                          <div className="actions">
+                            <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                            <button className="btn primary" onClick={() => onSave('SN')} disabled={saving || !validationMap['SN']}>{saving?"Saving…":"Save"}</button>
+                          </div>
+                        ) : <button className="btn" onClick={() => setEditingSection('SN')} disabled={saving || editingSection !== null}>Edit</button>}
+                      </summary>
+                      <div className="grid">
+                        {sections.SN.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'SN'} />)}
+                      </div>
+                    </details>
+                    <details className="section overflow-visible" open>
+                      <summary className="section-head">
+                        <span className="title">VCenter</span><span className="pill soft">Optional</span><div className="spacer" />
+                        {editingSection === 'VCENTER' ? (
+                          <div className="actions">
+                            <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                            <button className="btn primary" onClick={() => onSave('VCENTER')} disabled={saving || !validationMap['VCENTER']}>{saving?"Saving…":"Save"}</button>
+                          </div>
+                        ) : <button className="btn" onClick={() => setEditingSection('VCENTER')} disabled={saving || editingSection !== null}>Edit</button>}
+                      </summary>
+                      <div className="grid">
+                        {sections.VCENTER.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={vcenterTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'VCENTER'} />)}
+                      </div>
+                    </details>
+                    <details className="section overflow-visible" open>
+                      <summary className="section-head">
+                        <span className="title">Logging</span><span className="pill soft">Optional</span><div className="spacer" />
+                        {editingSection === 'DEBUG' ? (
+                          <div className="actions">
+                            <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                            <button className="btn primary" onClick={() => onSave('DEBUG')} disabled={saving || !validationMap['DEBUG']}>{saving?"Saving…":"Save"}</button>
+                          </div>
+                        ) : <button className="btn" onClick={() => setEditingSection('DEBUG')} disabled={saving || editingSection !== null}>Edit</button>}
+                      </summary>
+                      <div className="grid">
+                        {sections.DEBUG.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'DEBUG'} />)}
+                      </div>
+                    </details>
+                </>
+            )}
+          </>
       )}
     </div>
   );

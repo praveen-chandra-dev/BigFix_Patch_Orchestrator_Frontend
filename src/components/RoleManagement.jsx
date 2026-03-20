@@ -3,67 +3,78 @@ import { useState, useEffect, useMemo, useRef } from "react";
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
-// Custom React Select Component (Brightened background to fix greyout look)
-const CustomSelect = ({ value, onChange, options, disabled, width = '100%' }) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
+// Fixed: Robust FancySelect that handles both objects and primitive strings
+const FancySelect = ({ label, options, value, onChange, disabled, width = '100%', menuPlacement = 'bottom' }) => {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
 
-    useEffect(() => {
-        const handleClickOutside = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+  useEffect(() => {
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
-    const selectedOption = options.find(o => (o.val !== undefined ? o.val : o) === value);
-    const displayLabel = selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : "Select...";
+  const selectedOption = options.find(o => (o.value !== undefined ? o.value : o) === value);
+  const displayText = selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : "— Select —";
 
-    return (
-        <div className={`fx-wrap ${open ? 'fx-open' : ''} ${disabled ? 'disabled' : ''}`} ref={ref} style={{ width, position: 'relative' }}>
-            <button 
-                type="button" 
-                className="control" 
-                onClick={() => !disabled && setOpen(!open)} 
-                style={{ 
-                    width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '32px', padding: '0 10px', 
-                    background: disabled ? 'var(--bg)' : 'var(--panel)', // Use crisp white panel color when active
-                    border: '1px solid var(--border)', borderRadius: '4px', 
-                    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1 
-                }}
-            >
-                <span style={{ fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: disabled ? 'var(--muted)' : 'var(--text)', fontWeight: 500 }}>{displayLabel}</span>
-                <span style={{ fontSize: '10px', color: 'var(--muted)' }}>▼</span>
-            </button>
-            {open && (
-                <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 100, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: '200px', overflowY: 'auto' }}>
-                    <div style={{ padding: '4px' }}>
-                        {options.map((o, i) => {
-                            const optVal = o.val !== undefined ? o.val : o;
-                            const optLabel = o.label !== undefined ? o.label : o;
-                            const isSelected = value === optVal;
-                            return (
-                                <div key={i} style={{ padding: '6px 10px', cursor: 'pointer', borderRadius: '4px', fontSize: '13px', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', fontWeight: isSelected ? 600 : 400 }} 
-                                     onMouseEnter={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} 
-                                     onMouseLeave={e => !isSelected && (e.currentTarget.style.background = 'transparent')}
-                                     onClick={() => { onChange(optVal); setOpen(false); }}>
-                                    {optLabel}
-                                </div>
-                            );
-                        })}
+  return (
+    <div className="field flex-1 m-0" style={{ width }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: disabled ? 'var(--bg)' : 'var(--panel)' }}>
+          <span className="fx-value" title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: disabled ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
+        </button>
+        {open && (
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content', // Forces menu to fit the longest text option
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {options.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                options.map((opt) => {
+                  const optVal = opt.value !== undefined ? opt.value : opt;
+                  const optLabel = opt.label !== undefined ? opt.label : opt;
+                  const isSelected = value === optVal;
+                  return (
+                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
+                      <span className="fx-label">{optLabel}</span>
                     </div>
-                </div>
-            )}
-        </div>
-    );
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
+// Fixed Paginator: Uses native <select> to prevent cut-off issues at the bottom of the screen
 const Paginator = ({ total, rpp, setRpp, page, setPage }) => {
     const totalPages = Math.ceil(total / rpp) || 1;
+    
     return (
         <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "12px 20px", gap: "24px", background: 'var(--panel)', borderTop: '1px solid var(--border)', borderRadius: '0 0 6px 6px' }}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rpp} onChange={e => { setRpp(Number(e.target.value)); setPage(1); }}>
-                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
+                <select className="control" style={{ width: "70px", height: "30px", padding: '0 8px', fontSize: '13px' }} value={rpp} onChange={(e) => { setRpp(Number(e.target.value)); setPage(1); }}>
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={10000}>All</option>
                 </select>
             </div>
             <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
@@ -86,7 +97,15 @@ const CustomModal = ({ open, title, message, onConfirm, onCancel, confirmText = 
                 <div className="sub kpi-confirm-sub" style={{ fontSize: '14px', lineHeight: '1.5', color: 'var(--text)' }}>{message}</div>
                 <div className="flex-row justify-end gap-8 mt-20">
                     {!hideCancel && <button type="button" className="btn outline" onClick={onCancel} disabled={busy}>{cancelText}</button>}
-                    <button type="button" className="btn pri" onClick={onConfirm} disabled={busy}>{busy ? "Processing..." : confirmText}</button>
+                    <button type="button" className="btn pri flex-row items-center gap-8" onClick={onConfirm} disabled={busy}>
+                        {busy && (
+                           <svg viewBox="0 0 50 50" style={{ width: 16, height: 16, stroke: '#fff', animation: 'spin 1s linear infinite' }}>
+                             <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+                             <circle cx="25" cy="25" r="20" fill="none" strokeWidth="5" strokeDasharray="31.4 31.4" strokeLinecap="round"></circle>
+                           </svg>
+                        )}
+                        {busy ? "Processing..." : confirmText}
+                    </button>
                 </div>
             </div>
         </div>
@@ -94,24 +113,13 @@ const CustomModal = ({ open, title, message, onConfirm, onCancel, confirmText = 
 };
 
 export default function RoleManagement({ onClose, role, username }) {
-  
-  // Secure internal fetch (No sessionStorage)
   const apiFetch = async (endpoint, options = {}) => {
-      const headers = { 
-          "Content-Type": "application/json", 
-          "x-user-role": role || "Admin",
-          "x-active-user": username || ""
-      };
-      
+      const headers = { "Content-Type": "application/json", "x-user-role": role || "Admin", "x-active-user": username || "" };
       const res = await fetch(`${API}${endpoint}`, { ...options, headers });
       const text = await res.text();
       let json;
-      try {
-          json = JSON.parse(text);
-      } catch (e) {
-          if (text.trim().startsWith('<')) {
-              throw new Error(`API Endpoint not found (${endpoint}). Did you restart the backend server?`);
-          }
+      try { json = JSON.parse(text); } catch (e) {
+          if (text.trim().startsWith('<')) throw new Error(`API Endpoint not found (${endpoint}). Did you restart the backend server?`);
           throw new Error(`Invalid response from ${endpoint}: ${text.substring(0, 50)}...`);
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "API Error");
@@ -119,8 +127,7 @@ export default function RoleManagement({ onClose, role, username }) {
   };
 
   const safeFetch = async (url, fallback) => {
-      try { return await apiFetch(url); } 
-      catch (e) { console.warn(`[SafeFetch] ${url} failed:`, e.message); return fallback; }
+      try { return await apiFetch(url); } catch (e) { console.warn(`[SafeFetch] ${url} failed:`, e.message); return fallback; }
   };
 
   const [roles, setRoles] = useState([]);
@@ -129,7 +136,6 @@ export default function RoleManagement({ onClose, role, username }) {
   const [activeTab, setActiveTab] = useState("LIST");
   const [editingRoleId, setEditingRoleId] = useState(null); 
   const [dataLoaded, setDataLoaded] = useState(false);
-  
   const [modalConfig, setModalConfig] = useState({ open: false, title: "", message: "", onConfirm: null, onCancel: null, hideCancel: false });
 
   // CREATE FORM STATE
@@ -159,9 +165,11 @@ export default function RoleManagement({ onClose, role, username }) {
   const [availSiteSearch, setAvailSiteSearch] = useState("");
   const [availSitePage, setAvailSitePage] = useState(1);
   const [availSiteRpp, setAvailSiteRpp] = useState(10);
+  const [availSiteSort, setAvailSiteSort] = useState({ key: 'name', direction: 'asc' });
   const [selSiteSearch, setSelSiteSearch] = useState("");
   const [selSitePage, setSelSitePage] = useState(1);
   const [selSiteRpp, setSelSiteRpp] = useState(10);
+  const [selSiteSort, setSelSiteSort] = useState({ key: 'name', direction: 'asc' });
 
   // Operators State
   const [patchSetuUsers, setPatchSetuUsers] = useState([]);
@@ -185,43 +193,22 @@ export default function RoleManagement({ onClose, role, username }) {
       const handleNav = (e) => {
           const tab = String(e.detail).toUpperCase();
           if (tab === 'LIST') {
-              setView("LIST");
-              setEditingRoleId(null);
+              setView("LIST"); setEditingRoleId(null);
           } else {
               if (!editingRoleId && tab !== 'DETAILS') {
-                  setModalConfig({
-                      open: true,
-                      title: "Action Required",
-                      message: "You must fill out and 'Save Details' to create the Role before you can assign Computers, Sites, or Operators.",
-                      confirmText: "Got it",
-                      hideCancel: true,
-                      onConfirm: () => {
-                          setModalConfig({ open: false });
-                          window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: "DETAILS" }));
-                      }
-                  });
+                  setModalConfig({ open: true, title: "Action Required", message: "You must fill out and 'Save Details' to create the Role before assigning Computers, Sites, or Operators.", confirmText: "Got it", hideCancel: true, onConfirm: () => { setModalConfig({ open: false }); window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: "DETAILS" })); } });
                   return;
               }
-              setView("CREATE"); 
-              setActiveTab(tab);
+              setView("CREATE"); setActiveTab(tab);
           }
       };
       window.addEventListener('nav:roles', handleNav);
       return () => window.removeEventListener('nav:roles', handleNav);
   }, [editingRoleId]);
 
-  useEffect(() => {
-      window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: view === "LIST" ? "LIST" : activeTab }));
-  }, [view, activeTab]);
-
+  useEffect(() => { window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: view === "LIST" ? "LIST" : activeTab })); }, [view, activeTab]);
   useEffect(() => { loadRoles(); }, []);
-
-  useEffect(() => {
-      if (view === "CREATE" && !dataLoaded) {
-          loadCreateData();
-          setDataLoaded(true);
-      }
-  }, [view, dataLoaded]);
+  useEffect(() => { if (view === "CREATE" && !dataLoaded) { loadCreateData(); setDataLoaded(true); } }, [view, dataLoaded]);
 
   async function loadRoles() {
       setLoading(true);
@@ -240,74 +227,48 @@ export default function RoleManagement({ onClose, role, username }) {
               safeFetch("/api/auth/users", { users: [] }),
               safeFetch("/api/groups/list", { groups: [] })
           ]);
-          setTotalComps(cRes.total || 0);
-          setProperties(pRes.properties || []);
-          setAvailableSites(sRes.sites || []);
-          setPatchSetuUsers(uRes.users || []);
-          setPatchSetuGroups(gRes.groups || []);
+          setTotalComps(cRes.total || 0); setProperties(pRes.properties || []);
+          setAvailableSites(sRes.sites || []); setPatchSetuUsers(uRes.users || []); setPatchSetuGroups(gRes.groups || []);
       } catch (e) { setError("Failed to load dependency data: " + e.message); }
   }
 
   const handleOpenCreate = () => {
-      setEditingRoleId(null);
-      setView("CREATE"); 
-      setActiveTab("DETAILS");
-      setSaving(false); 
+      setEditingRoleId(null); setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); 
       setName(""); setDescription(""); setSelectedComputers([]); setSelectedSites([]); setSelectedOperators([]); 
-      setExpandedNodes(new Set(["ROOT", "RETRIEVED"]));
-      loadCreateData();
+      setExpandedNodes(new Set(["ROOT", "RETRIEVED"])); loadCreateData();
   };
 
   const handleEditRole = async (r) => {
-      setEditingRoleId(r.BigFixRoleID);
-      setName(r.Name);
-      setDescription(r.Description);
-      setView("CREATE");
-      setActiveTab("DETAILS");
-      setSaving(false); 
-
-      setLoading(true);
+      setEditingRoleId(r.BigFixRoleID); setName(r.Name); setDescription(r.Description);
+      setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); setLoading(true);
       try {
           await loadCreateData();
           const res = await apiFetch(`/api/roles/${r.BigFixRoleID}/details`);
           if (res.details) {
               const d = res.details;
               if (d.perms) setPerms(p => ({ ...p, ...d.perms }));
-              setSelectedComputers(d.computers || []);
-              setSelectedSites(d.sites || []);
-              setSelectedOperators(d.operators || []);
+              setSelectedComputers(d.computers || []); setSelectedSites(d.sites || []); setSelectedOperators(d.operators || []);
           }
       } catch (e) { setError("Failed to load role details: " + e.message); } finally { setLoading(false); }
   };
 
-  const handleCancel = () => {
-      setView("LIST");
-      setEditingRoleId(null);
-      setSaving(false);
-  };
+  const handleCancel = () => { setView("LIST"); setEditingRoleId(null); setSaving(false); };
 
   const toggleVal = (nodeId) => {
       const next = new Set(expandedNodes);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
+      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
       setExpandedNodes(next);
   };
 
   const toggleProp = async (nodeKey, targetProp, filters = []) => {
       const next = new Set(expandedNodes);
-      if (next.has(nodeKey)) {
-          next.delete(nodeKey);
-          setExpandedNodes(next);
-      } else {
-          next.add(nodeKey);
-          setExpandedNodes(next);
-
+      if (next.has(nodeKey)) { next.delete(nodeKey); setExpandedNodes(next); } 
+      else {
+          next.add(nodeKey); setExpandedNodes(next);
           if (!propertyValues[nodeKey] && !loadingStates[nodeKey]) {
               setLoadingStates(p => ({...p, [nodeKey]: true}));
               try {
-                  const res = await apiFetch(`/api/roles/property-values-filtered`, {
-                      method: 'POST', body: JSON.stringify({ targetProp, filters })
-                  });
+                  const res = await apiFetch(`/api/roles/property-values-filtered`, { method: 'POST', body: JSON.stringify({ targetProp, filters }) });
                   setPropertyValues(p => ({...p, [nodeKey]: res.values || []}));
               } catch(e) { console.error(e); } finally { setLoadingStates(p => ({...p, [nodeKey]: false})); }
           }
@@ -318,15 +279,12 @@ export default function RoleManagement({ onClose, role, username }) {
       const existingIdx = selectedComputers.findIndex(c => c.property === property && c.value === value);
       if (existingIdx >= 0) {
           const next = [...selectedComputers]; next.splice(existingIdx, 1); setSelectedComputers(next);
-      } else {
-          setSelectedComputers([...selectedComputers, { property, value, resource }]);
-      }
+      } else setSelectedComputers([...selectedComputers, { property, value, resource }]);
   };
 
   const handleOperatorToggle = async (username) => {
       if (selectedOperators.includes(username)) {
-          setSelectedOperators(selectedOperators.filter(u => u !== username));
-          return;
+          setSelectedOperators(selectedOperators.filter(u => u !== username)); return;
       }
       setSelectedOperators([...selectedOperators, username]);
       if (operatorWarnings[username] === undefined) {
@@ -353,46 +311,21 @@ export default function RoleManagement({ onClose, role, username }) {
                   const payload = { details: { name, description }, perms };
                   await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify(payload) });
               }
-          } else if (activeTab === 'COMPUTERS') {
-              await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ computers: selectedComputers }) });
-          } else if (activeTab === 'SITES') {
-              await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
-          } else if (activeTab === 'OPERATORS') {
-              await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
-          }
+          } else if (activeTab === 'COMPUTERS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ computers: selectedComputers }) });
+          else if (activeTab === 'SITES') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
+          else if (activeTab === 'OPERATORS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
           
           setSuccess("Role updated successfully! Redirecting...");
-          setTimeout(() => { 
-              handleCancel(); 
-              loadRoles(); 
-              setSuccess(""); 
-              setSaving(false); 
-          }, 1200);
-      } catch (e) {
-          setError(e.message);
-          setSaving(false);
-      } finally {
-          setModalConfig({ open: false });
-      }
+          setTimeout(() => { handleCancel(); loadRoles(); setSuccess(""); setSaving(false); }, 1200);
+      } catch (e) { setError(e.message); setSaving(false); } finally { setModalConfig({ open: false }); }
   };
 
   const handleSaveInit = () => {
-      if (activeTab === 'DETAILS' && !name) { 
-          setError("Role Name is required."); 
-          return; 
-      }
-      
+      if (activeTab === 'DETAILS' && !name) { setError("Role Name is required."); return; }
       if (activeTab === 'OPERATORS') {
           const hasMissingOps = selectedOperators.some(op => operatorWarnings[op] === false);
           if (hasMissingOps) {
-              setModalConfig({
-                  open: true,
-                  title: "Warning: Operators Not Found",
-                  message: "Some selected users do not exist in the BigFix Console yet. Role updates targeting these operators may fail. Do you wish to proceed anyway?",
-                  confirmText: "Proceed",
-                  onCancel: () => setModalConfig({ open: false }),
-                  onConfirm: executeSave
-              });
+              setModalConfig({ open: true, title: "Warning: Operators Not Found", message: "Some selected users do not exist in the BigFix Console yet. Role updates targeting these operators may fail. Do you wish to proceed anyway?", confirmText: "Proceed", onCancel: () => setModalConfig({ open: false }), onConfirm: executeSave });
               return;
           }
       }
@@ -403,18 +336,18 @@ export default function RoleManagement({ onClose, role, username }) {
   // RENDER: DETAILS TAB
   // ==========================================
   const renderDetails = () => {
-      const SelectRow = ({ label, value, onChange, options }) => (
+      const SelectRow = ({ label, value, onChange, options, menuPlacement = 'bottom' }) => (
           <div className="field flex-row items-center m-0" style={{ gap: '16px', marginBottom: '12px' }}>
               <label className="label m-0" style={{ width: '280px', fontWeight: 500 }}>{label}</label>
-              <CustomSelect options={options} value={value} onChange={onChange} width="180px" />
+              <FancySelect options={options} value={value} onChange={onChange} width="220px" menuPlacement={menuPlacement} />
           </div>
       );
-      const privOpts = [{val:"1", label:"Yes"}, {val:"0", label:"No"}];
-      const boolOpts = [{val:"true", label:"Yes"}, {val:"false", label:"No"}];
+      const privOpts = [{value:"1", label:"Yes"}, {value:"0", label:"No"}];
+      const boolOpts = [{value:"true", label:"Yes"}, {value:"false", label:"No"}];
 
       return (
-          <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '20px' }}>
-              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+          <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '40px' }}>
+              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Details</span></div>
                   <div style={{ padding: '20px', maxWidth: '700px' }}>
                       <div className="field">
@@ -428,7 +361,7 @@ export default function RoleManagement({ onClose, role, username }) {
                   </div>
               </div>
 
-              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Permissions</span></div>
                   <div style={{ padding: '20px' }}>
                       <SelectRow label="Master Operator" value={perms.masterOperator} onChange={v=>handlePermChange('masterOperator', v)} options={privOpts} />
@@ -439,24 +372,24 @@ export default function RoleManagement({ onClose, role, username }) {
                       <SelectRow label="Can Send Refresh to Multiple Computers" value={perms.canSendRefresh} onChange={v=>handlePermChange('canSendRefresh', v)} options={privOpts} />
                       <SelectRow label="Can Submit Queries" value={perms.canSubmitQueries} onChange={v=>handlePermChange('canSubmitQueries', v)} options={privOpts} />
                       <SelectRow label="Custom Content" value={perms.customContent} onChange={v=>handlePermChange('customContent', v)} options={privOpts} />
-                      <SelectRow label="Unmanaged Assets" value={perms.unmanagedAssets} onChange={v=>handlePermChange('unmanagedAssets', v)} options={[{val:"ShowAll", label:"Show All"}, {val:"ShowNone", label:"Show None"}]} />
+                      <SelectRow label="Unmanaged Assets" value={perms.unmanagedAssets} onChange={v=>handlePermChange('unmanagedAssets', v)} options={[{value:"ShowAll", label:"Show All"}, {value:"ShowNone", label:"Show None"}]} />
                   </div>
               </div>
 
-              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Restart and Shutdown [?]</span></div>
                   <div style={{ padding: '20px' }}>
-                      <SelectRow label="Post-Action Behavior" value={perms.postActionBehavior} onChange={v=>handlePermChange('postActionBehavior', v)} options={[{val:"AllowRestartOnly", label:"Allow Restart Only"}, {val:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {val:"None", label:"None"}]} />
-                      <SelectRow label="Action Script Commands" value={perms.actionScriptCommands} onChange={v=>handlePermChange('actionScriptCommands', v)} options={[{val:"AllowRestartOnly", label:"Allow Restart Only"}, {val:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {val:"None", label:"None"}]} />
+                      <SelectRow label="Post-Action Behavior" value={perms.postActionBehavior} onChange={v=>handlePermChange('postActionBehavior', v)} options={[{value:"AllowRestartOnly", label:"Allow Restart Only"}, {value:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {value:"None", label:"None"}]} />
+                      <SelectRow label="Action Script Commands" value={perms.actionScriptCommands} onChange={v=>handlePermChange('actionScriptCommands', v)} options={[{value:"AllowRestartOnly", label:"Allow Restart Only"}, {value:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {value:"None", label:"None"}]} />
                   </div>
               </div>
 
-              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+              <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Interface Login Privileges</span></div>
                   <div style={{ padding: '20px' }}>
-                      <SelectRow label="Can use Console" value={perms.useConsole} onChange={v=>handlePermChange('useConsole', v)} options={boolOpts} />
-                      <SelectRow label="Can use WebUI" value={perms.useWebUI} onChange={v=>handlePermChange('useWebUI', v)} options={boolOpts} />
-                      <SelectRow label="Can use REST API" value={perms.useRESTAPI} onChange={v=>handlePermChange('useRESTAPI', v)} options={boolOpts} />
+                      <SelectRow label="Can use Console" value={perms.useConsole} onChange={v=>handlePermChange('useConsole', v)} options={boolOpts} menuPlacement="top" />
+                      <SelectRow label="Can use WebUI" value={perms.useWebUI} onChange={v=>handlePermChange('useWebUI', v)} options={boolOpts} menuPlacement="top" />
+                      <SelectRow label="Can use REST API" value={perms.useRESTAPI} onChange={v=>handlePermChange('useRESTAPI', v)} options={boolOpts} menuPlacement="top" />
                   </div>
               </div>
           </div>
@@ -554,7 +487,7 @@ export default function RoleManagement({ onClose, role, username }) {
                                                     checked={selectedComputers.some(c => c.property === 'Group' && c.value === g.name)}
                                                     onChange={() => handleCompCheck('Group', g.name, 'GroupResource')}
                                                 />
-                                                <span style={{ whiteSpace: 'nowrap' }}>📄 {g.name}</span>
+                                                <span style={{ whiteSpace: 'nowrap' }}>📄 {g.name} ({g.computerCount ?? g.memberCount ?? 0})</span>
                                             </label>
                                         </div>
                                     ))
@@ -570,7 +503,7 @@ export default function RoleManagement({ onClose, role, username }) {
             <div className="section-head" style={{ padding: '16px', background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
                 <span className="title text-13">Selected Rules ({selectedComputers.length})</span>
             </div>
-            <div style={{ padding: '24px', flex: 1, overflowY: 'auto' }}>
+            <div>
                 <div style={{ marginBottom: '24px', fontSize: '13px', color: 'var(--muted)', lineHeight: '1.6' }}>
                   This role has management rights on all computers that have the retrieved property values shown on the left. This role does NOT have management rights on any computers that do NOT have the retrieved property values shown on the left.
                   <br/><br/>
@@ -597,11 +530,34 @@ export default function RoleManagement({ onClose, role, username }) {
   // RENDER: SITES TAB
   // ==========================================
   const renderSites = () => { 
-      const availFiltered = availableSites.filter(s => s.name.toLowerCase().includes(availSiteSearch.toLowerCase()));
+      let availSortable = [...availableSites];
+      if (availSiteSort.key) {
+          availSortable.sort((a,b) => {
+              let aVal = String(a[availSiteSort.key] || "").toLowerCase();
+              let bVal = String(b[availSiteSort.key] || "").toLowerCase();
+              if (aVal < bVal) return availSiteSort.direction === 'asc' ? -1 : 1;
+              if (aVal > bVal) return availSiteSort.direction === 'asc' ? 1 : -1;
+              return 0;
+          });
+      }
+      const availFiltered = availSortable.filter(s => s.name.toLowerCase().includes(availSiteSearch.toLowerCase()));
       const availPaginated = availFiltered.slice((availSitePage - 1) * availSiteRpp, availSitePage * availSiteRpp);
       
-      const selFiltered = selectedSites.filter(s => s.name.toLowerCase().includes(selSiteSearch.toLowerCase()));
+      let selSortable = [...selectedSites];
+      if (selSiteSort.key) {
+          selSortable.sort((a,b) => {
+              let aVal = String(a[selSiteSort.key] || "").toLowerCase();
+              let bVal = String(b[selSiteSort.key] || "").toLowerCase();
+              if (aVal < bVal) return selSiteSort.direction === 'asc' ? -1 : 1;
+              if (aVal > bVal) return selSiteSort.direction === 'asc' ? 1 : -1;
+              return 0;
+          });
+      }
+      const selFiltered = selSortable.filter(s => s.name.toLowerCase().includes(selSiteSearch.toLowerCase()));
       const selPaginated = selFiltered.slice((selSitePage - 1) * selSiteRpp, selSitePage * selSiteRpp);
+
+      const handleASort = (k) => setAvailSiteSort(p => ({ key: k, direction: p.key===k && p.direction==='asc' ? 'desc' : 'asc' }));
+      const handleSSort = (k) => setSelSiteSort(p => ({ key: k, direction: p.key===k && p.direction==='asc' ? 'desc' : 'asc' }));
 
       return (
           <div className="fade-in" style={{ display: 'flex', flexWrap: 'nowrap', gap: '24px', alignItems: 'flex-start', height: '100%', width: '100%' }}>
@@ -614,10 +570,10 @@ export default function RoleManagement({ onClose, role, username }) {
                     <table style={{ margin: 0 }}>
                        <thead className="kpi-th-sticky">
                          <tr>
-                           <th className="w-35p">Site Name</th>
-                           <th className="w-15p">Type</th>
-                           <th className="w-20p">Domain</th>
-                           <th className="w-15p">Creator</th>
+                           <th className="w-35p cursor-pointer" onClick={() => handleASort('name')}>Site Name {availSiteSort.key === 'name' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                           <th className="w-20p cursor-pointer" onClick={() => handleASort('type')}>Type {availSiteSort.key === 'type' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                           <th className="w-15p cursor-pointer" onClick={() => handleASort('domain')}>Domain {availSiteSort.key === 'domain' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                           <th className="w-15p cursor-pointer" onClick={() => handleASort('creator')}>Creator {availSiteSort.key === 'creator' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
                            <th className="text-center w-15p">Action</th>
                          </tr>
                        </thead>
@@ -647,15 +603,15 @@ export default function RoleManagement({ onClose, role, username }) {
                      <span className="title text-13">Assigned Sites</span>
                      <input type="text" className="control" placeholder="Search ⌕" style={{ width: '160px', height: '30px' }} value={selSiteSearch} onChange={e=>setSelSiteSearch(e.target.value)} />
                  </div>
-                 <div className="tableWrap" style={{ flex: 1, overflowY: 'auto', border: 'none', borderRadius: 0 }}>
+                 <div className="tableWrap" style={{ flex: 1, border: 'none', borderRadius: 0 }}>
                     <table style={{ margin: 0 }}>
                         <thead className="kpi-th-sticky">
                             <tr>
-                              <th className="w-30p">Site Name</th>
-                              <th className="w-15p">Type</th>
-                              <th className="w-20p">Domain</th>
-                              <th className="w-15p">Creator</th>
-                              <th className="w-15p">Permissions</th>
+                              <th className="w-30p cursor-pointer" onClick={() => handleSSort('name')}>Site Name {selSiteSort.key === 'name' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-15p cursor-pointer" onClick={() => handleSSort('type')}>Type {selSiteSort.key === 'type' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-15p cursor-pointer" onClick={() => handleSSort('domain')}>Domain {selSiteSort.key === 'domain' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-15p cursor-pointer" onClick={() => handleSSort('creator')}>Creator {selSiteSort.key === 'creator' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-20p">Permissions</th>
                               <th className="w-5p text-center"></th>
                             </tr>
                         </thead>
@@ -670,7 +626,11 @@ export default function RoleManagement({ onClose, role, username }) {
                                        {s.type === 'External' ? (
                                            <span className="muted-text font-mono">Reader</span>
                                        ) : (
-                                           <CustomSelect options={[{val:'Reader',label:'Reader'}, {val:'Writer',label:'Writer'}, {val:'Owner',label:'Owner'}]} value={s.permission} onChange={val => setSelectedSites(selectedSites.map(x => x.url === s.url ? { ...x, permission: val } : x))} />
+                                           <FancySelect 
+                                               options={[{value:'Reader',label:'Reader'}, {value:'Writer',label:'Writer'}, {value:'Owner',label:'Owner'}]} 
+                                               value={s.permission} 
+                                               onChange={val => setSelectedSites(selectedSites.map(x => x.url === s.url ? { ...x, permission: val } : x))} 
+                                           />
                                        )}
                                     </td>
                                     <td className="text-center">
@@ -697,12 +657,10 @@ export default function RoleManagement({ onClose, role, username }) {
   // RENDER: OPERATORS TAB (Dual Table Layout)
   // ==========================================
   const renderOperators = () => { 
-      // Available Users: Users not currently in selectedOperators
       const availOpsRaw = patchSetuUsers.filter(u => !selectedOperators.includes(u.username || u.LoginName));
       const availFiltered = availOpsRaw.filter(u => (u.username || u.LoginName || "").toLowerCase().includes(availOpSearch.toLowerCase()));
       const availPaginated = availFiltered.slice((availOpPage - 1) * availOpRpp, availOpPage * availOpRpp);
 
-      // Assigned Users: Users mapped from selectedOperators
       const selFiltered = selectedOperators.filter(u => u.toLowerCase().includes(selOpSearch.toLowerCase()));
       const selPaginated = selFiltered.slice((selOpPage - 1) * selOpRpp, selOpPage * selOpRpp);
 
@@ -727,7 +685,7 @@ export default function RoleManagement({ onClose, role, username }) {
                            const userName = u.username || u.LoginName || 'Unknown';
                            return (
                              <tr key={userName}>
-                               <td className="fw-600">{userName}</td>
+                               <td className="fw-600" style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userName}</td>
                                <td>{operatorWarnings[userName] === true ? <span className="text-success fw-600">✓ Verified</span> : operatorWarnings[userName] === false ? <span className="text-danger fw-600">⚠ Not Found</span> : '—'}</td>
                                <td className="text-center">
                                  <button className="btn outline small" onClick={() => handleOperatorToggle(userName)}>Add</button>
@@ -758,7 +716,7 @@ export default function RoleManagement({ onClose, role, username }) {
                         <tbody>
                             {selPaginated.length === 0 ? (<tr><td colSpan={3} className="text-center text-muted" style={{padding: '24px'}}>No users assigned.</td></tr>) : selPaginated.map(userName => (
                                 <tr key={userName}>
-                                    <td className="fw-600">{userName}</td>
+                                    <td className="fw-600" style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userName}</td>
                                     <td>{operatorWarnings[userName] === true ? <span className="text-success fw-600">✓ Verified</span> : operatorWarnings[userName] === false ? <span className="text-danger fw-600">⚠ Not Found</span> : '—'}</td>
                                     <td className="text-center">
                                        <button 
@@ -802,11 +760,21 @@ export default function RoleManagement({ onClose, role, username }) {
 
             <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div className="left">
-                    <h2 className="m-0">{editingRoleId ? 'Edit BigFix Role' : 'Create BigFix Role'} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>/ {getTabTitle(activeTab)}</span></h2>
+                    <h2 className="m-0">
+                        {editingRoleId ? `Edit BigFix Role: ` : 'Create BigFix Role '}
+                        <span style={{ color: 'var(--primary)' }}>{name || ''}</span>
+                        <span style={{ color: 'var(--muted)', fontWeight: 400 }}> / {getTabTitle(activeTab)}</span>
+                    </h2>
                 </div>
                 <div className="right flex-row gap-12 items-center">
                    <button onClick={handleCancel} className="btn outline sec">Cancel</button>
-                   <button onClick={handleSaveInit} disabled={saving} className="btn pri min-w-140">
+                   <button onClick={handleSaveInit} disabled={saving} className="btn pri min-w-140 flex-row items-center justify-center gap-8">
+                       {saving && (
+                          <svg viewBox="0 0 50 50" style={{ width: 16, height: 16, stroke: '#fff', animation: 'spin 1s linear infinite' }}>
+                            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+                            <circle cx="25" cy="25" r="20" fill="none" strokeWidth="5" strokeDasharray="31.4 31.4" strokeLinecap="round"></circle>
+                          </svg>
+                       )}
                        {saving ? "Saving..." : activeTab === 'DETAILS' ? (editingRoleId ? "Save Details" : "Create Role") : `Save ${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}`}
                    </button>
                 </div>
@@ -815,7 +783,7 @@ export default function RoleManagement({ onClose, role, username }) {
             {error && <div className="banner error m-20 mb-0">{error}</div>}
             {success && <div className="banner success m-20 mb-0">{success}</div>}
             
-            <div style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
+            <div style={{ }}>
                 {activeTab === 'DETAILS' && renderDetails()}
                 {activeTab === 'COMPUTERS' && renderComputers()}
                 {activeTab === 'SITES' && renderSites()}
@@ -849,24 +817,28 @@ export default function RoleManagement({ onClose, role, username }) {
             <h2 className="m-0">BigFix Role Management</h2>
         </div>
         <div className="right flex-row gap-12 items-center">
+            <button className="iconbtn" onClick={loadRoles} title="Refresh Roles">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            </button>
             <button onClick={handleOpenCreate} className="btn pri">+ Create Role</button>
         </div>
       </div>
       
       <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-        {loading ? <div className="sub">Loading roles...</div> : (
+        {loading ? (
+            <div className="sub flex-row items-center justify-center gap-8" style={{ padding: '40px' }}>
+                <svg className="spinner" viewBox="0 0 50 50" style={{ width: 24, height: 24, stroke: 'var(--primary)' }}><circle cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle></svg>
+                Loading roles...
+            </div>
+        ) : (
             <div className="section" style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: 0 }}>
-                <div className="grid-toolbar" style={{ margin: "0 0 16px 0", padding: 0 }}>
-                   <div className="grid-toolbar-right" style={{ display: "flex", gap: "12px", marginLeft: 'auto', marginRight: '16px' }}>
-                       <span style={{ fontSize: "13px", color: "var(--muted)", alignSelf: "center" }}>Showing {roles.length} roles</span>
-                   </div>
-                </div>
+                
                 <div className="tableWrap border-top" style={{ flex: 1, overflow: "auto", margin: "0 -32px", width: "calc(100% + 64px)", borderLeft: "none", borderRight: "none", borderRadius: 0 }}>
                     <table style={{ margin: 0 }}>
                         <thead className="kpi-th-sticky">
                             <tr>
                                 <th className="cursor-pointer w-10p" onClick={() => handleRoleSort('BigFixRoleID')}>Role ID {getRoleSortIcon('BigFixRoleID')}</th>
-                                <th className="cursor-pointer w-25p" onClick={() => handleRoleSort('Name')}>Role Name {getRoleSortIcon('Name')}</th>
+                                <th className="cursor-pointer w-25p" onClick={() => handleRoleSort('Name')}>BigFix Role Name {getRoleSortIcon('Name')}</th>
                                 <th className="cursor-pointer w-30p" onClick={() => handleRoleSort('Description')}>Description {getRoleSortIcon('Description')}</th>
                                 <th className="cursor-pointer w-15p" onClick={() => handleRoleSort('CreatedBy')}>Creator {getRoleSortIcon('CreatedBy')}</th>
                                 <th className="cursor-pointer w-15p" onClick={() => handleRoleSort('CreatedAt')}>Created At {getRoleSortIcon('CreatedAt')}</th>
@@ -887,21 +859,7 @@ export default function RoleManagement({ onClose, role, username }) {
                         </tbody>
                     </table>
                 </div>
-                <div className="pagination" style={{ display: "flex", marginTop: 'auto', justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderTop: "1px solid var(--border)", background: "var(--panel)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                        <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={roleRpp} onChange={e => { setRoleRpp(Number(e.target.value)); setRolePage(1); }}>
-                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                        </select>
-                    </div>
-                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                        {roles.length > 0 ? (rolePage - 1) * roleRpp + 1 : 0}-{Math.min(rolePage * roleRpp, roles.length)} of {roles.length}
-                    </span>
-                    <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                        <button className="pager-btn" disabled={rolePage === 1} onClick={() => setRolePage(p => p - 1)}>&lt;</button>
-                        <button className="pager-btn" disabled={rolePage === Math.ceil(roles.length / roleRpp) || Math.ceil(roles.length / roleRpp) === 0} onClick={() => setRolePage(p => p + 1)}>&gt;</button>
-                    </div>
-                </div>
+                <Paginator total={roles.length} rpp={roleRpp} setRpp={setRoleRpp} page={rolePage} setPage={setRolePage} />
             </div>
         )}
       </div>

@@ -376,12 +376,14 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       {!isEUC && (
         <div className="row mt-14">
           <div className="field">
-            <div className="label">Success Threshold (%) {inputsLocked && <span title="Locked during deployment" style={{cursor:'help', opacity:0.6}}>🔒</span>}</div>
-            <input type="number" className={`control ${inputsLocked ? 'disabled' : ''}`} min={0} max={100} value={env.successThreshold ?? 90} onChange={handleNumChange("successThreshold")} onBlur={handleBlur("successThreshold", 0, 100)} disabled={inputsLocked} />
+            <div className="label">Success Threshold (%) <span title="Configured by Admin in Environment Settings" style={{cursor:'help', opacity:0.6}}>🔒</span></div>
+            {/* Field is now safely read-only here, value managed by Configuration via Context */}
+            <input type="number" className="control disabled" value={env.successThreshold ?? 90} disabled={true} />
           </div>
           <div className="field">
-            <div className="label">Allowable Critical Health Failures {inputsLocked && <span title="Locked during deployment" style={{cursor:'help', opacity:0.6}}>🔒</span>}</div>
-            <input type="number" className={`control ${inputsLocked ? 'disabled' : ''}`} min={0} value={env.allowableCriticalHF ?? 0} onChange={handleNumChange("allowableCriticalHF")} onBlur={handleBlur("allowableCriticalHF", 0, 999)} disabled={inputsLocked} />
+            <div className="label">Allowable Critical Health Failures <span title="Configured by Admin in Environment Settings" style={{cursor:'help', opacity:0.6}}>🔒</span></div>
+            {/* Field is now safely read-only here, value managed by Configuration via Context */}
+            <input type="number" className="control disabled" value={env.allowableCriticalHF ?? 0} disabled={true} />
           </div>
           <div className="field flex-15">
             <span className="label">Patch Window (Days / Hours / Mins)</span>

@@ -1,59 +1,13 @@
 // src/components/auth/Login.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
 const API_BASE = window.env.VITE_API_BASE;
-
-function Select({ value, options, onChange, disabled }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const onDoc = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  const selectedLabel = options.find(o => o.value === value)?.label || "Select";
-
-  return (
-    <div className={`custom-select ${open ? "open" : ""}`} ref={ref}>
-      <button 
-        type="button" 
-        className="select-trigger" 
-        onClick={() => !disabled && setOpen(!open)} 
-        disabled={disabled}
-      >
-        <span>{selectedLabel}</span>
-        <svg className="chevron" width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M5 7l5 6 5-6" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </button>
-      
-      {open && (
-        <div className="select-menu">
-          {options.map(opt => (
-            <div 
-              key={opt.value} 
-              className={`select-item ${value === opt.value ? 'selected' : ''}`}
-              onClick={() => { onChange(opt.value); setOpen(false); }}
-            >
-              {opt.label}
-              {value === opt.value && <span className="tick">✓</span>}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function Login({ onSuccess }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const [isSetup, setIsSetup] = useState(false);
   const [setupConfirm, setSetupConfirm] = useState("");
-  const [needsRole, setNeedsRole] = useState(false);
-  const [selectedRole, setSelectedRole] = useState("Windows");
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -81,7 +35,8 @@ export default function Login({ onSuccess }) {
         const r = await fetch(`${API_BASE}/api/auth/signup`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: u.trim(), password: p, role: 'Admin' }),
+            // Setup user is always the Super Admin
+            body: JSON.stringify({ username: u.trim(), password: p, role: 'Admin' }), 
         });
         
         const text = await r.text();
@@ -93,8 +48,6 @@ export default function Login({ onSuccess }) {
         setInfo("Admin account created successfully! Please login.");
         setIsSetup(false); setP(""); setSetupConfirm(""); setBusy(false); 
 
-      } else if (needsRole) {
-        await performLdapRegister();
       } else {
         await performLogin();
       }
@@ -118,45 +71,15 @@ export default function Login({ onSuccess }) {
     } catch (err) { 
         throw new Error(text || "Invalid response from server."); 
     }
-      
-    if (j.error === 'role_required') {
-        setNeedsRole(true);
-        setInfo(j.message || "Please select your team role to continue.");
-        setBusy(false);
-        return;
-    }
 
     if (!r.ok || !j.ok) {
         throw new Error(j.message || (j.error === 'invalid' ? "Invalid username or password." : "Login failed. Please verify your credentials."));
     }
       
-    const userRole = j.role || "Windows";
-    sessionStorage.setItem("user_role", userRole);
+    // Default to 'User'. The actual RBAC is now handled dynamically by BigFix XML parsing in the Header.
+    const userRole = j.role || "User";
     
-    // --- SECURITY FIX: SAVE USERNAME FOR PASSTHROUGH AUTH ---
-    sessionStorage.setItem("username", j.username);
-    
-    onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
-    setBusy(false);
-  }
-
-  async function performLdapRegister() {
-    const r = await fetch(`${API_BASE}/api/auth/ldap-first-login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: u.trim(), password: p, role: selectedRole }),
-    });
-    
-    const text = await r.text();
-    let j;
-    try { j = JSON.parse(text); } catch(e) { throw new Error(text || "Registration failed."); }
-      
-    if (!r.ok || !j.ok) throw new Error(j.message || "Registration failed.");
-
-    const userRole = j.role;
-    sessionStorage.setItem("user_role", userRole);
-    
-    // --- SECURITY FIX: SAVE USERNAME FOR PASSTHROUGH AUTH ---
+    // UI Pointer (Not used for security, just for the frontend to know the user's name)
     sessionStorage.setItem("username", j.username);
     
     onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
@@ -167,20 +90,12 @@ export default function Login({ onSuccess }) {
     <div className="login-outer">
       <div className="login-card">
         <h2 className="login-title">
-            {isSetup ? "Create Admin Account" : needsRole ? "Complete Setup" : "Login"}
+            {isSetup ? "Create Admin Account" : "Login"}
         </h2>
         
         {isSetup && <p className="intro-text">Welcome! Please create the first Administrator account.</p>}
         
-        {needsRole && (
-            <p className="intro-text">
-                Welcome, <strong>{u}</strong>. This is your first login. Please select your team role.
-            </p>
-        )}
-
         <form onSubmit={handleAction}>
-          
-          {!needsRole && (
              <label>
                 <span>Username</span>
                 <input
@@ -189,12 +104,9 @@ export default function Login({ onSuccess }) {
                   placeholder="Enter username"
                   autoComplete="username"
                   required
-                  disabled={needsRole}
                 />
              </label>
-          )}
           
-          {!needsRole && (
             <label>
               <span>Password</span>
               <input
@@ -206,7 +118,6 @@ export default function Login({ onSuccess }) {
                 required
               />
             </label>
-          )}
 
           {isSetup && (
              <label>
@@ -218,21 +129,6 @@ export default function Login({ onSuccess }) {
                   placeholder="Confirm password"
                   autoComplete="new-password"
                   required
-                />
-             </label>
-          )}
-
-          {needsRole && (
-             <label>
-                <span>Select Team Role</span>
-                <Select 
-                    value={selectedRole}
-                    onChange={setSelectedRole}
-                    options={[
-                        { value: "Windows", label: "Windows Team" },
-                        { value: "Linux", label: "Linux Team" },
-                        { value: "EUC", label: "EUC Team" }
-                    ]}
                 />
              </label>
           )}
@@ -258,14 +154,8 @@ export default function Login({ onSuccess }) {
           {!!info && <div className="alert success">{info}</div>}
 
           <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Processing..." : (isSetup ? "Create Admin" : needsRole ? "Save & Login" : "Login")}
+            {busy ? "Processing..." : (isSetup ? "Create Admin" : "Login")}
           </button>
-          
-          {needsRole && (
-              <button type="button" className="btn-link" onClick={() => { setNeedsRole(false); setP(""); setErr(""); }}>
-                  Back to Login
-              </button>
-          )}
         </form>
       </div>
     </div>

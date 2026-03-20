@@ -6,4 +6,5 @@ const API_BASE = window.env?.VITE_API_BASE || "http://localhost:5174";
 
 export default axios.create({
   baseURL: `${API_BASE}/api`,
+  withCredentials: true, // SECURE: Automatically sends the HTTP-Only cookie with every request
 });

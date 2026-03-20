@@ -166,6 +166,8 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
 };
 
 export default function GroupManager({ onClose }) {
+  const isMO = sessionStorage.getItem("isMO") === "true";
+  
   const [groupType, setGroupType] = useState("Automatic");
   const [groupName, setGroupName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -229,14 +231,19 @@ export default function GroupManager({ onClose }) {
   useEffect(() => {
     clearMessages();
     setLastUpdated(new Date().toLocaleString());
-    if (groupType === "Automatic") {
+    if (groupType === "Automatic" || groupType === "ServerBased") {
       if (properties.length === 0) {
         setLoadingProps(true);
         getJSON("/api/groups/metadata/properties").then(data => setProperties(data.properties || [])).catch(e => setError(e.message)).finally(() => setLoadingProps(false));
       }
       if (customSites.length === 0) {
         setLoadingSites(true);
-        getJSON("/api/baseline/custom-sites").then(data => { const sites = data.sites || []; setCustomSites(sites); if (sites.length > 0) setSelectedTargetSite(sites[0]); }).catch(e => console.error(e)).finally(() => setLoadingSites(false));
+        // FIX: PROPERLY CALL THE ROLE-SITES ENDPOINT
+        getJSON("/api/groups/metadata/role-sites").then(data => { 
+          const sites = data.sites || []; 
+          setCustomSites(sites); 
+          if (sites.length > 0) setSelectedTargetSite(sites[0]); 
+        }).catch(e => console.error(e)).finally(() => setLoadingSites(false));
       }
     }
   }, [groupType]);
@@ -282,9 +289,7 @@ export default function GroupManager({ onClose }) {
   };
 
   const visibleComputers = useMemo(() => {
-    let list = allComputers;
-    if (sessionStorage.getItem("user_role") === 'EUC') list = list.filter(c => !(c.os || "").toLowerCase().includes("server"));
-    return list.filter(applyFilters);
+    return allComputers.filter(applyFilters);
   }, [allComputers, filters, globalLogic]);
 
   const sortedComputers = useMemo(() => {
@@ -335,7 +340,7 @@ export default function GroupManager({ onClose }) {
     if (!groupName.trim()) { setError("Group Name is required."); return; }
     const payload = { name: groupName, type: groupType };
 
-    if (groupType === "Automatic") {
+    if (groupType === "Automatic" || groupType === "ServerBased") {
       if (conditions.length === 0) { setError("Please add at least one condition."); return; }
       if (!selectedTargetSite) { setError("Please select a target site."); return; }
       payload.targetSite = selectedTargetSite; payload.conditions = conditions;
@@ -398,7 +403,12 @@ export default function GroupManager({ onClose }) {
             <span className="label">Group Type</span>
             <div className="toggle-bg">
               <button className={`toggle-btn ${groupType === "Automatic" ? "active" : ""}`} onClick={() => setGroupType("Automatic")}>Automatic</button>
-              <button className={`toggle-btn ${groupType === "Manual" ? "active" : ""}`} onClick={() => setGroupType("Manual")}>Manual</button>
+              
+              {isMO && (
+                  <button className={`toggle-btn ${groupType === "Manual" ? "active" : ""}`} onClick={() => setGroupType("Manual")}>Manual</button>
+              )}
+              
+              <button className={`toggle-btn ${groupType === "ServerBased" ? "active" : ""}`} onClick={() => setGroupType("ServerBased")}>Server Based</button>
             </div>
           </div>
           <div className="field">
@@ -410,7 +420,7 @@ export default function GroupManager({ onClose }) {
         </div>
       </div>
 
-      {groupType === "Automatic" && (
+      {(groupType === "Automatic" || groupType === "ServerBased") && (
         <div className="section overflow-visible">
           <div className="section-head"><span className="title">2. Define Property Criteria</span></div>
           <div className="flex-row items-end p-20 gap-16 wrap">
@@ -581,7 +591,7 @@ export default function GroupManager({ onClose }) {
 
       <div className="action-bar" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="spacer"></div>
-        <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating || !groupName || (groupType==='Automatic' && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}>
+        <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating || !groupName || ((groupType==='Automatic' || groupType === 'ServerBased') && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}>
           {creating ? "Creating..." : "Create Group"}
         </button>
       </div>

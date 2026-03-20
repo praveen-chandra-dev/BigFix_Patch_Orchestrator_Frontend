@@ -161,6 +161,10 @@ export default function Configuration({ onSaved, locked = false }) {
   
   const [enableSandbox, setEnableSandbox] = useState(true);
   const [enablePilot, setEnablePilot] = useState(true);
+  
+  // Newly Added Global Thresholds
+  const [successThreshold, setSuccessThreshold] = useState(90);
+  const [allowableCriticalHF, setAllowableCriticalHF] = useState(0);
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -206,6 +210,9 @@ export default function Configuration({ onSaved, locked = false }) {
         if (j.lastReportValue != null) setLastReportValue(Number(j.lastReportValue));
         if (j.lastReportUnit != null) setLastReportUnit(String(j.lastReportUnit));
 
+        if (j.successThreshold != null) setSuccessThreshold(Number(j.successThreshold));
+        if (j.allowableCriticalHF != null) setAllowableCriticalHF(Number(j.allowableCriticalHF));
+
         setEnv(f => ({ 
             ...f, 
             autoMail: Boolean(j.autoMail), 
@@ -213,7 +220,9 @@ export default function Configuration({ onSaved, locked = false }) {
             cloneVM: Boolean(j.cloneVM), 
             snapshotVM: Boolean(j.snapshotVM),
             enableSandbox: j.enableSandbox != null ? Boolean(j.enableSandbox) : true, 
-            enablePilot: j.enablePilot != null ? Boolean(j.enablePilot) : true      
+            enablePilot: j.enablePilot != null ? Boolean(j.enablePilot) : true,
+            successThreshold: j.successThreshold != null ? Number(j.successThreshold) : 90,
+            allowableCriticalHF: j.allowableCriticalHF != null ? Number(j.allowableCriticalHF) : 0
         }));
         
       } catch (e) { 
@@ -231,6 +240,8 @@ export default function Configuration({ onSaved, locked = false }) {
     
     const diskSafe = Math.max(0, Number(disk) || 0);
     const lastSafe = Math.max(0, Number(lastReportValue) || 0);
+    const stSafe = Math.min(100, Math.max(0, Number(successThreshold) || 0));
+    const chSafe = Math.max(0, Number(allowableCriticalHF) || 0);
     
     const newConfigValues = {
         diskThreshold: diskSafe,
@@ -244,6 +255,8 @@ export default function Configuration({ onSaved, locked = false }) {
         enablePilot: Boolean(enablePilot),
         lastReportValue: lastSafe,
         lastReportUnit: String(lastReportUnit),
+        successThreshold: stSafe,
+        allowableCriticalHF: chSafe
     };
 
     try {
@@ -256,7 +269,9 @@ export default function Configuration({ onSaved, locked = false }) {
           cloneVM: Boolean(cloneVM), 
           snapshotVM: Boolean(snapshotVM),
           enableSandbox: Boolean(enableSandbox),
-          enablePilot: Boolean(enablePilot)
+          enablePilot: Boolean(enablePilot),
+          successThreshold: stSafe,
+          allowableCriticalHF: chSafe
       }));
 
       if (onSaved) {
@@ -284,6 +299,19 @@ export default function Configuration({ onSaved, locked = false }) {
               <input type="number" min="0" className="control input-modern" value={disk} onChange={handleNumChange(setDisk)} onBlur={() => handleBlur(disk, setDisk, 0, 1000)} disabled={locked} placeholder="e.g. 10" />
               <div className="help-text">Servers below this limit will fail health checks.</div>
             </div>
+            
+            <div className="field">
+              <label className="label">Success Threshold (%)</label>
+              <input type="number" min="0" max="100" className="control input-modern" value={successThreshold} onChange={handleNumChange(setSuccessThreshold)} onBlur={() => handleBlur(successThreshold, setSuccessThreshold, 0, 100)} disabled={locked || !isAdmin} />
+              <div className="help-text">Minimum success percentage to proceed. {(!isAdmin) && <span style={{color: '#94a3b8', fontSize: '11px'}}>(Admin only)</span>}</div>
+            </div>
+
+            <div className="field">
+              <label className="label">Allowable Critical Health Failures</label>
+              <input type="number" min="0" className="control input-modern" value={allowableCriticalHF} onChange={handleNumChange(setAllowableCriticalHF)} onBlur={() => handleBlur(allowableCriticalHF, setAllowableCriticalHF, 0, 999)} disabled={locked || !isAdmin} />
+              <div className="help-text">Maximum acceptable critical failures. {(!isAdmin) && <span style={{color: '#94a3b8', fontSize: '11px'}}>(Admin only)</span>}</div>
+            </div>
+
             <div className="field">
               <label className="label">Last Report Time Threshold</label>
               <div className="input-combo">
@@ -329,7 +357,7 @@ export default function Configuration({ onSaved, locked = false }) {
         </Section>
       </div>
       <div className="footer-actions">
-        <button className="btn secondary" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(1); setLastReportUnit("days"); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
+        <button className="btn secondary" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(1); setLastReportUnit("days"); setSuccessThreshold(90); setAllowableCriticalHF(0); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
         <button className="btn outline small" onClick={save} disabled={busy || locked}>{busy ? "Saving Settings..." : "Save Configuration"}</button>
       </div>
     </section>

@@ -1,5 +1,5 @@
 // src/components/Header.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import logo from "../assets/bigfix-logo.jpg";
 import { useEnvironment } from "./Environment.jsx";
 
@@ -55,9 +55,9 @@ class NavManager {
 const navMgr = window.__navMgr = window.__navMgr || new NavManager();
 let isRestoring = false;
 
-export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setRiskTab, riskSubTab, setRiskSubTab, kpiTab, setKpiTab }) {
+export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab, riskSubTab, setRiskSubTab, kpiTab, setKpiTab }) {
   const { env } = useEnvironment();
-  const isEUC = role === 'EUC';
+  const isMO = sessionStorage.getItem("isMO") === "true";
 
   const [localSnapTab, setLocalSnapTab] = useState('TARGETS');
   const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
@@ -144,8 +144,8 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
                   Deployment History
                </a>
                {renderStage('CONFIG', 'Configuration')}
-               {env.enableSandbox && !isEUC && renderStage('SANDBOX', 'Sandbox')}
-               {env.enablePilot && !isEUC && renderStage('PILOT', 'Pilot')}
+               {env.enableSandbox && renderStage('SANDBOX', 'Sandbox')}
+               {env.enablePilot && renderStage('PILOT', 'Pilot')}
                {renderStage('PRODUCTION', 'Production')}
                {renderStage('FINAL RESULT', 'Final Result')}
            </div>
@@ -206,46 +206,43 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
            <IconGroup /> Group Management
         </a>
         
-        {role !== 'EUC' && (
-          <>
-            <a className={`menu-item ${activeMenu === 'snapshot' ? 'active' : ''}`} onClick={() => onNavigate('snapshot')}>
-               <IconFolder /> Take Snapshot
-            </a>
-            {activeMenu === 'snapshot' && (
-               <div className="sidebar-sub-menu">
-                   <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'TARGETS'}))}>
-                         Targets
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'SETTINGS'}))}>
-                        Settings
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'EXECUTION'}))}>
-                        Execution
-                   </a>
-               </div>
-            )}
+        <a className={`menu-item ${activeMenu === 'snapshot' ? 'active' : ''}`} onClick={() => onNavigate('snapshot')}>
+           <IconFolder /> Take Snapshot
+        </a>
+        {activeMenu === 'snapshot' && (
+           <div className="sidebar-sub-menu">
+               <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'TARGETS'}))}>
+                     Targets
+               </a>
+               <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'SETTINGS'}))}>
+                    Settings
+               </a>
+               <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'EXECUTION'}))}>
+                    Execution
+               </a>
+           </div>
+        )}
 
-            <a className={`menu-item ${activeMenu === 'clone' ? 'active' : ''}`} onClick={() => onNavigate('clone')}>
-               <IconFolder /> Clone VM
-            </a>
-            {activeMenu === 'clone' && (
-               <div className="sidebar-sub-menu">
-                   <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'TARGETS'}))}>
-                         Targets
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'SETTINGS'}))}>
-                         Settings
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'EXECUTION'}))}>
-                         Execution
-                   </a>
-               </div>
-            )}
-          </>
+        <a className={`menu-item ${activeMenu === 'clone' ? 'active' : ''}`} onClick={() => onNavigate('clone')}>
+           <IconFolder /> Clone VM
+        </a>
+        {activeMenu === 'clone' && (
+           <div className="sidebar-sub-menu">
+               <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'TARGETS'}))}>
+                     Targets
+               </a>
+               <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'SETTINGS'}))}>
+                     Settings
+               </a>
+               <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'EXECUTION'}))}>
+                     Execution
+               </a>
+           </div>
         )}
 
         <div className="menu-label">Administration</div>
-        {role === 'Admin' && (
+        
+        {isMO && (
           <>
             <a className={`menu-item ${activeMenu === 'users' ? 'active' : ''}`} onClick={() => onNavigate('users')}>
                <IconGroup /> User Management
@@ -284,7 +281,63 @@ export function Sidebar({ activeMenu, onNavigate, flowState, role, riskTab, setR
   );
 }
 
-export function Topbar({ onNavHistory, username, role, onLogout }) {
+export function Topbar({ onNavHistory, username, onLogout }) {
+  const [roles, setRoles] = useState([]);
+  const [isMO, setIsMO] = useState(false);
+  const [activeRole, setActiveRole] = useState(sessionStorage.getItem('user_role') || '');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    fetch('/api/auth/roles')
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          setIsMO(data.isMO);
+          sessionStorage.setItem('isMO', data.isMO ? 'true' : 'false');
+          setRoles(data.roles || []);
+          
+          if (data.isMO) {
+            setActiveRole('Master Operator');
+            sessionStorage.setItem('user_role', 'Admin');
+            window.dispatchEvent(new CustomEvent('role:changed', { detail: 'Admin' }));
+          } else if (data.roles && data.roles.length > 0) {
+            const current = sessionStorage.getItem('user_role');
+            if (!data.roles.includes(current)) {
+              setActiveRole(data.roles[0]);
+              sessionStorage.setItem('user_role', data.roles[0]);
+              window.dispatchEvent(new CustomEvent('role:changed', { detail: data.roles[0] }));
+            } else {
+              setActiveRole(current);
+            }
+          } else {
+             setActiveRole('No Role Assigned');
+             sessionStorage.setItem('user_role', 'No Role Assigned');
+          }
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+      const handleOutside = (e) => {
+          if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+              setShowDropdown(false);
+          }
+      };
+      document.addEventListener('mousedown', handleOutside);
+      return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const handleRoleChange = (newRole) => {
+    setActiveRole(newRole);
+    sessionStorage.setItem('user_role', newRole);
+    setShowDropdown(false);
+    
+    // Forcing a full page reload gracefully simulates an entire app re-mount,
+    // ensuring absolute data integrity across all unlinked components.
+    window.location.reload();
+  };
+
   const handleBack = () => {
     const state = navMgr.back();
     if (state) {
@@ -307,8 +360,12 @@ export function Topbar({ onNavHistory, username, role, onLogout }) {
     }
   };
 
+  const userRoleDisplay = activeRole || (roles.length > 0 ? roles[0] : 'No Role Assigned');
+  const hasMultipleRoles = !isMO && roles.length > 1;
+
   return (
-    <div className="topbar-main">
+    // Z-INDEX 99999 FORCES THE TOPBAR DROPDOWN OVER ALL STICKY ELEMENTS IN ALL TABS
+    <div className="topbar-main" style={{ position: 'relative', zIndex: 99999 }}>
        <div className="flex-row items-center gap-12">
            <div style={{ display: 'flex', gap: 4 }}>
              <button className="iconbtn" onClick={handleBack}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg></button>
@@ -316,13 +373,110 @@ export function Topbar({ onNavHistory, username, role, onLogout }) {
            </div>
        </div>
        <div className="flex-row items-center gap-16">
-          <div className="user-info-top">
+          
+          <div className="user-info-top" style={{ position: 'relative' }} ref={dropdownRef}>
              <div className="user-avatar">{username ? username[0].toUpperCase() : 'U'}</div>
-             <div className="user-details">
-                <div className="user-name" title={username || 'User'}>{username || 'User'}</div>
-                <div className="user-role">{role || 'Guest'}</div>
+             
+             {/* UPGRADED UX: Interactive Role Switcher Trigger */}
+             <div className="user-details" 
+                  onClick={() => { if (hasMultipleRoles) setShowDropdown(!showDropdown); }}
+                  style={{ 
+                      cursor: hasMultipleRoles ? 'pointer' : 'default', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '12px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: hasMultipleRoles ? (showDropdown ? '1px solid var(--primary)' : '1px solid var(--border)') : '1px solid transparent',
+                      background: showDropdown ? 'var(--bg)' : 'transparent',
+                      transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => { if(hasMultipleRoles && !showDropdown) e.currentTarget.style.backgroundColor = 'var(--bg)'; }}
+                  onMouseOut={(e) => { if(!showDropdown) e.currentTarget.style.backgroundColor = 'transparent'; }}
+             >
+                <div>
+                    <div className="user-name" title={username || 'User'}>{username || 'User'}</div>
+                    <div className="user-role" style={{ 
+                        color: 'var(--primary)', 
+                        fontWeight: 600, 
+                        maxWidth: '180px', 
+                        whiteSpace: 'nowrap', 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis' 
+                    }}>
+                        {userRoleDisplay}
+                    </div>
+                </div>
+                {hasMultipleRoles && (
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: showDropdown ? 'var(--primary)' : 'var(--muted)',
+                        transition: 'color 0.2s ease'
+                    }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ transform: showDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                )}
              </div>
+
+             {/* UPGRADED UX: Modern Role Dropdown Menu */}
+             {showDropdown && (
+                <div style={{ 
+                    position: 'absolute', 
+                    top: 'calc(100% + 8px)', 
+                    right: 0, 
+                    background: 'var(--panel)', 
+                    border: '1px solid var(--border)', 
+                    borderRadius: '10px', 
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.12)', 
+                    zIndex: 99999, 
+                    minWidth: '240px', 
+                    overflow: 'hidden'
+                }}>
+                    <div style={{ padding: '12px 16px', background: 'var(--bg)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            Select Workspace Role
+                        </span>
+                    </div>
+                    <div style={{ padding: '8px' }}>
+                        {roles.map(r => {
+                            const isActive = activeRole === r;
+                            return (
+                                <div key={r} onClick={() => handleRoleChange(r)} 
+                                     style={{ 
+                                         padding: '10px 12px', 
+                                         fontSize: '13px', 
+                                         fontWeight: isActive ? 600 : 500,
+                                         cursor: 'pointer', 
+                                         display: 'flex', 
+                                         alignItems: 'center', 
+                                         gap: '10px',
+                                         borderRadius: '6px',
+                                         background: isActive ? 'var(--primary-light)' : 'transparent', 
+                                         color: isActive ? 'var(--primary)' : 'var(--text)',
+                                         transition: 'all 0.15s ease'
+                                     }}
+                                     onMouseOver={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
+                                     onMouseOut={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px' }}>
+                                        {isActive ? (
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                        ) : (
+                                            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--border)' }} />
+                                        )}
+                                    </div>
+                                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+             )}
           </div>
+
           <button className="btn outline dan" onClick={onLogout} style={{height: 32, padding: "0 12px"}}>
              <IconLogout /> Logout
           </button>

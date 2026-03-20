@@ -456,7 +456,8 @@ export default function KpiDetails({ context, activeTab }) {
         <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                <h2 className="m-0">{getTitle()}</h2>
-               <span className="pill gray">Target Group: {groupName || "All Servers"}</span>
+               {/* Updated Label below */}
+               <span className="pill gray">{groupName ? `Target Group: ${groupName}` : "Scope: Full Infrastructure"}</span>
             </div>
             <div className="sub mt-4 text-13 muted-text">
                Updated: {lastUpdated || "—"}
