@@ -1,5 +1,5 @@
 // src/components/pilot/PilotDecisionEngine.jsx
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useEnvironment } from "../Environment.jsx";
 import ValidationGate from "../ValidationGate";
 
@@ -109,6 +109,9 @@ export default function PilotDecisionEngine({
 
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const isRefreshing = useRef(false);
+  const hasAutoRefreshed = useRef(false); // Tracks auto-initialization
+  
   const [enableEvaluate, setEnableEvaluate] = useState(false);
   const [enableTriggerPilot, setEnableTriggerPilot] = useState(false);
   const [evaluated, setEvaluated] = useState(false);
@@ -173,13 +176,24 @@ export default function PilotDecisionEngine({
         try { 
             const cfg = await getJSON(`${API_BASE}/api/config`, ctl.signal); 
             const c = cfg?.config ?? cfg; 
+            
+            setEnv(prev => ({
+                ...prev,
+                snapshotVM: c.snapshotVM ?? prev.snapshotVM,
+                cloneVM: c.cloneVM ?? prev.cloneVM,
+                enablePilot: c.enablePilot ?? prev.enablePilot,
+                enableSandbox: c.enableSandbox ?? prev.enableSandbox,
+                successThreshold: c.successThreshold != null ? Number(c.successThreshold) : prev.successThreshold,
+                allowableCriticalHF: c.allowableCriticalHF != null ? Number(c.allowableCriticalHF) : prev.allowableCriticalHF
+            }));
+
             if (typeof c?.requireChg === "boolean") setRequireChg(c.requireChg); 
             if (typeof c?.enablePilot === "boolean") setLocalPilotEnabled(c.enablePilot);
             if (typeof c?.enableSandbox === "boolean") setLocalSandboxEnabled(c.enableSandbox);
         } catch {} 
     })();
     return () => ctl.abort();
-  }, []);
+  }, [setEnv]);
 
   useEffect(() => {
     const skippedPrevForProduction = inProduction && !localPilotEnabled && !localSandboxEnabled;
@@ -189,19 +203,26 @@ export default function PilotDecisionEngine({
        setEnableTriggerPilot(true);
        setIsPrevStageComplete(true);
        setDecision("Ready to trigger (Prior stages bypassed).");
+       // Instantly unlock all settings (Baseline/Group/PatchWindow) if we bypassed earlier stages
+       setEnv(p => ({ ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true }));
     }
-  }, [inProduction, localPilotEnabled, localSandboxEnabled, isGateSatisfied]);
+  }, [inProduction, localPilotEnabled, localSandboxEnabled, isGateSatisfied, mode, setEnv]);
+
+  // Identify Previous Action ID safely for dependency arrays
+  const prevActionId = useMemo(() => {
+    return inProduction 
+      ? (localPilotEnabled ? lastActions?.PILOT?.id : lastActions?.SANDBOX?.id) 
+      : lastActions?.SANDBOX?.id;
+  }, [inProduction, localPilotEnabled, lastActions]);
+
+  // Reset auto-refresh trigger if the action ID significantly changes
+  useEffect(() => {
+    hasAutoRefreshed.current = false;
+  }, [prevActionId]);
 
   useEffect(() => {
     if (!isGateSatisfied || readOnly) { 
         setIsPrevStageComplete(false); setEnableEvaluate(false); return; 
-    }
-
-    let prevActionId;
-    if (inProduction) {
-      prevActionId = localPilotEnabled ? lastActions?.PILOT?.id : lastActions?.SANDBOX?.id;
-    } else {
-      prevActionId = lastActions?.SANDBOX?.id;
     }
 
     const skippedPrevForProduction = inProduction && !localPilotEnabled && !localSandboxEnabled;
@@ -225,7 +246,7 @@ export default function PilotDecisionEngine({
     
     poll(); timer = setInterval(poll, 30000); 
     return () => { cancelled = true; if (timer) clearInterval(timer); };
-  }, [inProduction, lastActions, isPrevStageComplete, isGateSatisfied, readOnly, localPilotEnabled, localSandboxEnabled]);
+  }, [inProduction, prevActionId, isPrevStageComplete, isGateSatisfied, readOnly, localPilotEnabled, localSandboxEnabled]);
 
   useEffect(() => {
     const onCounts = (e) => { 
@@ -257,34 +278,94 @@ export default function PilotDecisionEngine({
     }
   }, [isEUC, isGateSatisfied, isPrevStageComplete]);
 
-  async function refreshKpis() {
-    if (refreshing) return; setRefreshing(true);
+  const refreshKpis = useCallback(async () => {
+    if (isRefreshing.current) return;
+    isRefreshing.current = true;
+    setRefreshing(true);
+    
     const ab = new AbortController();
     try {
-      let actionId, scopeGroup;
-      if (inProduction) {
-        actionId = localPilotEnabled ? lastActions?.PILOT?.id : lastActions?.SANDBOX?.id;
-        scopeGroup = localPilotEnabled ? lastActions?.PILOT?.group : lastActions?.SANDBOX?.group;
-      } else {
-        actionId = lastActions?.SANDBOX?.id;
-        scopeGroup = lastActions?.SANDBOX?.group;
-      }
+      let actionId = prevActionId;
+      let scopeGroup = inProduction 
+        ? (localPilotEnabled ? lastActions?.PILOT?.group : lastActions?.SANDBOX?.group) 
+        : lastActions?.SANDBOX?.group;
 
-      if (!actionId) { setEnableEvaluate(false); setDecision("Loading previous stage data..."); return; }
+      if (!actionId) { 
+          setEnableEvaluate(false); 
+          setDecision("Loading previous stage data..."); 
+          return; 
+      }
       
       const results = await getActionResults(actionId, ab.signal);
       const rows = Array.isArray(results?.rows) ? results.rows : [];
-      setSandbox({ success: num(pick(results, "success", rows.filter(r => isSuccess(r?.status)).length)), total: num(pick(results, "total", rows.length)), rows });
+      const successCount = num(pick(results, "success", rows.filter(r => isSuccess(r?.status)).length));
+      const totalCount = num(pick(results, "total", rows.length));
+      setSandbox({ success: successCount, total: totalCount, rows });
       
       const ch = await getCriticalHealth(scopeGroup, ab.signal);
       setCounts(c => ({ ...c, critical: num(ch?.count, 0) }));
+      
       const tot = await getTotalComputersMaybe(scopeGroup, ab.signal); 
       if (tot > 0) setTotalComputers(tot);
       
       setTimeout(() => { window.dispatchEvent(new CustomEvent("pilot:requestKpiCounts")); }, 0);
-      setEnableEvaluate(isGateSatisfied && isPrevStageComplete); setEnableTriggerPilot(false); setEvaluated(false); setDecision("Evaluate to see gate status…"); setChgValidated(false);
-    } catch (e) { console.error("Refresh KPIs failed:", e); } finally { setRefreshing(false); }
-  }
+      
+      const approved = sessionStorage.getItem(`approved_${mode}_${actionId}`) === "true";
+      const savedChg = sessionStorage.getItem(`chg_${mode}_${actionId}`);
+      
+      setEnableEvaluate(isGateSatisfied && isPrevStageComplete);
+
+      if (approved) {
+          setEvaluated(true);
+          // UNLOCKS BASELINE, TARGET GROUP, AND PATCH WINDOWS SIMULTANEOUSLY
+          setEnv(p => ({ ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true }));
+          
+          if (requireChg) {
+              if (savedChg) {
+                  setChgValidated(true);
+                  setChgNumber(savedChg);
+                  setEnableTriggerPilot(true);
+                  setDecision(`CHG validated. Configuration Unlocked.`);
+              } else {
+                  setEnableTriggerPilot(false);
+                  setDecision("PASS: Thresholds met. Validate CHG.");
+              }
+          } else {
+              setEnableTriggerPilot(true);
+              setDecision("PASS: Thresholds met. Configuration Unlocked.");
+          }
+      } else {
+          setEnableTriggerPilot(false); 
+          setEvaluated(false); 
+          setDecision("Evaluate to see gate status…"); 
+          setChgValidated(false);
+          setEnv(p => ({ ...p, [`${mode}Evaluated`]: false, [`${mode}Unlocked`]: false }));
+      }
+    } catch (e) { 
+        console.error("Refresh KPIs failed:", e); 
+    } finally { 
+        isRefreshing.current = false;
+        setRefreshing(false); 
+    }
+  }, [prevActionId, inProduction, localPilotEnabled, lastActions, mode, isGateSatisfied, isPrevStageComplete, requireChg, setEnv]);
+
+  // NEW: Automatically restore state from sessionStorage immediately on mount/poll completion
+  useEffect(() => {
+    if (isGateSatisfied && isPrevStageComplete && prevActionId && !hasAutoRefreshed.current) {
+      hasAutoRefreshed.current = true;
+      refreshKpis();
+    }
+  }, [isGateSatisfied, isPrevStageComplete, prevActionId, refreshKpis]);
+
+  // AUTO REFRESH LOOP EVERY 10 MINS
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (!busy && !checkingBaseline) {
+        refreshKpis();
+      }
+    }, 600000); // 10 minutes
+    return () => clearInterval(intervalId);
+  }, [refreshKpis, busy, checkingBaseline]);
 
   function evaluateAndDecide() {
     if (!isGateSatisfied || !enableEvaluate || readOnly) return;
@@ -295,18 +376,34 @@ export default function PilotDecisionEngine({
     const T = totalComputers > 0 ? totalComputers : Math.max(1, sandbox.total);
     const successPct = sandbox.total > 0 ? Math.round((sandbox.success / sandbox.total) * 100) : 0;
     
-    if (sandbox.total === 0 && (counts.critical === undefined)) { setDecision("FAIL: No data loaded."); setEnableTriggerPilot(false); setEvaluated(true); return; }
+    if (sandbox.total === 0 && (counts.critical === undefined)) { 
+        setDecision("FAIL: No data loaded."); 
+        setEnableTriggerPilot(false); 
+        setEvaluated(true); 
+        return; 
+    }
     
     const okSuccess = successPct >= threshold; 
     const okHealth = (counts.critical || 0) <= allowableCHF;
     setEvaluated(true);
     
     if (okSuccess && okHealth) {
-      setEnv(p => ({ ...p, [`${mode}Evaluated`]: true }));
-      if (requireChg) { setDecision("PASS: Thresholds met. Validate CHG."); setShowChg(true); setChgErr(""); if (!chgNumber) setChgNumber("CHG"); setEnableTriggerPilot(false); } 
-      else { setDecision("PASS: Thresholds met. Group Dropdown Unlocked."); setEnableTriggerPilot(true); }
+      setEnv(p => ({ ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true }));
+      if (prevActionId) sessionStorage.setItem(`approved_${mode}_${prevActionId}`, "true");
+
+      if (requireChg) { 
+          setDecision("PASS: Thresholds met. Validate CHG."); 
+          setShowChg(true); 
+          setChgErr(""); 
+          if (!chgNumber) setChgNumber("CHG"); 
+          setEnableTriggerPilot(false); 
+      } else { 
+          setDecision("PASS: Thresholds met. Configuration Unlocked."); 
+          setEnableTriggerPilot(true); 
+      }
     } else { 
-      setEnv(p => ({ ...p, [`${mode}Evaluated`]: false }));
+      setEnv(p => ({ ...p, [`${mode}Evaluated`]: false, [`${mode}Unlocked`]: false }));
+      if (prevActionId) sessionStorage.removeItem(`approved_${mode}_${prevActionId}`);
       setDecision(`FAIL: Thresholds not met (Success: ${successPct}%, Critical Fails: ${counts.critical}).`); 
       setEnableTriggerPilot(false); 
     }
@@ -320,9 +417,14 @@ export default function PilotDecisionEngine({
         const url = `${API_BASE}/api/sn/change/validate?number=${encodeURIComponent(cleaned)}`; 
         const j = await getJSON(url); 
         if (j.ok !== true || j.implement !== true) { setChgErr(j?.message || "Validation failed."); return; } 
-        setChgValidated(true); setShowChg(false); setEnableTriggerPilot(true); 
-        setDecision(`CHG validated. Group Dropdown Unlocked.`); 
-        setEnv(p => ({ ...p, [`${mode}Evaluated`]: true }));
+        
+        setChgValidated(true); 
+        setShowChg(false); 
+        setEnableTriggerPilot(true); 
+        setDecision(`CHG validated. Configuration Unlocked.`); 
+        setEnv(p => ({ ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true }));
+        
+        if (prevActionId) sessionStorage.setItem(`chg_${mode}_${prevActionId}`, cleaned);
     } catch (err) { setChgErr(err?.message || String(err)); } finally { setChgChecking(false); }
   }
 
@@ -361,8 +463,12 @@ export default function PilotDecisionEngine({
       
       const trig = await postJSON(`${API_BASE}${endpoint}`, payload);
       
-      // Clear the override lock to reset evaluation behavior for the next run
-      setEnv(p => ({ ...p, [`${mode}Unlocked`]: false }));
+      setEnv(p => ({ ...p, [`${mode}Unlocked`]: false, [`${mode}Evaluated`]: false }));
+      
+      if (prevActionId) {
+          sessionStorage.removeItem(`approved_${mode}_${prevActionId}`);
+          sessionStorage.removeItem(`chg_${mode}_${prevActionId}`);
+      }
       
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
       setEnableTriggerPilot(false); setDecision(`${inProduction ? "Production" : "Pilot"} triggered. Action ${trig?.actionId || "?"}.`);
@@ -386,7 +492,8 @@ export default function PilotDecisionEngine({
 
   const baselineToConfirm = env?.baselineName || env?.baseline || "N/A";
   const targetGroup = inProduction ? env?.prodGroup : env?.pilotGroup;
-  const needsBackup = env?.snapshotVM || env?.cloneVM; const isTriggerBlocked = needsBackup && !validationReady;
+  const needsBackup = env?.snapshotVM || env?.cloneVM; 
+  const isTriggerBlocked = needsBackup && !validationReady;
 
   const currentItems = useMemo(() => {
     if (!prediction?.details) return [];
@@ -474,8 +581,6 @@ export default function PilotDecisionEngine({
           title="Override Configuration Limits"
           onClose={() => setShowUnlockConfirm(false)}
           onConfirm={() => {
-             // By setting this in the global env context, App.jsx will capture it 
-             // and push it to the database's `AppState` JSON.
              setEnv(p => ({ ...p, [`${mode}Unlocked`]: true }));
              setShowUnlockConfirm(false);
           }}

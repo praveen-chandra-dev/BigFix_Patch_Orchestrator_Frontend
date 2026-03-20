@@ -3,8 +3,6 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import FilterDrawer from "./FilterDrawer";
 
 // --- SECURE IN-MEMORY VM CACHE ---
-// Caches INDIVIDUAL VMs instead of whole lists. 
-// If a server is in Group A and Group B, it will instantly load in Group B without another API call!
 const vmResolutionCache = new Map();
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
@@ -69,65 +67,114 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
-const FancySelect = ({ label, options, value, onChange, placeholder, disabled, isLoading }) => {
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, isLoading, width = '100%', menuPlacement = 'bottom' }) => {
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ref = useRef(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const wrapperRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
-    const handleClickOutside = (event) => { if (ref.current && !ref.current.contains(event.target)) setOpen(false); };
-    document.addEventListener("mousedown", handleClickOutside);
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   useEffect(() => {
-    if (!open) setSearch("");
-  }, [open]);
+    if (open && searchable && searchInputRef.current) searchInputRef.current.focus();
+  }, [open, searchable]);
 
-  const selectedLabel = options.find((o) => o.value === value)?.label || placeholder;
-  const filteredOptions = options.filter(opt => String(opt.label).toLowerCase().includes(search.toLowerCase()));
+  const selectedOption = options.find(o => String(o.value !== undefined ? o.value : o) === String(value));
+  const displayText = isLoading ? "Loading..." : (selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : (placeholder || "— Select —"));
+  const isPlaceholder = !selectedOption && !isLoading;
+
+  const filteredOptions = searchable && searchTerm.trim() !== ""
+    ? options.filter(opt => String(opt.label !== undefined ? opt.label : opt).toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
 
   return (
-    <div className="field flex-1 min-w-200" ref={ref}>
-      {label && <div className="meta"><label>{label}</label></div>}
-      <div className="inputwrap">
-          <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`}>
-            <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} disabled={disabled || isLoading}>
-              <span className="fx-value">{isLoading ? "Loading..." : selectedLabel}</span>
-              <span className="fx-chevron">▾</span>
-            </button>
-            {open && (
-              <div className="fx-menu">
-                <div style={{ padding: "8px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, backgroundColor: "var(--panel)", zIndex: 10 }}>
-                  <input 
-                    type="text" 
-                    className="control" 
-                    placeholder="Search..." 
-                    value={search} 
-                    onChange={(e) => setSearch(e.target.value)} 
-                    onClick={e => e.stopPropagation()}
-                    onKeyDown={e => e.stopPropagation()}
-                    autoFocus 
-                    style={{ width: "100%", height: "32px", fontSize: "13px" }} 
-                  />
-                </div>
-                <div className="fx-menu-inner">
-                    {filteredOptions.length === 0 ? (
-                    <div className="fx-item empty">No Options Found</div>
-                    ) : (
-                    filteredOptions.map((opt) => (
-                        <div key={opt.value} className={`fx-item ${value === opt.value ? "active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }}>
-                        {opt.label}
-                        </div>
-                    ))
-                    )}
-                </div>
+    <div className="field flex-1 m-0" style={{ minWidth: label ? '200px' : 'auto' }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${(disabled || isLoading) ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && !isLoading && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: (disabled || isLoading) ? 'var(--bg)' : 'var(--panel)' }} disabled={disabled || isLoading}>
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: (disabled || isLoading) ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
+        </button>
+        {open && (
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
+            {searchable && (
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
+                <input 
+                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
+                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
+                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
+                />
               </div>
             )}
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                filteredOptions.map((opt) => {
+                  const optVal = opt.value !== undefined ? opt.value : opt;
+                  const optLabel = opt.label !== undefined ? opt.label : opt;
+                  const isSelected = String(value) === String(optVal);
+                  return (
+                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
+                      <span className="fx-label">{optLabel}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
+        )}
       </div>
     </div>
   );
+};
+
+const Paginator = ({ total, rpp, setRpp, page, setPage, edgeToEdge = false }) => {
+    const totalPages = Math.ceil(total / rpp) || 1;
+    const rppOptions = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
+    const edgeStyles = edgeToEdge 
+        ? { margin: '0 -32px', width: 'calc(100% + 64px)', borderBottom: '1px solid var(--border)', padding: '16px 32px' } 
+        : { padding: '16px 20px', borderTop: '1px solid var(--border)' };
+
+    return (
+        <div className="pagination" style={{ position: 'relative', zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "24px", background: 'var(--panel)', ...edgeStyles }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                <FancySelect options={rppOptions} value={rpp} onChange={v => { setRpp(Number(v)); setPage(1); }} width="80px" menuPlacement="top" searchable={false} />
+            </div>
+            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                {total > 0 ? (page - 1) * rpp + 1 : 0}-{Math.min(page * rpp, total)} of {total}
+            </span>
+            <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt;</button>
+                <button className={`pager-btn ${page === 1 ? 'active' : ''}`} onClick={() => setPage(1)}>1</button>
+                {totalPages > 1 && <button className={`pager-btn ${page === 2 ? 'active' : ''}`} onClick={() => setPage(2)}>2</button>}
+                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                {totalPages > 2 && page > 2 && page < totalPages && <button className="pager-btn active">{page}</button>}
+                {totalPages > 2 && <button className={`pager-btn ${page === totalPages ? 'active' : ''}`} onClick={() => setPage(totalPages)}>{totalPages}</button>}
+                <button className="pager-btn" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>&gt;</button>
+            </div>
+        </div>
+    );
 };
 
 export default function CloneManager({ onClose, groupName: initialGroup, onComplete, environment }) {
@@ -178,7 +225,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
     { id: 'status', label: 'Status', show: true }
   ]);
 
-  const propertyOptions = activeTab === 'EXECUTION' ? [
+  const propertyOptions = useMemo(() => activeTab === 'EXECUTION' ? [
     { value: "name", label: "Original" },
     { value: "backupName", label: "Clone Name" },
     { value: "status", label: "Status" }
@@ -186,7 +233,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
     { value: "name", label: "Hostname" },
     { value: "ips", label: "IP Address" },
     { value: "vcStatus", label: "Status" }
-  ];
+  ], [activeTab]);
 
   const [inventory, setInventory] = useState({ datacenters: [], hosts: [], datastores: [], folders: [], osSpecs: [] });
   const [invLoading, setInvLoading] = useState(false);
@@ -227,8 +274,8 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
       try {
         const gRes = await getJSON("/api/groups/list");
         if (gRes.ok) {
-          setGroups(gRes.groups.map((g) => ({ value: g.id, label: g.name })));
-          if (initialGroup) { const found = gRes.groups.find((g) => g.name === initialGroup); if (found) setSelectedGroupId(found.id); }
+          setGroups(gRes.groups.map((g) => ({ value: String(g.id), label: g.name })));
+          if (initialGroup) { const found = gRes.groups.find((g) => g.name === initialGroup); if (found) setSelectedGroupId(String(found.id)); }
         }
       } catch (e) {}
       setInvLoading(true);
@@ -256,7 +303,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
     try {
       let rawItems = [];
       if (mode === "GROUP") {
-        const g = groups.find((x) => x.value === selectedGroupId);
+        const g = groups.find((x) => String(x.value) === String(selectedGroupId));
         if (g) { 
             const res = await getJSON(`/api/groups/${encodeURIComponent(g.label)}/members`); 
             rawItems = res.members || []; 
@@ -270,7 +317,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
       const processedItems = rawItems.map(c => {
           const key = String(c.name || "").toLowerCase();
           if (vmResolutionCache.has(key)) {
-              // Immediately load from global cache
               const cached = vmResolutionCache.get(key);
               return { ...c, vcId: cached.vcId, vcStatus: cached.vcStatus };
           } else {
@@ -293,7 +339,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   useEffect(() => { fetchData(); }, [mode, selectedGroupId]);
 
   const resolveBatch = async (unresolvedItems) => {
-      // Chunk the API requests to prevent "All Servers" from crashing the payload limit
       const CHUNK_SIZE = 200; 
       
       for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
@@ -311,12 +356,10 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                   const vcId = resultMap.get(key);
                   const status = vcId ? 'ready' : 'not_found';
                   
-                  // Save to secure memory cache
                   vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
                   chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
               });
               
-              // Safely update state for this specific chunk
               setItems(prev => prev.map(item => {
                   const key = String(item.name || "").toLowerCase();
                   if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
@@ -324,7 +367,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               }));
               
           } catch (e) {
-              console.error("Batch resolve failed", e);
               const chunkUpdates = {};
               chunk.forEach(c => {
                   const key = String(c.name || "").toLowerCase();
@@ -401,10 +443,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
     return sortableItems;
   }, [visibleExecs, execSortConfig]);
 
-  const totalPages = Math.ceil(sortedItems.length / rowsPerPage);
   const paginatedItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
-
-  const execTotalPages = Math.ceil(sortedExecs.length / execRowsPerPage);
   const execPaginatedItems = sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage);
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
@@ -607,7 +646,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
           {mode === "GROUP" && (
             <div className="section overflow-visible">
               <div className="controls-grid">
-                  <FancySelect label="Select Group" options={groups} value={selectedGroupId} onChange={setSelectedGroupId} placeholder="-- Select Group --" disabled={processing} />
+                  <FancySelect label="Select Group" options={groups} value={selectedGroupId} onChange={setSelectedGroupId} placeholder="-- Select Group --" disabled={processing} searchable={true} />
               </div>
             </div>
           )}
@@ -693,26 +732,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               )}
             </div>
 
-            <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                    <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                        <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                    </select>
-                </div>
-                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                    {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedItems.length)} of {sortedItems.length}
-                </span>
-                <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                    <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
-                    <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
-                    {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
-                    {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                    {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-                    {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-                    <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
-                </div>
-            </div>
+            <Paginator total={sortedItems.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={false} />
           </div>
           <div className="action-bar"><button className="btn pri min-w-140" onClick={() => setActiveTab("SETTINGS")} disabled={!selectedIds.size}>Next</button></div>
         </>
@@ -723,11 +743,11 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
           <div className="section overflow-visible">
             <div className="section-head"><span className="title">1. Destination (Global)</span></div>
             <div className="controls-grid">
-               <FancySelect label="Datacenter" options={inventory.datacenters} value={globalDest.datacenter} onChange={v=>setGlobalDest(p=>({...p,datacenter:v}))} placeholder="Select DC" isLoading={invLoading} />
-               <FancySelect label="Cluster/Host" options={inventory.hosts} value={globalDest.host} onChange={v=>setGlobalDest(p=>({...p,host:v}))} placeholder="Select Host" isLoading={invLoading} />
-               <FancySelect label="Datastore" options={inventory.datastores} value={globalDest.datastore} onChange={v=>setGlobalDest(p=>({...p,datastore:v}))} placeholder="Select DS" isLoading={invLoading} />
-               <FancySelect label="VM Folder" options={inventory.folders} value={globalDest.folder} onChange={v=>setGlobalDest(p=>({...p,folder:v}))} placeholder="Select Folder" isLoading={invLoading} />
-               <FancySelect label="OS Spec" options={inventory.osSpecs} value={globalDest.osSpec} onChange={v=>setGlobalDest(p=>({...p,osSpec:v}))} placeholder="Select Spec" isLoading={invLoading} />
+               <FancySelect label="Datacenter" options={inventory.datacenters} value={globalDest.datacenter} onChange={v=>setGlobalDest(p=>({...p,datacenter:v}))} placeholder="Select DC" isLoading={invLoading} searchable={true} />
+               <FancySelect label="Cluster/Host" options={inventory.hosts} value={globalDest.host} onChange={v=>setGlobalDest(p=>({...p,host:v}))} placeholder="Select Host" isLoading={invLoading} searchable={true} />
+               <FancySelect label="Datastore" options={inventory.datastores} value={globalDest.datastore} onChange={v=>setGlobalDest(p=>({...p,datastore:v}))} placeholder="Select DS" isLoading={invLoading} searchable={true} />
+               <FancySelect label="VM Folder" options={inventory.folders} value={globalDest.folder} onChange={v=>setGlobalDest(p=>({...p,folder:v}))} placeholder="Select Folder" isLoading={invLoading} searchable={true} />
+               <FancySelect label="OS Spec" options={inventory.osSpecs} value={globalDest.osSpec} onChange={v=>setGlobalDest(p=>({...p,osSpec:v}))} placeholder="Select Spec" isLoading={invLoading} searchable={true} />
             </div>
           </div>
           <div className="section">
@@ -856,26 +876,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               </tbody>
             </table>
           </div>
-          <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                  <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={execRowsPerPage} onChange={(e) => { setExecRowsPerPage(Number(e.target.value)); setExecCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                  </select>
-              </div>
-              <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                  {sortedExecs.length > 0 ? (execCurrentPage - 1) * execRowsPerPage + 1 : 0}-{Math.min(execCurrentPage * execRowsPerPage, sortedExecs.length)} of {sortedExecs.length}
-              </span>
-              <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                  <button className="pager-btn" disabled={execCurrentPage === 1} onClick={() => setExecCurrentPage(p => p - 1)}>&lt;</button>
-                  <button className={`pager-btn ${execCurrentPage === 1 ? 'active' : ''}`} onClick={() => setExecCurrentPage(1)}>1</button>
-                  {execTotalPages > 1 && <button className={`pager-btn ${execCurrentPage === 2 ? 'active' : ''}`} onClick={() => setExecCurrentPage(2)}>2</button>}
-                  {execTotalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                  {execTotalPages > 2 && execCurrentPage > 2 && execCurrentPage < execTotalPages && <button className="pager-btn active">{execCurrentPage}</button>}
-                  {execTotalPages > 2 && <button className={`pager-btn ${execCurrentPage === execTotalPages ? 'active' : ''}`} onClick={() => setExecCurrentPage(execTotalPages)}>{execTotalPages}</button>}
-                  <button className="pager-btn" disabled={execCurrentPage === execTotalPages || execTotalPages === 0} onClick={() => setExecCurrentPage(p => p + 1)}>&gt;</button>
-              </div>
-          </div>
+          <Paginator total={sortedExecs.length} rpp={execRowsPerPage} setRpp={setExecRowsPerPage} page={execCurrentPage} setPage={setExecCurrentPage} edgeToEdge={false} />
         </div>
       )}
       

@@ -127,6 +127,116 @@ const FancyDropdown = ({ options, value, onChange, placeholder, disabled }) => {
   );
 };
 
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, isLoading, width = '100%', menuPlacement = 'bottom' }) => {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const wrapperRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (open && searchable && searchInputRef.current) searchInputRef.current.focus();
+  }, [open, searchable]);
+
+  const selectedOption = options.find(o => String(o.value !== undefined ? o.value : o) === String(value));
+  const displayText = isLoading ? "Loading..." : (selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : (placeholder || "— Select —"));
+  const isPlaceholder = !selectedOption && !isLoading;
+
+  const filteredOptions = searchable && searchTerm.trim() !== ""
+    ? options.filter(opt => String(opt.label !== undefined ? opt.label : opt).toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
+
+  return (
+    <div className="field flex-1 m-0" style={{ minWidth: label ? '200px' : 'auto' }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${(disabled || isLoading) ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && !isLoading && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: (disabled || isLoading) ? 'var(--bg)' : 'var(--panel)' }} disabled={disabled || isLoading}>
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: (disabled || isLoading) ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
+        </button>
+        {open && (
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
+            {searchable && (
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
+                <input 
+                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
+                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
+                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
+                />
+              </div>
+            )}
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                filteredOptions.map((opt) => {
+                  const optVal = opt.value !== undefined ? opt.value : opt;
+                  const optLabel = opt.label !== undefined ? opt.label : opt;
+                  const isSelected = String(value) === String(optVal);
+                  return (
+                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
+                      <span className="fx-label">{optLabel}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const Paginator = ({ total, rpp, setRpp, page, setPage, edgeToEdge = false }) => {
+    const totalPages = Math.ceil(total / rpp) || 1;
+    const rppOptions = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
+    const edgeStyles = edgeToEdge 
+        ? { margin: '0 -32px', width: 'calc(100% + 64px)', borderBottom: '1px solid var(--border)', padding: '16px 32px' } 
+        : { padding: '16px 20px', borderTop: '1px solid var(--border)' };
+
+    return (
+        <div className="pagination" style={{ position: 'relative', zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "24px", background: 'var(--panel)', ...edgeStyles }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                <FancySelect options={rppOptions} value={rpp} onChange={v => { setRpp(Number(v)); setPage(1); }} width="80px" menuPlacement="top" searchable={false} />
+            </div>
+            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                {total > 0 ? (page - 1) * rpp + 1 : 0}-{Math.min(page * rpp, total)} of {total}
+            </span>
+            <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt;</button>
+                <button className={`pager-btn ${page === 1 ? 'active' : ''}`} onClick={() => setPage(1)}>1</button>
+                {totalPages > 1 && <button className={`pager-btn ${page === 2 ? 'active' : ''}`} onClick={() => setPage(2)}>2</button>}
+                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                {totalPages > 2 && page > 2 && page < totalPages && <button className="pager-btn active">{page}</button>}
+                {totalPages > 2 && <button className={`pager-btn ${page === totalPages ? 'active' : ''}`} onClick={() => setPage(totalPages)}>{totalPages}</button>}
+                <button className="pager-btn" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>&gt;</button>
+            </div>
+        </div>
+    );
+};
+
 export default function SnapshotManager({ onClose, groupName: initialGroup, onComplete, environment }) {
   const [activeTab, setActiveTab] = useState("TARGETS");
   const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
@@ -382,12 +492,6 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     return sortableItems;
   }, [visibleExecs, execSortConfig]);
 
-  const totalPages = Math.ceil(sortedItems.length / rowsPerPage);
-  const paginatedItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
-
-  const execTotalPages = Math.ceil(sortedExecs.length / execRowsPerPage);
-  const execPaginatedItems = sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage);
-
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   const handleExecSort = (key) => setExecSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   
@@ -423,7 +527,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     const columns = isExec ? execCols : cols;
     const filename = isExec ? "snapshot_history" : "snapshot_targets";
 
-    if (scope === 'page') dataToExport = isExec ? execPaginatedItems : paginatedItems;
+    if (scope === 'page') dataToExport = isExec ? sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage) : sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
     else if (scope === 'filtered') dataToExport = isExec ? sortedExecs : sortedItems;
     else dataToExport = isExec ? visibleExecs : visibleItems;
 
@@ -612,20 +716,20 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
             <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
               {isFetching ? (
                   <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading servers...</div>
-              ) : paginatedItems.length === 0 ? (
+              ) : sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).length === 0 ? (
                   <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No servers found.</div>
               ) : (
                 <table>
                   <thead className="kpi-th-sticky">
                     <tr>
-                        <th className="w-40 text-center"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} disabled={!paginatedItems.length}/></th>
+                        <th className="w-40 text-center"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} disabled={!sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).length}/></th>
                         {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Hostname{getSortIcon('name', sortConfig)}</th>}
                         {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortIcon('ips', sortConfig)}</th>}
                         {cols.find(c=>c.id==='vcStatus')?.show && <th className="cursor-pointer" onClick={() => handleSort('vcStatus')}>Status{getSortIcon('vcStatus', sortConfig)}</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedItems.map((row, i) => {
+                    {sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).map((row, i) => {
                         const isReady = row.vcStatus === 'ready';
                         return (
                             <tr key={i} className={!isReady ? "disabled" : selectedIds.has(row.vcId) ? "selected-row cursor-pointer" : "cursor-pointer"} onClick={() => toggleRow(row.vcId)}>
@@ -641,26 +745,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
               )}
             </div>
 
-            <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                    <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                        <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                    </select>
-                </div>
-                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                    {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedItems.length)} of {sortedItems.length}
-                </span>
-                <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                    <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
-                    <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
-                    {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
-                    {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                    {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-                    {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-                    <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
-                </div>
-            </div>
+            <Paginator total={sortedItems.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={false} />
           </div>
           <div className="action-bar"><button className="btn pri min-w-140" onClick={() => setActiveTab("SETTINGS")} disabled={selectedIds.size === 0}>Next</button></div>
         </>
@@ -761,8 +846,8 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                 </tr>
               </thead>
               <tbody>
-                {execPaginatedItems.length === 0 ? (<tr><td colSpan={5} className="text-center p-20">No snapshots found.</td></tr>) : (
-                  execPaginatedItems.map((ex, i) => (
+                {sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage).length === 0 ? (<tr><td colSpan={5} className="text-center p-20">No snapshots found.</td></tr>) : (
+                  sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage).map((ex, i) => (
                     <tr key={i}>
                       {execCols.find(c=>c.id==='name')?.show && <td>{ex.name}</td>}
                       {execCols.find(c=>c.id==='snapName')?.show && <td>{ex.snapName}</td>}
@@ -775,26 +860,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
               </tbody>
             </table>
           </div>
-          <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                  <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={execRowsPerPage} onChange={(e) => { setExecRowsPerPage(Number(e.target.value)); setExecCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                  </select>
-              </div>
-              <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                  {sortedExecs.length > 0 ? (execCurrentPage - 1) * execRowsPerPage + 1 : 0}-{Math.min(execCurrentPage * execRowsPerPage, sortedExecs.length)} of {sortedExecs.length}
-              </span>
-              <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                  <button className="pager-btn" disabled={execCurrentPage === 1} onClick={() => setExecCurrentPage(p => p - 1)}>&lt;</button>
-                  <button className={`pager-btn ${execCurrentPage === 1 ? 'active' : ''}`} onClick={() => setExecCurrentPage(1)}>1</button>
-                  {execTotalPages > 1 && <button className={`pager-btn ${execCurrentPage === 2 ? 'active' : ''}`} onClick={() => setExecCurrentPage(2)}>2</button>}
-                  {execTotalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                  {execTotalPages > 2 && execCurrentPage > 2 && execCurrentPage < execTotalPages && <button className="pager-btn active">{execCurrentPage}</button>}
-                  {execTotalPages > 2 && <button className={`pager-btn ${execCurrentPage === execTotalPages ? 'active' : ''}`} onClick={() => setExecCurrentPage(execTotalPages)}>{execTotalPages}</button>}
-                  <button className="pager-btn" disabled={execCurrentPage === execTotalPages || execTotalPages === 0} onClick={() => setExecCurrentPage(p => p + 1)}>&gt;</button>
-              </div>
-          </div>
+          <Paginator total={sortedExecs.length} rpp={execRowsPerPage} setRpp={setExecRowsPerPage} page={execCurrentPage} setPage={setExecCurrentPage} edgeToEdge={false} />
         </div>
       )}
       

@@ -274,9 +274,16 @@ export default function Environment() {
           signal: controller.signal
       }).then(r => r.json());
 
-      const [bRes, gRes] = await Promise.all([
+      // Fetch global config to carry over last triggered Pipeline options
+      const configPromise = fetch(`${API_BASE}/api/config`, { 
+          headers: getHeaders(), 
+          signal: controller.signal 
+      }).then(r => r.json()).catch(() => ({}));
+
+      const [bRes, gRes, cConfig] = await Promise.all([
         baselinePromise,
-        groupPromise
+        groupPromise,
+        configPromise
       ]);
 
       const bNames = (bRes.baselines || []).map(b => b.name).sort();
@@ -285,13 +292,27 @@ export default function Environment() {
       setBaselines(bNames);
       setGroups(gNames);
 
-      setEnv((f) => ({
-        ...f,
-        baseline: bNames.includes(f.baseline) ? f.baseline : (bNames[0] || ""),
-        sbxGroup: gNames.includes(f.sbxGroup) ? f.sbxGroup : (gNames[0] || ""),
-        pilotGroup: f.pilotGroup || "",
-        prodGroup: f.prodGroup || "",
-      }));
+      setEnv((f) => {
+          let defaultBaseline = f.baseline;
+          // If unpopulated, check backend history
+          if (!defaultBaseline || !bNames.includes(defaultBaseline)) {
+              defaultBaseline = cConfig.lastSandboxBaseline;
+          }
+          const currentBaselineValid = defaultBaseline && bNames.includes(defaultBaseline);
+          
+          let defaultGroup = f.sbxGroup;
+          // If unpopulated, check backend history
+          if (!defaultGroup || !gNames.includes(defaultGroup)) {
+              defaultGroup = cConfig.lastSandboxGroup;
+          }
+          const currentGroupValid = defaultGroup && gNames.includes(defaultGroup);
+          
+          return {
+              ...f,
+              baseline: currentBaselineValid ? defaultBaseline : "",
+              sbxGroup: currentGroupValid ? defaultGroup : "",
+          };
+      });
     } catch (e) {
       if (e.name !== "AbortError") setErr(`Failed to load options: ${e.message}`);
     } finally {

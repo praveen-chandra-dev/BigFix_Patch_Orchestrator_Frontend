@@ -429,7 +429,7 @@ export default function App() {
                     />
                 </Suspense>
             ) :
-             activeMenu === 'baseline' ? <Suspense fallback={null}><BaselineManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
+             //activeMenu === 'baseline' ? <Suspense fallback={null}><BaselineManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'group' ? <Suspense fallback={null}><GroupManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'snapshot' ? <Suspense fallback={null}><SnapshotManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
              activeMenu === 'clone' ? <Suspense fallback={null}><CloneManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :

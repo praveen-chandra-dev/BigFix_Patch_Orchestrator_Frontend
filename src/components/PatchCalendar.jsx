@@ -4,6 +4,7 @@ import FilterDrawer from "./FilterDrawer";
 
 const DAYS_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const RPP_OPTIONS = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
 
 const CSV_HEADER = "Server,Day,Month,Year,Time,Operating System";
 const SAMPLE_CSV = `Server-Win-01,15,January,2025,10:00 AM,Windows\nServer-Win-02,16,January,2025,10:30 AM,Windows\nDB-Linux-01,20,February,2025,02:00 PM,Linux`;
@@ -106,6 +107,82 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, isLoading, width = '100%', menuPlacement = 'bottom' }) => {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const wrapperRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (open && searchable && searchInputRef.current) searchInputRef.current.focus();
+  }, [open, searchable]);
+
+  const selectedOption = options.find(o => String(o.value) === String(value));
+  const displayText = isLoading ? "Loading..." : (selectedOption ? selectedOption.label : (placeholder || "— Select —"));
+  const isPlaceholder = !selectedOption && !isLoading;
+
+  const filteredOptions = searchable && searchTerm.trim() !== ""
+    ? options.filter(opt => String(opt.label).toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
+
+  return (
+    <div className="field flex-1 m-0" style={{ width }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${(disabled || isLoading) ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && !isLoading && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: (disabled || isLoading) ? 'var(--bg)' : 'var(--panel)' }} disabled={disabled || isLoading}>
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: (disabled || isLoading) ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
+        </button>
+        {open && (
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
+            {searchable && (
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
+                <input 
+                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
+                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
+                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
+                />
+              </div>
+            )}
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                filteredOptions.map((opt) => (
+                  <div key={opt.value} className={`fx-item ${String(value) === String(opt.value) ? "fx-active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: String(value) === String(opt.value) ? 'var(--bg)' : 'transparent', color: String(value) === String(opt.value) ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => String(value) !== String(opt.value) && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => String(value) !== String(opt.value) && (e.currentTarget.style.background = 'transparent')}>
+                    <span className="fx-label">{opt.label}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function PatchCalendar({ onClose, userRole }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
@@ -122,10 +199,13 @@ export default function PatchCalendar({ onClose, userRole }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
-  const propertyOptions = [
+  
+  // Fixed Issue #1: Wrapped propertyOptions in useMemo
+  const propertyOptions = useMemo(() => [
     { value: "server", label: "Server Name" }, { value: "os", label: "Operating System" },
     { value: "time", label: "Time" }, { value: "month", label: "Month" }, { value: "date", label: "Date" } 
-  ];
+  ], []);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -341,7 +421,7 @@ export default function PatchCalendar({ onClose, userRole }) {
                     {validConds.map((c, cIdx) => (
                       <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
                         {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                        <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                        <span className="filter-tag"><strong>{propertyOptions.find(o => String(o.value) === String(c.column))?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                       </span>
                     ))}
                   </div>
@@ -487,12 +567,10 @@ export default function PatchCalendar({ onClose, userRole }) {
                     </table>
                 </div>
 
-                <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
+                <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                         <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                        <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                        </select>
+                        <FancySelect options={RPP_OPTIONS} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
                     </div>
                     <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
                         {sortedEvents.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedEvents.length)} of {sortedEvents.length}

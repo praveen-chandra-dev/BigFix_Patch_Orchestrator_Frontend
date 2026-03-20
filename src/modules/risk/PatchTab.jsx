@@ -2,52 +2,102 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import api from "../../api/api";
 
-function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
-    const visibleCols = columns.filter(c => c.show);
-    const headers = visibleCols.map(c => c.label);
-    const triggerDownload = (content, type, ext) => {
-        const blob = new Blob([content], { type });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `${filenamePrefix}.${ext}`;
-        a.click(); URL.revokeObjectURL(url);
-    };
-    if (format === 'JSON') {
-        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
-        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
-    } else if (format === 'XML') {
-        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
-        dataToExport.forEach(row => {
-            xml += '  <row>\n';
-            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
-            xml += '  </row>\n';
-        });
-        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
-    } else if (format === 'HTML') {
-        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
-        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
-        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
-    } else if (format === 'TXT') {
-        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
-        triggerDownload(txt, "text/plain", "txt");
-    } else if (format === 'PDF') {
-        const loadScript = (src) => new Promise(resolve => {
-            if (document.querySelector(`script[src="${src}"]`)) return resolve();
-            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
-        });
-        Promise.all([
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
-        ]).then(() => {
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text(`Export: ${filenamePrefix}`, 14, 15);
-            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
-            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
-        });
-    } else { 
-        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
-        triggerDownload(csv, "text/csv", "csv");
-    }
+function performExport(
+  dataToExport,
+  columns,
+  format,
+  filenamePrefix,
+  getVal = (row, colId) => row[colId],
+) {
+  const visibleCols = columns.filter((c) => c.show);
+  const headers = visibleCols.map((c) => c.label);
+
+  const triggerDownload = (content, type, ext) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${filenamePrefix}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  if (format === "JSON") {
+    const json = dataToExport.map((row) => {
+      let obj = {};
+      visibleCols.forEach((c) => (obj[c.label] = getVal(row, c.id)));
+      return obj;
+    });
+    triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
+  } else if (format === "XML") {
+    let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
+    dataToExport.forEach((row) => {
+      xml += "  <row>\n";
+      visibleCols.forEach((c) => {
+        const tag = c.label.replace(/[^a-zA-Z0-9]/g, "_");
+        xml += `    <${tag}>${getVal(row, c.id) || ""}</${tag}>\n`;
+      });
+      xml += "  </row>\n";
+    });
+    xml += "</rows>";
+    triggerDownload(xml, "application/xml", "xml");
+  } else if (format === "HTML") {
+    let html = '<table border="1"><thead><tr>';
+    headers.forEach((h) => (html += `<th>${h}</th>`));
+    html += "</tr></thead><tbody>";
+    dataToExport.forEach((row) => {
+      html += "<tr>";
+      visibleCols.forEach(
+        (c) => (html += `<td>${getVal(row, c.id) || ""}</td>`),
+      );
+      html += "</tr>";
+    });
+    html += "</tbody></table>";
+    triggerDownload(html, "text/html", "html");
+  } else if (format === "TXT") {
+    const txt = [
+      headers.join("\t"),
+      ...dataToExport.map((r) =>
+        visibleCols.map((c) => getVal(r, c.id) || "").join("\t"),
+      ),
+    ].join("\n");
+    triggerDownload(txt, "text/plain", "txt");
+  } else if (format === "PDF") {
+    const loadScript = (src) =>
+      new Promise((resolve) => {
+        if (document.querySelector(`script[src="${src}"]`)) return resolve();
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = resolve;
+        document.body.appendChild(script);
+      });
+    Promise.all([
+      loadScript(
+        "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+      ),
+      loadScript(
+        "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js",
+      ),
+    ]).then(() => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.text(`Export: ${filenamePrefix}`, 14, 15);
+      const body = dataToExport.map((row) =>
+        visibleCols.map((c) => getVal(row, c.id) || ""),
+      );
+      doc.autoTable({ head: [headers], body: body, startY: 20 });
+      doc.save(`${filenamePrefix}.pdf`);
+    });
+  } else {
+    const csv = [
+      headers.join(","),
+      ...dataToExport.map((r) =>
+        visibleCols
+          .map((c) => `"${String(getVal(r, c.id) || "").replace(/"/g, '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    triggerDownload(csv, "text/csv", "csv");
+  }
 }
 
 const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
@@ -56,13 +106,15 @@ export default function PatchTab({
   patches,
   patchLoading,
   addBaseline,
+  selectedMap,
+  setSelectedMap,
   parentFilters = [],
   parentLogic = "AND",
   navigate,
 }) {
   const [cves, setCves] = useState([]);
   const [modalData, setModalData] = useState(null);
-  const [selectedMap, setSelectedMap] = useState({});
+  
   const [cveLoading, setCveLoading] = useState(false);
 
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -72,9 +124,12 @@ export default function PatchTab({
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
-  const [exportFormat, setExportFormat] = useState('CSV');
+  const [exportFormat, setExportFormat] = useState("CSV");
   const colRef = useRef(null);
   const expRef = useRef(null);
+  const headerCheckboxRef = useRef(null);
+  const [isMaster, setIsMaster] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const [cols, setCols] = useState([
     { id: "patch_id", label: "Patch ID", show: true },
@@ -83,6 +138,7 @@ export default function PatchTab({
     { id: "cve_count", label: "Associated CVE IDs", show: true },
     { id: "severity", label: "Vulnerability Severity", show: true },
     { id: "final_score", label: "Score", show: true },
+    { id: "status", label: "Approval Status", show: true },
   ]);
 
   useEffect(() => {
@@ -96,6 +152,15 @@ export default function PatchTab({
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
+  const showToast = (message, type = "info") => {
+    console.log("TOAST CALLED:", message);
+    setToast({ message, type });
+
+    setTimeout(() => {
+      setToast(null);
+    }, 5000);
+  };
+
   const patchCveMap = useMemo(() => {
     const map = {};
     cves.forEach((c) => {
@@ -105,6 +170,25 @@ export default function PatchTab({
     });
     return map;
   }, [cves]);
+
+  useEffect(() => {
+    async function checkRole() {
+      try {
+        const res = await api.get("/test-sites"); // your existing endpoint
+        const sites = res.data?.sites || [];
+
+        if (sites.includes("__ALL__")) {
+          setIsMaster(true);
+        } else {
+          setIsMaster(false);
+        }
+      } catch (e) {
+        setIsMaster(false);
+      }
+    }
+
+    checkRole();
+  }, []);
 
   const loadPatchCves = async (patch) => {
     const key = getPatchKey(patch);
@@ -183,8 +267,16 @@ export default function PatchTab({
             else if (c.operator === "!=") condition = field !== val;
           }
         } else {
-          let field = String(patch[c.column] || "").toLowerCase();
+          let field;
+
+          if (c.column === "status") {
+            field = patch.status === 1 ? "approved" : "not approved";
+          } else {
+            field = String(patch[c.column] || "").toLowerCase();
+          }
+
           if (c.column === "patch_id") field = field.replace(/^bigfix-/, "");
+
           if (c.operator === "contains") condition = field.includes(search);
           else if (c.operator === "=") condition = field === search;
           else if (c.operator === "!=") condition = field !== search;
@@ -207,8 +299,11 @@ export default function PatchTab({
     }));
 
   const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
-    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+    if (sortConfig.key !== key)
+      return <span className="muted-text ml-6">↕</span>;
+    return (
+      <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>
+    );
   };
 
   const filteredPatches = [...patches].filter(applyFilters).sort((a, b) => {
@@ -232,6 +327,9 @@ export default function PatchTab({
       const keyB = getPatchKey(b);
       aVal = a.cve_count ?? (patchCveMap[keyA]?.length || 0);
       bVal = b.cve_count ?? (patchCveMap[keyB]?.length || 0);
+    } else if (sortConfig.key === "status") {
+      aVal = Number(a.status || 0);
+      bVal = Number(b.status || 0);
     } else {
       aVal = String(a[sortConfig.key] || "").toLowerCase();
       bVal = String(b[sortConfig.key] || "").toLowerCase();
@@ -241,6 +339,13 @@ export default function PatchTab({
     return 0;
   });
 
+  const allSelected =
+    filteredPatches.length > 0 &&
+    filteredPatches.every((p) => selectedMap[getPatchKey(p)]);
+
+  const someSelected =
+    filteredPatches.some((p) => selectedMap[getPatchKey(p)]) && !allSelected;
+
   const totalPages = Math.ceil(filteredPatches.length / rowsPerPage);
   const paginatedPatches = filteredPatches.slice(
     (currentPage - 1) * rowsPerPage,
@@ -248,24 +353,93 @@ export default function PatchTab({
   );
   const selectedCount = Object.keys(selectedMap).length;
 
+  const hasApprovable = Object.values(selectedMap).some((p) => p.status !== 1);
+
+  const hasUnapprovable = Object.values(selectedMap).some(
+    (p) => p.status !== 0,
+  );
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
+
   const handleExport = (scope) => {
     setShowExpDrop(false);
     let dataToExport = [];
-    if (scope === 'page') dataToExport = paginatedPatches;
-    else if (scope === 'filtered') dataToExport = filteredPatches;
+    if (scope === "page") dataToExport = paginatedPatches;
+    else if (scope === "filtered") dataToExport = filteredPatches;
     else dataToExport = patches;
-    
-    performExport(dataToExport, cols, exportFormat, "patches_export", (p, cId) => {
-        if (cId === "severity") return getSeverityFromScore(Number(p.final_score || 0));
-        if (cId === "cve_count") return patchCveMap[getPatchKey(p)]?.length || 0;
+
+    performExport(
+      dataToExport,
+      cols,
+      exportFormat,
+      "patches_export",
+      (p, cId) => {
+        if (cId === "severity")
+          return getSeverityFromScore(Number(p.final_score || 0));
+        if (cId === "cve_count")
+          return patchCveMap[getPatchKey(p)]?.length || 0;
+        if (cId === "status") return getStatusLabel(p.status);
         return p[cId];
-    });
+      },
+    );
   };
+
+  const getStatusLabel = (status) =>
+    status === 1 ? "Approved" : "Not Approved";
 
   const approvePatches = () => {
     if (selectedCount === 0) return;
+
+    const hasUnapproved = Object.values(selectedMap).some(
+      (p) => p.status !== 1,
+    );
+
+    if (hasUnapproved) {
+      showToast(
+        "Only approved patches can be used to create baseline",
+        "error",
+      );
+      return;
+    }
+
     addBaseline({ patches: Object.values(selectedMap) });
-    setSelectedMap({});
+    //setSelectedMap({});
+  };
+
+  const handleApprovePatches = async (approve = true) => {
+    if (selectedCount === 0) return;
+
+    //  filter only valid patches
+    const filtered = Object.values(selectedMap).filter((p) =>
+      approve ? p.status !== 1 : p.status !== 0,
+    );
+
+    if (filtered.length === 0) return;
+
+    try {
+      const payload = filtered.map((p) => ({
+        patch_id: p.patch_id,
+        site_name: p.site_name,
+      }));
+
+      await api.post("/patches/approve", {
+        patches: payload,
+        approve,
+      });
+
+      // update only affected patches
+      filtered.forEach((p) => {
+        p.status = approve ? 1 : 0;
+      });
+
+      setSelectedMap({});
+    } catch (err) {
+      console.error("Approve patches failed:", err);
+    }
   };
 
   if (patchLoading)
@@ -273,14 +447,42 @@ export default function PatchTab({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+      {toast && (
+        <div className={`custom-toast show ${toast.type}`}>
+          <div className="toast-content">
+            <span>{toast.message}</span>
+            <button className="toast-close" onClick={() => setToast(null)}>
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       <div
         className="grid-toolbar"
         style={{ margin: "0 0 16px 0", padding: 0 }}
       >
         <div
           className="grid-toolbar-right"
-          style={{ display: "flex", gap: "12px", marginLeft: 'auto' }}
+          style={{ display: "flex", gap: "12px", marginLeft: "auto" }}
         >
+          <button
+            className="btn outline sec small"
+            disabled={!isMaster || !hasApprovable}
+            onClick={() => handleApprovePatches(true)}
+            style={{
+              color: selectedCount === 0 ? "var(--muted)" : "var(--text)",
+              borderColor: "var(--border)",
+            }}
+          >
+            Approve Patches
+          </button>
+          <button
+            className="btn outline sec small"
+            disabled={!isMaster || !hasUnapprovable}
+            onClick={() => handleApprovePatches(false)}
+          >
+            Unapprove
+          </button>
           <button
             className="btn outline sec small"
             disabled={selectedCount === 0}
@@ -290,7 +492,7 @@ export default function PatchTab({
               borderColor: "var(--border)",
             }}
           >
-            Approve Patches
+            Create Baseline
           </button>
 
           <div className="dropdown" ref={colRef}>
@@ -428,9 +630,12 @@ export default function PatchTab({
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
                     <button
                       key={fmt}
-                      className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`}
+                      className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
                       style={{ fontSize: "11px", height: "32px", padding: 0 }}
-                      onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExportFormat(fmt);
+                      }}
                     >
                       {fmt}
                     </button>
@@ -455,13 +660,16 @@ export default function PatchTab({
                 >
                   Scope
                 </div>
-                <button className="item" onClick={() => handleExport('page')}>
+                <button className="item" onClick={() => handleExport("page")}>
                   Current Page
                 </button>
-                <button className="item" onClick={() => handleExport('filtered')}>
+                <button
+                  className="item"
+                  onClick={() => handleExport("filtered")}
+                >
                   Filtered Data
                 </button>
-                <button className="item" onClick={() => handleExport('all')}>
+                <button className="item" onClick={() => handleExport("all")}>
                   All Data
                 </button>
               </div>
@@ -487,9 +695,11 @@ export default function PatchTab({
             <tr>
               <th style={{ width: 48, textAlign: "center" }}>
                 <input
+                  ref={headerCheckboxRef}
                   type="checkbox"
                   className="custom-checkbox"
-                  onChange={() => toggleSelectAll(paginatedPatches)}
+                  checked={allSelected}
+                  onChange={() => toggleSelectAll(filteredPatches)}
                 />
               </th>
               {cols.find((c) => c.id === "patch_id")?.show && (
@@ -532,7 +742,15 @@ export default function PatchTab({
                   onClick={() => handleSort("final_score")}
                   className="cursor-pointer"
                 >
-                  Score{getSortIcon("final_score")}
+                  Risk Score{getSortIcon("final_score")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "status")?.show && (
+                <th
+                  onClick={() => handleSort("status")}
+                  className="cursor-pointer"
+                >
+                  Status{getSortIcon("status")}
                 </th>
               )}
             </tr>
@@ -561,14 +779,18 @@ export default function PatchTab({
                   <tr
                     key={getPatchKey(p)}
                     className={isSelected ? "selected-row" : ""}
-                    onClick={() => toggleSelect(p)}
+                    onClick={(e) => {
+                      if (e.target.type === "checkbox") return;
+                      toggleSelect(p);
+                    }}
                   >
                     <td style={{ textAlign: "center" }}>
                       <input
                         type="checkbox"
-                        className="custom-checkbox no-events"
+                        className="custom-checkbox"
                         checked={isSelected}
-                        readOnly
+                        onChange={() => toggleSelect(p)}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </td>
                     {cols.find((c) => c.id === "patch_id")?.show && (
@@ -648,9 +870,7 @@ export default function PatchTab({
                             );
                           }}
                         >
-                          {p.cve_count ??
-                            patchCveMap[getPatchKey(p)]?.length ??
-                            0}
+                          {p.cve_count || 0}
                         </span>
                       </td>
                     )}
@@ -670,6 +890,16 @@ export default function PatchTab({
                         >
                           {score.toFixed(2)}
                         </span>
+                      </td>
+                    )}
+
+                    {cols.find((c) => c.id === "status")?.show && (
+                      <td>
+                        {p.status === 1 ? (
+                          <span className="status-approved">Approved</span>
+                        ) : (
+                          <span className="status-pending">Not Approved</span>
+                        )}
                       </td>
                     )}
                   </tr>

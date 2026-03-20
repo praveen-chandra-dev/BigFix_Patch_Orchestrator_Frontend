@@ -99,7 +99,6 @@ function enhanceNativeSelect(selectEl) {
   
   trigger.onclick = (e) => { e.stopPropagation(); wrap.classList.contains("fx-open") ? close() : open(); };
 
-  // This ensures the custom dropdown stays synced when React updates the <select> value asynchronously
   const obs = new MutationObserver(() => {
     const selectedOption = selectEl.options[selectEl.selectedIndex];
     const displayText = selectedOption ? selectedOption.text : "— select —";
@@ -162,7 +161,6 @@ export default function Configuration({ onSaved, locked = false }) {
   const [enableSandbox, setEnableSandbox] = useState(true);
   const [enablePilot, setEnablePilot] = useState(true);
   
-  // Newly Added Global Thresholds
   const [successThreshold, setSuccessThreshold] = useState(90);
   const [allowableCriticalHF, setAllowableCriticalHF] = useState(0);
 
@@ -300,17 +298,22 @@ export default function Configuration({ onSaved, locked = false }) {
               <div className="help-text">Servers below this limit will fail health checks.</div>
             </div>
             
-            <div className="field">
-              <label className="label">Success Threshold (%)</label>
-              <input type="number" min="0" max="100" className="control input-modern" value={successThreshold} onChange={handleNumChange(setSuccessThreshold)} onBlur={() => handleBlur(successThreshold, setSuccessThreshold, 0, 100)} disabled={locked || !isAdmin} />
-              <div className="help-text">Minimum success percentage to proceed. {(!isAdmin) && <span style={{color: '#94a3b8', fontSize: '11px'}}>(Admin only)</span>}</div>
-            </div>
+            {/* FIX 4: Hide these specific fields for NMOs */}
+            {isAdmin && (
+              <>
+                <div className="field">
+                  <label className="label">Success Threshold (%)</label>
+                  <input type="number" min="0" max="100" className="control input-modern" value={successThreshold} onChange={handleNumChange(setSuccessThreshold)} onBlur={() => handleBlur(successThreshold, setSuccessThreshold, 0, 100)} disabled={locked} />
+                  <div className="help-text">Minimum success percentage to proceed.</div>
+                </div>
 
-            <div className="field">
-              <label className="label">Allowable Critical Health Failures</label>
-              <input type="number" min="0" className="control input-modern" value={allowableCriticalHF} onChange={handleNumChange(setAllowableCriticalHF)} onBlur={() => handleBlur(allowableCriticalHF, setAllowableCriticalHF, 0, 999)} disabled={locked || !isAdmin} />
-              <div className="help-text">Maximum acceptable critical failures. {(!isAdmin) && <span style={{color: '#94a3b8', fontSize: '11px'}}>(Admin only)</span>}</div>
-            </div>
+                <div className="field">
+                  <label className="label">Allowable Critical Health Failures</label>
+                  <input type="number" min="0" className="control input-modern" value={allowableCriticalHF} onChange={handleNumChange(setAllowableCriticalHF)} onBlur={() => handleBlur(allowableCriticalHF, setAllowableCriticalHF, 0, 999)} disabled={locked} />
+                  <div className="help-text">Maximum acceptable critical failures.</div>
+                </div>
+              </>
+            )}
 
             <div className="field">
               <label className="label">Last Report Time Threshold</label>
@@ -331,23 +334,25 @@ export default function Configuration({ onSaved, locked = false }) {
               <Switch checked={cloneVM} onChange={setCloneVM} label="Clone VM" subLabel="Create a full clone of the VM before patching." disabled={locked} />
               <Switch checked={snapshotVM} onChange={setSnapshotVM} label="Snapshot VM" subLabel="Trigger a VM snapshot for quick rollback capability." disabled={locked} />
               
-              <div style={{marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16}}>
-                 <Switch 
-                   checked={enableSandbox} 
-                   onChange={setEnableSandbox} 
-                   label="Enable Sandbox Stage" 
-                   subLabel="Include Sandbox verification in the patch workflow." 
-                   disabled={locked || !isAdmin} 
-                 />
-                 <Switch 
-                   checked={enablePilot} 
-                   onChange={setEnablePilot} 
-                   label="Enable Pilot Stage" 
-                   subLabel="Include Pilot group deployment in the patch workflow." 
-                   disabled={locked || !isAdmin} 
-                 />
-                 {!isAdmin && <div style={{fontSize:12, color:'#94a3b8', marginTop:6}}>Only Administrators can modify workflow stages.</div>}
-              </div>
+              {/* FIX 4: Hide these entire toggles for NMOs */}
+              {isAdmin && (
+                  <div style={{marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16}}>
+                     <Switch 
+                       checked={enableSandbox} 
+                       onChange={setEnableSandbox} 
+                       label="Enable Sandbox Stage" 
+                       subLabel="Include Sandbox verification in the patch workflow." 
+                       disabled={locked} 
+                     />
+                     <Switch 
+                       checked={enablePilot} 
+                       onChange={setEnablePilot} 
+                       label="Enable Pilot Stage" 
+                       subLabel="Include Pilot group deployment in the patch workflow." 
+                       disabled={locked} 
+                     />
+                  </div>
+              )}
             </>
           )}
         </Section>

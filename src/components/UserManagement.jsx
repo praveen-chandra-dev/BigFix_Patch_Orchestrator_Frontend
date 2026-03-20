@@ -69,8 +69,7 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
-// FULL FANCY SELECT UI (Matches First Image Exactly)
-const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable }) => {
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, width = '100%', menuPlacement = 'bottom' }) => {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const wrapperRef = useRef(null);
@@ -100,28 +99,40 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, s
     : options;
 
   return (
-    <div className="field flex-1">
-      <span className="label">{label}</span>
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef}>
-        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)}>
-          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText}>{displayText}</span>
-          <span className="fx-chevron">▾</span>
+    <div className="field flex-1 m-0" style={{ width }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: disabled ? 'var(--bg)' : 'var(--panel)' }}>
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: disabled ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
         </button>
         {open && (
-          <div className="fx-menu">
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
             {searchable && (
-              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2 }}>
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
                 <input 
-                  ref={searchInputRef} type="text" className="control" placeholder="Search Roles..." 
+                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
                   value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
                   style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
                 />
               </div>
             )}
-            <div className="fx-menu-inner">
-              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty">No options</div> ) : (
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
                 filteredOptions.map((opt) => (
-                  <div key={opt.value} className={`fx-item ${value === opt.value ? "fx-active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); setSearchTerm(""); }}>
+                  <div key={opt.value} className={`fx-item ${value === opt.value ? "fx-active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: value === opt.value ? 'var(--bg)' : 'transparent', color: value === opt.value ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => value !== opt.value && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => value !== opt.value && (e.currentTarget.style.background = 'transparent')}>
                     <span className="fx-label">{opt.label}</span>
                   </div>
                 ))
@@ -169,12 +180,13 @@ export default function UserManagement({ onClose, currentUserId }) {
     { id: 'CreatedAt', label: 'Created At', show: true }
   ]);
 
-  const propertyOptions = [
+  // Fixed Issue #1: Wrapped propertyOptions in useMemo
+  const propertyOptions = useMemo(() => [
     { value: "UserID", label: "User ID" },
     { value: "LoginName", label: "Login Name" },
     { value: "Role", label: "Role" },
     { value: "CreatedAt", label: "Created At" }
-  ];
+  ], []);
 
   const roleOptions = useMemo(() => {
     return [
@@ -182,6 +194,8 @@ export default function UserManagement({ onClose, currentUserId }) {
       ...availableRoles.filter(r => r !== 'Admin').map(r => ({ value: r, label: r }))
     ];
   }, [availableRoles]);
+
+  const rppOptions = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
 
   useEffect(() => {
     fetchUsers();
@@ -356,18 +370,19 @@ export default function UserManagement({ onClose, currentUserId }) {
                 </div>
             )}
 
-            <FancySelect 
-               label="Assigned Role"
-               options={roleOptions}
-               value={newR}
-               onChange={setNewR}
-               disabled={adding}
-               searchable={true}
-            />
+            <div style={{ marginTop: '22px', flex: 1 }}>
+                <FancySelect 
+                   options={roleOptions}
+                   value={newR}
+                   onChange={setNewR}
+                   disabled={adding}
+                   searchable={true}
+                />
+            </div>
             
             <div className="pb-0" style={{ display: 'flex', gap: '8px', marginTop: '22px' }}>
-              <button type="submit" className="btn pri small min-w-100" style={{ height: '36px' }} disabled={adding}>{adding?"Adding...":"Confirm"}</button>
-              <button type="button" className="btn ghost small min-w-100" style={{ height: '36px' }} onClick={()=>{setAddOpen(false); setNewU(""); setNewP(""); setNewR("Admin");}} disabled={adding}>Cancel</button>
+              <button type="submit" className="btn pri small min-w-100" style={{ height: '32px' }} disabled={adding}>{adding?"Adding...":"Confirm"}</button>
+              <button type="button" className="btn ghost small min-w-100" style={{ height: '32px' }} onClick={()=>{setAddOpen(false); setNewU(""); setNewP(""); setNewR("Admin");}} disabled={adding}>Cancel</button>
             </div>
           </form>
         </div>
@@ -488,12 +503,10 @@ export default function UserManagement({ onClose, currentUserId }) {
             )}
           </div>
           
-          <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
+          <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                   <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                  <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                  </select>
+                  <FancySelect options={rppOptions} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
               </div>
               <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
                   {sortedData.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedData.length)} of {sortedData.length}

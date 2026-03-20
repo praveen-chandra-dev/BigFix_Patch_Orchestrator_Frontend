@@ -107,6 +107,65 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
+// FIXED: FancySelect to prevent clipping and empty rendering
+const FancySelect = ({ label, options = [], value, onChange, disabled, width = '100%', menuPlacement = 'bottom' }) => {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find(o => (o.value !== undefined ? o.value : o) === value);
+  const displayText = selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : value;
+
+  return (
+    <div className="field flex-1 m-0" style={{ width }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: disabled ? 'var(--bg)' : 'var(--panel)' }}>
+          <span className="fx-value" title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: disabled ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
+        </button>
+        {open && (
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {options.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                options.map((opt) => {
+                  const optVal = opt.value !== undefined ? opt.value : opt;
+                  const optLabel = opt.label !== undefined ? opt.label : opt;
+                  const isSelected = value === optVal;
+                  return (
+                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
+                      <span className="fx-label">{optLabel}</span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function DeploymentHistory() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -228,6 +287,14 @@ export default function DeploymentHistory() {
   };
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+  
+  // Options for FancySelect
+  const rppOptions = [
+      {value: 10, label: "10"}, 
+      {value: 20, label: "20"}, 
+      {value: 50, label: "50"}, 
+      {value: 10000, label: "All"}
+  ];
 
   if (detailAction) {
      return <ActionResultsView action={detailAction} loading={detailResults.loading} rows={detailResults.rows} error={detailResults.error} lastUpdated={detailLastUpdated} onBack={() => setDetailAction(null)} onRefresh={() => openActionDetails(detailAction)} />
@@ -336,12 +403,12 @@ export default function DeploymentHistory() {
                 <table>
                     <thead className="kpi-th-sticky">
                         <tr>
-                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Action Name{getSortIcon('name', sortConfig)}</th>}
-                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortIcon('id', sortConfig)}</th>}
-                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')}>State{getSortIcon('state', sortConfig)}</th>}
-                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')}>Issued{getSortIcon('issued', sortConfig)}</th>}
-                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')}>Stopped{getSortIcon('stopped', sortConfig)}</th>}
-                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')}>Issuer{getSortIcon('issuer', sortConfig)}</th>}
+                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Action Name{getSortIcon('name')}</th>}
+                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortIcon('id')}</th>}
+                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')}>State{getSortIcon('state')}</th>}
+                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')}>Issued{getSortIcon('issued')}</th>}
+                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')}>Stopped{getSortIcon('stopped')}</th>}
+                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')}>Issuer{getSortIcon('issuer')}</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -363,13 +430,12 @@ export default function DeploymentHistory() {
                 </table>
             )}
         </div>
-
-        <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
+        
+        {/* ADDED position: "relative" and zIndex: 50 to prevent FancySelect menu from hiding behind the table */}
+        <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
-                </select>
+                <FancySelect options={rppOptions} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
             </div>
             <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
                 {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredItems.length)} of {filteredItems.length}
@@ -416,6 +482,13 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
     const propertyOptions = [
       { value: "server", label: "Server Name" },
       { value: "status", label: "Status" }
+    ];
+
+    const rppOptions = [
+        {value: 10, label: "10"}, 
+        {value: 20, label: "20"}, 
+        {value: 50, label: "50"}, 
+        {value: 10000, label: "All"}
     ];
 
     useEffect(() => {
@@ -590,8 +663,8 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                     <table>
                         <thead className="kpi-th-sticky">
                             <tr>
-                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server', sortConfig)}</th>}
-                                {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status', sortConfig)}</th>}
+                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server')}</th>}
+                                {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status')}</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -615,12 +688,11 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                     </table>
                 </div>
 
-                <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
+                {/* ADDED position: "relative" and zIndex: 50 to prevent FancySelect menu from hiding behind the table */}
+                <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                         <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                        <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                            <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option>
-                        </select>
+                        <FancySelect options={rppOptions} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
                     </div>
                     <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
                         {sorted.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sorted.length)} of {sorted.length}

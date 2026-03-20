@@ -3,8 +3,8 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import FilterDrawer from "./FilterDrawer";
 
 const API_BASE = window.env?.VITE_API_BASE || "http://localhost:5174";
+const RPP_OPTIONS = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
 
-/* ------------------------------- helpers ------------------------------- */
 function getHeaders() {
   return {
     "Content-Type": "application/json",
@@ -98,14 +98,98 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
   );
 }
 
-// Ensure activeTab is accepted as a prop!
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, isLoading, width = '100%', menuPlacement = 'bottom' }) => {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const wrapperRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) { 
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside); 
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (open && searchable && searchInputRef.current) searchInputRef.current.focus();
+  }, [open, searchable]);
+
+  const selectedOption = options.find(o => String(o.value) === String(value));
+  const displayText = isLoading ? "Loading..." : (selectedOption ? selectedOption.label : (placeholder || "—"));
+  const isPlaceholder = !selectedOption && !isLoading;
+
+  const filteredOptions = searchable && searchTerm.trim() !== ""
+    ? options.filter(opt => String(opt.label).toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
+
+  return (
+    <div className="field m-0" style={{ width }}>
+      {label && <span className="label">{label}</span>}
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${(disabled || isLoading) ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button 
+            type="button" 
+            className="fx-trigger" 
+            onClick={() => !disabled && !isLoading && setOpen(!open)} 
+            style={{ 
+                height: '32px', minHeight: '32px', padding: '0 10px', 
+                background: (disabled || isLoading) ? 'var(--bg)' : 'var(--panel)',
+                border: '1px solid var(--border)', borderRadius: '4px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                width: '100%', cursor: disabled ? 'not-allowed' : 'pointer'
+            }} 
+            disabled={disabled || isLoading}
+        >
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={String(displayText)} style={{ fontSize: '13px', fontWeight: 500, color: (disabled || isLoading) ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {String(displayText)}
+          </span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px', color: 'var(--text)' }}>▼</span>
+        </button>
+        {open && (
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
+            {searchable && (
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
+                <input 
+                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
+                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
+                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
+                />
+              </div>
+            )}
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                filteredOptions.map((opt) => (
+                  <div key={opt.value} className={`fx-item ${String(value) === String(opt.value) ? "fx-active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: String(value) === String(opt.value) ? 'var(--bg)' : 'transparent', color: String(value) === String(opt.value) ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => String(value) !== String(opt.value) && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => String(value) !== String(opt.value) && (e.currentTarget.style.background = 'transparent')}>
+                    <span className="fx-label">{opt.label}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function KpiDetails({ context, activeTab }) {
-  
-  // --- SECURE CONTEXT PARSING ---
-  // If context explicitly defines a type (because of a click in PilotKPI), it takes priority!
   const type = (typeof context === 'object' ? context?.type : (typeof context === 'string' ? context : null)) || activeTab || 'health';
-  
-  // Scope is ONLY passed if navigating from Pilot/Prod. Otherwise, it queries ALL servers.
   const groupName = context?.group || '';
   const actionId = context?.id || null;
 
@@ -144,7 +228,6 @@ export default function KpiDetails({ context, activeTab }) {
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const showService = userRole !== "Linux";
 
-  // Dynamic columns based on KPI type
   const [cols, setCols] = useState([]);
   useEffect(() => {
       if (type === 'success') {
@@ -170,7 +253,7 @@ export default function KpiDetails({ context, activeTab }) {
       }
   }, [type, showService]);
 
-  const propertyOptions = cols.map(c => ({ value: c.id, label: c.label }));
+  const propertyOptions = useMemo(() => cols.map(c => ({ value: c.id, label: c.label })), [cols]);
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -197,7 +280,6 @@ export default function KpiDetails({ context, activeTab }) {
       setSelectedHealth(new Set());
       
       try {
-          // STRICT BLAST RADIUS QUERY INJECTION
           const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
           let fetchedData = [];
 
@@ -321,7 +403,6 @@ export default function KpiDetails({ context, activeTab }) {
     });
   };
 
-  // --- REBOOT ACTIONS ---
   const toggleRebootSelection = (serverName) => {
     const next = new Set(selectedReboots);
     if (next.has(serverName)) next.delete(serverName); else next.add(serverName);
@@ -371,7 +452,6 @@ export default function KpiDetails({ context, activeTab }) {
     }
   }
 
-  // --- HEALTH (SERVICE RESTART) ACTIONS ---
   const isHealthRestartable = (row) => {
       const isWindows = String(row.os || "").toLowerCase().includes("win");
       return isWindows && row.serviceStatus && row.serviceStatus.toLowerCase() !== "running" && row.serviceStatus !== "N/A" && row.serviceStatus !== "Not Applicable";
@@ -421,7 +501,6 @@ export default function KpiDetails({ context, activeTab }) {
       const names = Array.from(selectedHealth);
       const newStatus = { ...actionStatus };
       
-      // Fire requests in parallel
       await Promise.all(names.map(async (name) => {
           const key = `svc_${name}`;
           try {
@@ -451,15 +530,15 @@ export default function KpiDetails({ context, activeTab }) {
   };
 
   return (
-    <div className="mgmtenv" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
+      
+      <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
         <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-               <h2 className="m-0">{getTitle()}</h2>
-               {/* Updated Label below */}
+               <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{getTitle()}</h2>
                <span className="pill gray">{groupName ? `Target Group: ${groupName}` : "Scope: Full Infrastructure"}</span>
             </div>
-            <div className="sub mt-4 text-13 muted-text">
+            <div className="text-13 muted-text" style={{ marginTop: '4px' }}>
                Updated: {lastUpdated || "—"}
             </div>
         </div>
@@ -476,11 +555,11 @@ export default function KpiDetails({ context, activeTab }) {
         </div>
       </div>
 
-      {error && <div className="banner error m-20" style={{ marginBottom: 0 }}>{error}</div>}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {error && <div className="banner error" style={{ marginBottom: "16px" }}>{error}</div>}
 
-      {activeFilterCount > 0 && (
-          <div className="p-0-20-20" style={{ marginTop: '20px' }}>
-              <div className="active-filter-banner active">
+          {activeFilterCount > 0 && (
+              <div className="active-filter-banner active" style={{ marginBottom: '16px' }}>
                 <div className="filter-tags">
                   {filters.map((b, bIdx) => {
                     const validConds = b.conds.filter(c => c.value);
@@ -491,7 +570,7 @@ export default function KpiDetails({ context, activeTab }) {
                         {validConds.map((c, cIdx) => (
                           <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
                             {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
-                            <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                            <span className="filter-tag"><strong>{propertyOptions.find(o => String(o.value) === String(c.column))?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                           </span>
                         ))}
                       </div>
@@ -500,229 +579,173 @@ export default function KpiDetails({ context, activeTab }) {
                 </div>
                 <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
               </div>
-          </div>
-      )}
+          )}
 
-      <div className="section" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', marginTop: '20px' }}>
-        <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span className="title">Results</span>
+          <div className="fade-in" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span className="title" style={{ fontWeight: 600, color: 'var(--text)' }}>Results</span>
+                    
+                    {type === 'reboot' && selectedReboots.size > 0 && (
+                       <>
+                         <span className="pill amber">{selectedReboots.size} selected</span>
+                         <button className="btn pri h-32 px-12 text-12" onClick={() => setConfirmBulkReboot(true)}>Restart Selected</button>
+                       </>
+                    )}
+                    {type === 'reboot' && bulkRebootStatus && <span className="text-12 text-success">{bulkRebootStatus}</span>}
+
+                    {type === 'health' && selectedHealth.size > 0 && (
+                       <>
+                         <span className="pill amber">{selectedHealth.size} selected</span>
+                         <button className="btn pri h-32 px-12 text-12" onClick={() => setConfirmBulkService(true)}>Restart Services</button>
+                       </>
+                    )}
+                    {type === 'health' && bulkServiceStatus && <span className="text-12 text-success">{bulkServiceStatus}</span>}
+                </div>
                 
-                {/* BULK ACTION: Pending Reboots */}
-                {type === 'reboot' && selectedReboots.size > 0 && (
-                   <>
-                     <span className="pill amber">{selectedReboots.size} selected</span>
-                     <button className="btn pri h-32 px-12 text-12" onClick={() => setConfirmBulkReboot(true)}>Restart Selected</button>
-                   </>
-                )}
-                {type === 'reboot' && bulkRebootStatus && <span className="text-12 text-success">{bulkRebootStatus}</span>}
-
-                {/* BULK ACTION: Critical Health (Service Restarts) */}
-                {type === 'health' && selectedHealth.size > 0 && (
-                   <>
-                     <span className="pill amber">{selectedHealth.size} selected</span>
-                     <button className="btn pri h-32 px-12 text-12" onClick={() => setConfirmBulkService(true)}>Restart Services</button>
-                   </>
-                )}
-                {type === 'health' && bulkServiceStatus && <span className="text-12 text-success">{bulkServiceStatus}</span>}
-            </div>
-            
-            <div style={{ display: 'flex', gap: '12px' }}>
-                <div className="dropdown" ref={colRef}>
-                    <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-                        &nbsp; Columns
-                    </button>
-                    {showColDrop && (
-                        <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                {cols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
-                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
-                                            const next = [...cols]; next[i].show = e.target.checked; setCols(next);
-                                        }} />
-                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
-                                    </label>
-                                ))}
+                <div style={{ display: 'flex', gap: '12px' }}>
+                    <div className="dropdown" ref={colRef}>
+                        <button className="btn outline sec small" style={{ height: '36px' }} onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                            &nbsp; Columns
+                        </button>
+                        {showColDrop && (
+                            <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                    {cols.map((col, i) => (
+                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                            <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                                const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                            }} />
+                                            <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    )}
-                </div>
-                <div className="dropdown" ref={expRef}>
-                    <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
-                        &nbsp; Export
-                    </button>
-                    {showExpDrop && (
-                        <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
-                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
-                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
-                               ))}
+                        )}
+                    </div>
+                    <div className="dropdown" ref={expRef}>
+                        <button className="btn outline small" style={{ height: '36px' }} onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                            &nbsp; Export
+                        </button>
+                        {showExpDrop && (
+                            <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                                   {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                     <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                                   ))}
+                                </div>
+                                <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                                <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                                <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                                <button className="item" onClick={() => handleExport('all')}>All Data</button>
                             </div>
-                            <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
-                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                            <button className="item" onClick={() => handleExport('page')}>Current Page</button>
-                            <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
-                            <button className="item" onClick={() => handleExport('all')}>All Data</button>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div className="tableWrap" style={{ flex: 1, borderTop: 'none', borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflowY: 'auto' }}>
-            {loading ? (
-                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading KPI details...</div>
-            ) : paginatedData.length === 0 ? (
-                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No data found.</div>
-            ) : (
-                <table>
-                    <thead className="kpi-th-sticky">
-                        <tr>
-                            {/* Checkbox Header for Reboots OR Health Services */}
-                            {(type === 'reboot' || (type === 'health' && showService)) && (
-                                <th className="w-40 kpi-td-center">
-                                    {type === 'reboot' && (
-                                        <input 
-                                            type="checkbox" 
-                                            className="custom-checkbox" 
-                                            onChange={toggleAllReboots} 
-                                            checked={paginatedData.length > 0 && paginatedData.every(r => selectedReboots.has(r.server))} 
-                                        />
-                                    )}
-                                    {type === 'health' && (
-                                        <input 
-                                            type="checkbox" 
-                                            className="custom-checkbox" 
-                                            onChange={toggleAllHealth} 
-                                            disabled={paginatedData.filter(isHealthRestartable).length === 0}
-                                            checked={
-                                                paginatedData.filter(isHealthRestartable).length > 0 && 
-                                                paginatedData.filter(isHealthRestartable).every(r => selectedHealth.has(r.server))
-                                            } 
-                                        />
-                                    )}
-                                </th>
-                            )}
-                            
-                            {cols.map(c => {
-                                if (!c.show) return null;
-                                return (
-                                    <th key={c.id} className="cursor-pointer" onClick={() => handleSort(c.id)}>
-                                        {c.label}{getSortIcon(c.id)}
+            <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
+                {loading ? (
+                    <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading KPI details...</div>
+                ) : paginatedData.length === 0 ? (
+                    <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No data found.</div>
+                ) : (
+                    <table>
+                        <thead className="kpi-th-sticky">
+                            <tr>
+                                {(type === 'reboot' || (type === 'health' && showService)) && (
+                                    <th className="w-40 kpi-td-center">
+                                        {type === 'reboot' && (
+                                            <input type="checkbox" className="custom-checkbox" onChange={toggleAllReboots} checked={paginatedData.length > 0 && paginatedData.every(r => selectedReboots.has(r.server))} />
+                                        )}
+                                        {type === 'health' && (
+                                            <input type="checkbox" className="custom-checkbox" onChange={toggleAllHealth} disabled={paginatedData.filter(isHealthRestartable).length === 0} checked={paginatedData.filter(isHealthRestartable).length > 0 && paginatedData.filter(isHealthRestartable).every(r => selectedHealth.has(r.server))} />
+                                        )}
                                     </th>
+                                )}
+                                {cols.map(c => {
+                                    if (!c.show) return null;
+                                    return (
+                                        <th key={c.id} className="cursor-pointer" onClick={() => handleSort(c.id)}>
+                                            {c.label}{getSortIcon(c.id)}
+                                        </th>
+                                    );
+                                })}
+                                {(type === 'health' || type === 'reboot') && showService && (
+                                    <th className="w-140 kpi-td-center">Action</th>
+                                )}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {paginatedData.map((row, i) => {
+                                const canRestartSvc = type === 'health' && isHealthRestartable(row);
+                                return (
+                                    <tr key={i} onClick={type === 'reboot' ? () => toggleRebootSelection(row.server) : (type === 'health' && canRestartSvc ? () => toggleHealthSelection(row.server) : undefined)} className={type === 'reboot' ? (selectedReboots.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : (type === 'health' && canRestartSvc ? (selectedHealth.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : "")}>
+                                        {(type === 'reboot' || (type === 'health' && showService)) && (
+                                            <td className="kpi-td-center">
+                                                {type === 'reboot' ? (
+                                                    <input type="checkbox" className="custom-checkbox no-events" checked={selectedReboots.has(row.server)} readOnly />
+                                                ) : (
+                                                    canRestartSvc ? <input type="checkbox" className="custom-checkbox no-events" checked={selectedHealth.has(row.server)} readOnly /> : null
+                                                )}
+                                            </td>
+                                        )}
+                                        {cols.map(c => {
+                                            if (!c.show) return null;
+                                            let val = row[c.id];
+                                            if (type === 'success' && c.id === 'status') return <td key={c.id}><span className="pill green">Success</span></td>;
+                                            if (c.id === 'issues') return <td key={c.id}>{(row.issues || []).map((issue, idx) => (<span key={idx} className="pill red mr-10 text-11">{issue}</span>))}</td>;
+                                            if (c.id === 'serviceStatus' && type === 'health') { const isWindows = String(row.os || "").toLowerCase().includes("win"); return <td key={c.id}>{isWindows ? (row.serviceStatus || "N/A") : "—"}</td>; }
+                                            if (c.id === 'pendingRestart') return <td key={c.id}>{String(row.pendingRestart ?? row.pending ?? row.restart ?? "N/A")}</td>;
+                                            return <td key={c.id}>{val || "N/A"}</td>;
+                                        })}
+                                        {type === 'health' && showService && (
+                                            <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
+                                                {canRestartSvc && (
+                                                    <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmService(row.server); }} disabled={!!actionStatus[`svc_${row.server}`]}>
+                                                        {actionStatus[`svc_${row.server}`] === "loading" ? "..." : actionStatus[`svc_${row.server}`] === "success" ? "Sent" : "Restart"}
+                                                    </button>
+                                                )}
+                                            </td>
+                                        )}
+                                        {type === 'reboot' && showService && (
+                                            <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
+                                                <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmRestart(row.server); }} disabled={!!actionStatus[row.server]}>
+                                                    {actionStatus[row.server] === "loading" ? "..." : actionStatus[row.server] === "success" ? "Sent" : "Restart"}
+                                                </button>
+                                            </td>
+                                        )}
+                                    </tr>
                                 );
                             })}
-                            
-                            {(type === 'health' || type === 'reboot') && showService && (
-                                <th className="w-140 kpi-td-center">Action</th>
-                            )}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {paginatedData.map((row, i) => {
-                            const canRestartSvc = type === 'health' && isHealthRestartable(row);
-                            
-                            return (
-                                <tr 
-                                    key={i} 
-                                    onClick={
-                                        type === 'reboot' ? () => toggleRebootSelection(row.server) : 
-                                        (type === 'health' && canRestartSvc ? () => toggleHealthSelection(row.server) : undefined)
-                                    } 
-                                    className={
-                                        type === 'reboot' ? (selectedReboots.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : 
-                                        (type === 'health' && canRestartSvc ? (selectedHealth.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : "")
-                                    }
-                                >
-                                    
-                                    {(type === 'reboot' || (type === 'health' && showService)) && (
-                                        <td className="kpi-td-center">
-                                            {type === 'reboot' ? (
-                                                <input type="checkbox" className="custom-checkbox no-events" checked={selectedReboots.has(row.server)} readOnly />
-                                            ) : (
-                                                canRestartSvc ? <input type="checkbox" className="custom-checkbox no-events" checked={selectedHealth.has(row.server)} readOnly /> : null
-                                            )}
-                                        </td>
-                                    )}
-
-                                    {cols.map(c => {
-                                        if (!c.show) return null;
-                                        let val = row[c.id];
-                                        
-                                        if (type === 'success' && c.id === 'status') {
-                                            return <td key={c.id}><span className="pill green">Success</span></td>;
-                                        }
-                                        
-                                        if (c.id === 'issues') {
-                                            return (
-                                                <td key={c.id}>
-                                                    {(row.issues || []).map((issue, idx) => (
-                                                        <span key={idx} className="pill red mr-10 text-11">{issue}</span>
-                                                    ))}
-                                                </td>
-                                            );
-                                        }
-
-                                        if (c.id === 'serviceStatus' && type === 'health') {
-                                            const isWindows = String(row.os || "").toLowerCase().includes("win");
-                                            return <td key={c.id}>{isWindows ? (row.serviceStatus || "N/A") : "—"}</td>;
-                                        }
-
-                                        if (c.id === 'pendingRestart') {
-                                            return <td key={c.id}>{String(row.pendingRestart ?? row.pending ?? row.restart ?? "N/A")}</td>;
-                                        }
-
-                                        return <td key={c.id}>{val || "N/A"}</td>;
-                                    })}
-
-                                    {type === 'health' && showService && (
-                                        <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
-                                            {canRestartSvc && (
-                                                <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmService(row.server); }} disabled={!!actionStatus[`svc_${row.server}`]}>
-                                                    {actionStatus[`svc_${row.server}`] === "loading" ? "..." : actionStatus[`svc_${row.server}`] === "success" ? "Sent" : "Restart"}
-                                                </button>
-                                            )}
-                                        </td>
-                                    )}
-
-                                    {type === 'reboot' && showService && (
-                                        <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
-                                            <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmRestart(row.server); }} disabled={!!actionStatus[row.server]}>
-                                                {actionStatus[row.server] === "loading" ? "..." : actionStatus[row.server] === "success" ? "Sent" : "Restart"}
-                                            </button>
-                                        </td>
-                                    )}
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            )}
-        </div>
-
-        <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)', borderTop: '1px solid var(--border)' }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                    <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                </select>
+                        </tbody>
+                    </table>
+                )}
             </div>
-            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                {sortedData.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedData.length)} of {sortedData.length}
-            </span>
-            <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
-                <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
-                {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
-                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-                {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-                <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
+
+            <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
+                    <FancySelect options={RPP_OPTIONS} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
+                </div>
+                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+                    {sortedData.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedData.length)} of {sortedData.length}
+                </span>
+                <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
+                    <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
+                    <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
+                    {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
+                    {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                    {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
+                    {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
+                    <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
+                </div>
             </div>
-        </div>
+          </div>
       </div>
 
       <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
@@ -732,13 +755,11 @@ export default function KpiDetails({ context, activeTab }) {
           Are you sure you want to restart the server: <strong>{confirmRestart}</strong>?
         </ConfirmationModal>
       )}
-
       {confirmService && (
         <ConfirmationModal open={!!confirmService} title="Confirm Service Restart" onClose={() => setConfirmService(null)} onConfirm={executeServiceRestart} busy={actionStatus[`svc_${confirmService}`] === "loading"}>
           Are you sure you want to restart "Window Update" service on: <strong>{confirmService}</strong>?
         </ConfirmationModal>
       )}
-
       {confirmBulkReboot && (
         <ConfirmationModal open={confirmBulkReboot} title={`Confirm Bulk Restart (${selectedReboots.size})`} onClose={() => setConfirmBulkReboot(false)} onConfirm={executeBulkRestart} busy={bulkRebootStatus === "Triggering..."}>
            Are you sure you want to restart <strong>{selectedReboots.size}</strong> selected servers immediately?
@@ -747,7 +768,6 @@ export default function KpiDetails({ context, activeTab }) {
            </div>
         </ConfirmationModal>
       )}
-
       {confirmBulkService && (
         <ConfirmationModal open={confirmBulkService} title={`Confirm Bulk Service Restart (${selectedHealth.size})`} onClose={() => setConfirmBulkService(false)} onConfirm={executeBulkServiceRestart} busy={bulkServiceStatus === "Triggering..."}>
            Are you sure you want to restart the "Window Update" service on <strong>{selectedHealth.size}</strong> selected servers immediately?

@@ -1,5 +1,6 @@
 // frontend/src/components/pilot/PilotKPI.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEnvironment } from "../Environment.jsx"; // <-- 1. Import useEnvironment
 
 const API_BASE = window.env.VITE_API_BASE;
 
@@ -337,6 +338,9 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
 }
 
 export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiClick }) {
+  // <-- 2. Bind to global environment state so the KPI reacts instantly to the dropdown -->
+  const { env } = useEnvironment(); 
+  
   const mode = /production/i.test(title) ? "production" : "pilot";
   
   const getPinnedActionId = useCallback(() => {
@@ -349,13 +353,11 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }, [lastActions, mode]);
 
+  // <-- 3. Pull directly from env context instead of stale lastActions -->
   const scopeGroup = useMemo(() => {
-    try {
-      const la = lastActions || {};
-      if (mode === "production") return la?.PILOT?.group ?? la?.SANDBOX?.group ?? null;
-      return la?.SANDBOX?.group ?? null;
-    } catch { return null; }
-  }, [lastActions, mode]);
+    if (mode === "production") return env.prodGroup;
+    return env.pilotGroup;
+  }, [env.prodGroup, env.pilotGroup, mode]);
 
   const [kpi, setKpi] = useState({ rebootPending: 0, critHealthFails: 0, successRate: 0, successCount: 0, totalCount: 0 });
   const [totalComputers, setTotalComputers] = useState(0);
@@ -466,7 +468,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     return { pct: pctFor(key), label: key.toLowerCase() };
   }, [hoverKey, kpi.successRate, kpi.rebootPending, kpi.critHealthFails, kpi.successCount, kpi.totalCount]);
 
-  // --- FIX: Pass the group into the KpiDetails component route ---
   const handleKpiClick = (type) => {
       if (onKpiClick) {
           onKpiClick({ type, group: scopeGroup, id: getPinnedActionId() });
@@ -654,7 +655,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
         </div>
       </div>
 
-      {/* MODALS RETAINED FOR WHEN THEY ARE USED INSTEAD OF THE ROUTED PAGE */}
       <EnhancedModal 
         open={openSuccess} onClose={() => setOpenSuccess(false)} title={`${title.replace("KPI", "Success Details")}`} 
         rows={successRows} loading={successLoading} 

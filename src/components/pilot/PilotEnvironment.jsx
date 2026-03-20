@@ -218,12 +218,18 @@ function enhanceNativeSelect(selectEl) {
 
   function onDocDown(e) { if (!wrap.contains(e.target)) close(); }
 
-  trigger.addEventListener("click", (e) => { e.stopPropagation(); wrap.classList.contains("fx-open") ? close() : open(); });
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    wrap.classList.contains("fx-open") ? close() : open();
+  });
+  
   trigger.addEventListener("keydown", (e) => {
     const isOpen = wrap.classList.contains("fx-open");
-    if (!isOpen && ["ArrowDown","Enter"," "].includes(e.key)) { e.preventDefault(); open(); return; }
+    if (!isOpen && ["ArrowDown", "Enter", " "].includes(e.key)) {
+      e.preventDefault(); open(); return;
+    }
   });
-
+  
   const obs = new MutationObserver(() => {
     const selectedOption = selectEl.options[selectEl.selectedIndex];
     const displayText = selectedOption ? selectedOption.text : "— select —";
@@ -242,7 +248,7 @@ function enhanceNativeSelect(selectEl) {
       trigger.disabled = false;
     }
   });
-  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected", "value", "disabled"] });
+  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected","value", "disabled"] });
 }
 
 function enhanceNativeSelects(root = document) {
@@ -273,9 +279,17 @@ export default function PilotEnvironment({ mode = "pilot" }) {
     abortRef.current = controller;
     try {
       setLoading(true); setErr("");
+      
       const groupPromise = fetch(`${API_BASE}/api/groups/list`, { headers: getHeaders(), signal: controller.signal }).then(r => r.json());
       const baselinePromise = fetch(`${API_BASE}/api/baselines/list`, { headers: getHeaders(), signal: controller.signal }).then(r => r.json());
-      const [bRes, gRes] = await Promise.all([baselinePromise, groupPromise]);
+      
+      const configPromise = fetch(`${API_BASE}/api/config`, { headers: getHeaders(), signal: controller.signal })
+        .then(async r => {
+            if (!r.ok) return {};
+            try { return await r.json(); } catch { return {}; }
+        }).catch(() => ({}));
+
+      const [bRes, gRes, cConfig] = await Promise.all([baselinePromise, groupPromise, configPromise]);
 
       const bNames = (bRes.baselines || []).map(b => b.name).sort();
       const gNames = (gRes.groups || []).map(g => g.name).sort();
@@ -283,17 +297,51 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       setBaselines(bNames);
       setGroups(gNames); 
 
-      setEnv((f) => ({
-        ...f,
-        baseline: bNames.includes(f.baseline) ? f.baseline : (bNames[0] || ""),
-        pilotGroup: inProduction ? (f.pilotGroup || "") : (gNames.includes(f.pilotGroup) ? f.pilotGroup : (gNames[0] || "")),
-        prodGroup: inProduction ? (gNames.includes(f.prodGroup) ? f.prodGroup : (gNames[0] || "")) : (f.prodGroup || ""), 
-        successThreshold: f.successThreshold ?? 90,
-        allowableCriticalHF: f.allowableCriticalHF ?? 0,
-        patchWindowDays: f.patchWindowDays ?? 2,
-        patchWindowHours: f.patchWindowHours ?? 0,
-        patchWindowMinutes: f.patchWindowMinutes ?? 0,
-      }));
+      setEnv((f) => {
+          let safeBaseline = f.baseline;
+          // If empty or invalid, try to pull from the last successful stage
+          if (!safeBaseline || !bNames.includes(safeBaseline)) {
+              safeBaseline = inProduction ? (cConfig.lastPilotBaseline || cConfig.lastSandboxBaseline) : cConfig.lastSandboxBaseline;
+          }
+          const finalBaseline = (safeBaseline && bNames.includes(safeBaseline)) ? safeBaseline : "";
+          
+          let currentGroupField = inProduction ? f.prodGroup : f.pilotGroup;
+          let safeGroup = currentGroupField;
+          
+          if (!safeGroup || !gNames.includes(safeGroup)) {
+              // Gracefully cascade forward: Prod falls back to Pilot context -> Sandbox context -> DB
+              if (!inProduction) {
+                  safeGroup = (f.sbxGroup && gNames.includes(f.sbxGroup)) ? f.sbxGroup : cConfig.lastSandboxGroup;
+              } else {
+                  safeGroup = (f.pilotGroup && gNames.includes(f.pilotGroup)) ? f.pilotGroup :
+                              (f.sbxGroup && gNames.includes(f.sbxGroup)) ? f.sbxGroup :
+                              (cConfig.lastPilotGroup || cConfig.lastSandboxGroup);
+              }
+          }
+          const finalGroup = (safeGroup && gNames.includes(safeGroup)) ? safeGroup : "";
+          
+          // NMOs get threshold context correctly mapped in state
+          const st = cConfig.successThreshold != null ? Number(cConfig.successThreshold) : (f.successThreshold ?? 90);
+          const hf = cConfig.allowableCriticalHF != null ? Number(cConfig.allowableCriticalHF) : (f.allowableCriticalHF ?? 0);
+
+          return {
+              ...f,
+              baseline: finalBaseline,
+              [inProduction ? 'prodGroup' : 'pilotGroup']: finalGroup,
+              
+              successThreshold: st,
+              allowableCriticalHF: hf,
+              
+              snapshotVM: cConfig.snapshotVM ?? f.snapshotVM,
+              cloneVM: cConfig.cloneVM ?? f.cloneVM,
+              enablePilot: cConfig.enablePilot ?? f.enablePilot,
+              enableSandbox: cConfig.enableSandbox ?? f.enableSandbox,
+
+              patchWindowDays: f.patchWindowDays ?? 2,
+              patchWindowHours: f.patchWindowHours ?? 0,
+              patchWindowMinutes: f.patchWindowMinutes ?? 0,
+          };
+      });
     } catch (e) {
       if (e.name !== "AbortError") setErr(`Failed to load options: ${e.message}`);
     } finally {
@@ -332,8 +380,6 @@ export default function PilotEnvironment({ mode = "pilot" }) {
   const groupOptions = useMemo(() => groups.map((x) => <option key={x} value={x}>{x}</option>), [groups]);
   const disabled = loading || (!baselines.length && !groups.length);
   
-  // --- OVERRIDE UNLOCK FIX ---
-  // If the user chooses to override settings after a failure, this unlocks the inputs.
   const inputsLocked = !env[`${mode}Unlocked`]; 
 
   return (
@@ -377,12 +423,10 @@ export default function PilotEnvironment({ mode = "pilot" }) {
         <div className="row mt-14">
           <div className="field">
             <div className="label">Success Threshold (%) <span title="Configured by Admin in Environment Settings" style={{cursor:'help', opacity:0.6}}>🔒</span></div>
-            {/* Field is now safely read-only here, value managed by Configuration via Context */}
             <input type="number" className="control disabled" value={env.successThreshold ?? 90} disabled={true} />
           </div>
           <div className="field">
             <div className="label">Allowable Critical Health Failures <span title="Configured by Admin in Environment Settings" style={{cursor:'help', opacity:0.6}}>🔒</span></div>
-            {/* Field is now safely read-only here, value managed by Configuration via Context */}
             <input type="number" className="control disabled" value={env.allowableCriticalHF ?? 0} disabled={true} />
           </div>
           <div className="field flex-15">

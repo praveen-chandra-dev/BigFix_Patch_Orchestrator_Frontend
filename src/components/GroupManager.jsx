@@ -70,7 +70,7 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
-const FancySelect = ({ label, options, value, onChange, disabled, placeholder, isLoading, multiSelect, searchable }) => {
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, isLoading, multiSelect, searchable, width = '100%', menuPlacement = 'bottom' }) => {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const wrapperRef = useRef(null);
@@ -97,41 +97,55 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
   if (multiSelect) {
     if (Array.isArray(value) && value.length > 0) { isPlaceholder = false; displayText = value.length <= 2 ? value.join(", ") : `${value.length} selected`; }
   } else {
-    const selectedOption = options.find(o => o === value);
-    if (selectedOption) { displayText = selectedOption; isPlaceholder = false; }
+    // Normalizing options handling for {label, value} objects vs strings
+    const optObj = options.find(o => (o.value !== undefined ? o.value : o) === value);
+    if (optObj) { displayText = optObj.label !== undefined ? optObj.label : optObj; isPlaceholder = false; }
   }
 
   const handleOptionClick = (opt, e) => {
+    const optVal = opt.value !== undefined ? opt.value : opt;
     if (multiSelect) { 
       e.stopPropagation(); 
       const current = Array.isArray(value) ? value : []; 
       const newSet = new Set(current); 
-      if (newSet.has(opt)) newSet.delete(opt); else newSet.add(opt); 
+      if (newSet.has(optVal)) newSet.delete(optVal); else newSet.add(optVal); 
       onChange(Array.from(newSet)); 
     } else { 
-      onChange(opt); 
+      onChange(optVal); 
       setOpen(false); 
       setSearchTerm("");
     }
   };
 
   const filteredOptions = searchable && searchTerm.trim() !== ""
-    ? options.filter(opt => String(opt).toLowerCase().includes(searchTerm.toLowerCase()))
+    ? options.filter(opt => String(opt.label !== undefined ? opt.label : opt).toLowerCase().includes(searchTerm.toLowerCase()))
     : options;
 
   return (
-    <div className="field flex-1">
-      <span className="label">{label}</span>
+    <div className="field flex-1 m-0" style={{ width }}>
+      {label && <span className="label">{label}</span>}
       {isLoading && <div className="sub label-loading-sub">Loading...</div>}
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled || isLoading ? "disabled" : ""}`} ref={wrapperRef}>
-        <button type="button" className="fx-trigger" onClick={() => setOpen(!open)}>
-          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={!isPlaceholder ? displayText : ""}>{displayText}</span>
-          <span className="fx-chevron">▾</span>
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled || isLoading ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && !isLoading && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: disabled || isLoading ? 'var(--bg)' : 'var(--panel)' }}>
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={!isPlaceholder ? displayText : ""} style={{ fontSize: '13px', fontWeight: 500, color: disabled ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
         </button>
         {open && (
-          <div className="fx-menu">
+          <div className="fx-menu" style={{ 
+              position: 'absolute',
+              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
+              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
+              left: 0,
+              minWidth: '100%',
+              width: 'max-content',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+              border: '1px solid var(--border)',
+              zIndex: 99999,
+              background: 'var(--panel)',
+              borderRadius: '6px'
+          }}>
             {searchable && (
-              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2 }}>
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
                 <input 
                   ref={searchInputRef}
                   type="text" 
@@ -144,14 +158,16 @@ const FancySelect = ({ label, options, value, onChange, disabled, placeholder, i
                 />
               </div>
             )}
-            <div className="fx-menu-inner">
-              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty">No options</div> ) : (
+            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
                 filteredOptions.map((opt) => {
-                  const isSelected = multiSelect ? (value || []).includes(opt) : value === opt;
+                  const optVal = opt.value !== undefined ? opt.value : opt;
+                  const optLabel = opt.label !== undefined ? opt.label : opt;
+                  const isSelected = multiSelect ? (value || []).includes(optVal) : value === optVal;
                   return (
-                    <div key={opt} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={(e) => handleOptionClick(opt, e)}>
+                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={(e) => handleOptionClick(opt, e)} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
                       {multiSelect && <input type="checkbox" className="custom-checkbox mr-10 no-events" checked={isSelected} readOnly />}
-                      <span className="fx-label">{opt}</span>
+                      <span className="fx-label">{optLabel}</span>
                       {!multiSelect && isSelected}
                     </div>
                   );
@@ -176,7 +192,7 @@ export default function GroupManager({ onClose }) {
 
   const [properties, setProperties] = useState([]);
   const [selectedProperty, setSelectedProperty] = useState("");
-  const [operators] = useState(["Contains", "Equals", "Starts With"]);
+  const [operators] = useState([{value:"Contains", label:"Contains"}, {value:"Equals", label:"Equals"}, {value:"Starts With", label:"Starts With"}]);
   const [selectedOperator, setSelectedOperator] = useState("Contains");
   const [valueInput, setValueInput] = useState("");
   const [conditions, setConditions] = useState([]); 
@@ -210,11 +226,14 @@ export default function GroupManager({ onClose }) {
     { id: 'ips', label: 'IP Address', show: true }
   ]);
 
-  const propertyOptions = [
+  // Fixed Issue #1: Wrapped propertyOptions in useMemo
+  const propertyOptions = useMemo(() => [
     { value: "name", label: "Computer Name" },
     { value: "os", label: "Operating System" },
     { value: "ips", label: "IP Address" }
-  ];
+  ], []);
+
+  const rppOptions = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -234,15 +253,14 @@ export default function GroupManager({ onClose }) {
     if (groupType === "Automatic" || groupType === "ServerBased") {
       if (properties.length === 0) {
         setLoadingProps(true);
-        getJSON("/api/groups/metadata/properties").then(data => setProperties(data.properties || [])).catch(e => setError(e.message)).finally(() => setLoadingProps(false));
+        getJSON("/api/groups/metadata/properties").then(data => setProperties(data.properties?.map(p => ({value: p, label: p})) || [])).catch(e => setError(e.message)).finally(() => setLoadingProps(false));
       }
       if (customSites.length === 0) {
         setLoadingSites(true);
-        // FIX: PROPERLY CALL THE ROLE-SITES ENDPOINT
         getJSON("/api/groups/metadata/role-sites").then(data => { 
-          const sites = data.sites || []; 
+          const sites = data.sites?.map(s => ({value: s, label: s})) || []; 
           setCustomSites(sites); 
-          if (sites.length > 0) setSelectedTargetSite(sites[0]); 
+          if (sites.length > 0) setSelectedTargetSite(sites[0].value); 
         }).catch(e => console.error(e)).finally(() => setLoadingSites(false));
       }
     }
@@ -436,7 +454,7 @@ export default function GroupManager({ onClose }) {
                 <input type="text" className="control" placeholder="e.g., rhel" value={valueInput} onChange={(e) => setValueInput(e.target.value)} />
               </div>
             </div>
-            <div className="pb-0"><button className="btn outline small" style={{ height: '40px' }} onClick={addCondition}>Add</button></div>
+            <div className="pb-0"><button className="btn outline small" style={{ height: '32px' }} onClick={addCondition}>Add</button></div>
           </div>
           <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
              <div className="flex-1">
@@ -561,12 +579,10 @@ export default function GroupManager({ onClose }) {
             )}
           </div>
 
-          <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
+          <div className="pagination" style={{ position: 'relative', zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 20px", gap: "24px", background: 'var(--panel)' }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                   <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                  <select className="control" style={{ width: "70px", height: "32px", padding: '0 8px' }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-                      <option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={10000}>All</option>
-                  </select>
+                  <FancySelect options={rppOptions} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
               </div>
               <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
                   {sortedComputers.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sortedComputers.length)} of {sortedComputers.length}

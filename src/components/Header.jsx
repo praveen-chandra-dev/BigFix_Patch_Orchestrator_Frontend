@@ -194,9 +194,6 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
         )}
 
         <div className="menu-label">Patch Management</div>
-        <a className={`menu-item ${activeMenu === 'baseline' ? 'active' : ''}`} onClick={() => onNavigate('baseline')}>
-           <IconFolder /> Baselines
-        </a>
         <a className={`menu-item ${activeMenu === 'calendar' ? 'active' : ''}`} onClick={() => onNavigate('calendar')}>
            <IconCalendar /> Patch Calendar
         </a>

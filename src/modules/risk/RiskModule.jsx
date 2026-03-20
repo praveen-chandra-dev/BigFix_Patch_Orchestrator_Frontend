@@ -25,6 +25,7 @@ export default function RiskModule({
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [selectedPatches, setSelectedPatches] = useState({});
 
   useEffect(() => {}, [filters]);
 
@@ -36,6 +37,7 @@ export default function RiskModule({
 
   const addBaseline = (data) => {
     setPendingPatches(data.patches);
+
     if (onSetPending) onSetPending(data.patches);
     if (setRiskTab) setRiskTab("baseline");
   };
@@ -61,7 +63,15 @@ export default function RiskModule({
   const loadBaselines = useCallback(async () => {
     try {
       const res = await api.get("/baselines");
-      setBaselines(res.data?.data || []);
+      const raw = res.data;
+
+      const normalized = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.data)
+          ? raw.data
+          : [];
+
+      setBaselines(normalized);
     } catch (err) {
       console.error("Failed to load baselines", err);
     }
@@ -79,7 +89,8 @@ export default function RiskModule({
         { value: "patch_name", label: "Name" },
         { value: "severity", label: "Severity" },
         { value: "cve_id", label: "CVE ID" },
-        { value: "final_score", label: "Score" },
+        { value: "final_score", label: "Risk Score" },
+        { value: "status", label: "Status" },
       ];
     if (activeTab === "baseline")
       return [
@@ -105,7 +116,7 @@ export default function RiskModule({
           { value: "severity", label: "Severity" },
           { value: "cve_id", label: "CVE ID" },
           { value: "device", label: "Device" },
-          { value: "final_score", label: "Score" },
+          { value: "final_score", label: "Risk Score" },
         ];
       if (activeSubTab === "computer")
         return [
@@ -122,6 +133,31 @@ export default function RiskModule({
     }
     return [];
   }, [activeTab, activeSubTab]);
+
+  const columnTypes = {
+    patch_id: "text",
+    patch_name: "text",
+    severity: "text",
+    cve_id: "text",
+    status: "text",
+    final_score: "number",
+  };
+
+  const operatorMap = {
+    text: [
+      { value: "=", label: "equals" },
+      { value: "!=", label: "not equals" },
+      { value: "contains", label: "contains" },
+    ],
+    number: [
+      { value: "=", label: "equals" },
+      { value: "!=", label: "not equals" },
+      { value: ">", label: "greater than" },
+      { value: "<", label: "less than" },
+      { value: ">=", label: "greater than or equal" },
+      { value: "<=", label: "less than or equal" },
+    ],
+  };
 
   const activeFilterCount = filters.reduce(
     (acc, b) => acc + b.conds.filter((c) => c.value).length,
@@ -338,6 +374,8 @@ export default function RiskModule({
               patches={patches}
               patchLoading={patchLoading}
               addBaseline={addBaseline}
+              selectedMap={selectedPatches}
+              setSelectedMap={setSelectedPatches}
               parentFilters={filters}
               parentLogic={globalLogic}
               navigate={(section, incomingFilters = [], logic = "AND") => {
@@ -382,6 +420,8 @@ export default function RiskModule({
         globalLogic={globalLogic}
         setGlobalLogic={setGlobalLogic}
         propertyOptions={propertyOptions}
+        columnTypes={columnTypes}
+        operatorMap={operatorMap}
       />
     </div>
   );

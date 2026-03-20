@@ -3,28 +3,41 @@ import { useState, useEffect, useMemo, useRef } from "react";
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
-// Fixed: Robust FancySelect that handles both objects and primitive strings
-const FancySelect = ({ label, options, value, onChange, disabled, width = '100%', menuPlacement = 'bottom' }) => {
+const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, isLoading, width = '100%', menuPlacement = 'bottom' }) => {
   const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const wrapperRef = useRef(null);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
     function handleClickOutside(event) { 
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setOpen(false);
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
     }
     document.addEventListener("mousedown", handleClickOutside); 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const selectedOption = options.find(o => (o.value !== undefined ? o.value : o) === value);
-  const displayText = selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : "— Select —";
+  useEffect(() => {
+    if (open && searchable && searchInputRef.current) searchInputRef.current.focus();
+  }, [open, searchable]);
+
+  const selectedOption = options.find(o => String(o.value !== undefined ? o.value : o) === String(value));
+  const displayText = isLoading ? "Loading..." : (selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : (placeholder || "— Select —"));
+  const isPlaceholder = !selectedOption && !isLoading;
+
+  const filteredOptions = searchable && searchTerm.trim() !== ""
+    ? options.filter(opt => String(opt.label !== undefined ? opt.label : opt).toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
 
   return (
-    <div className="field flex-1 m-0" style={{ width }}>
+    <div className="field flex-1 m-0" style={{ minWidth: label ? '200px' : 'auto' }}>
       {label && <span className="label">{label}</span>}
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
-        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: disabled ? 'var(--bg)' : 'var(--panel)' }}>
-          <span className="fx-value" title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: disabled ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
+      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${(disabled || isLoading) ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
+        <button type="button" className="fx-trigger" onClick={() => !disabled && !isLoading && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: (disabled || isLoading) ? 'var(--bg)' : 'var(--panel)' }} disabled={disabled || isLoading}>
+          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: (disabled || isLoading) ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
           <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
         </button>
         {open && (
@@ -34,24 +47,33 @@ const FancySelect = ({ label, options, value, onChange, disabled, width = '100%'
               bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
               left: 0,
               minWidth: '100%',
-              width: 'max-content', // Forces menu to fit the longest text option
+              width: 'max-content',
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
               border: '1px solid var(--border)',
               zIndex: 99999,
               background: 'var(--panel)',
               borderRadius: '6px'
           }}>
+            {searchable && (
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
+                <input 
+                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
+                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
+                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
+                />
+              </div>
+            )}
             <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {options.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
-                options.map((opt) => {
+              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
+                filteredOptions.map((opt) => {
                   const optVal = opt.value !== undefined ? opt.value : opt;
                   const optLabel = opt.label !== undefined ? opt.label : opt;
-                  const isSelected = value === optVal;
+                  const isSelected = String(value) === String(optVal);
                   return (
-                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
+                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
                       <span className="fx-label">{optLabel}</span>
                     </div>
-                  )
+                  );
                 })
               )}
             </div>
@@ -62,26 +84,29 @@ const FancySelect = ({ label, options, value, onChange, disabled, width = '100%'
   );
 };
 
-// Fixed Paginator: Uses native <select> to prevent cut-off issues at the bottom of the screen
-const Paginator = ({ total, rpp, setRpp, page, setPage }) => {
+const Paginator = ({ total, rpp, setRpp, page, setPage, edgeToEdge = false }) => {
     const totalPages = Math.ceil(total / rpp) || 1;
-    
+    const rppOptions = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
+    const edgeStyles = edgeToEdge 
+        ? { margin: '0 -32px', width: 'calc(100% + 64px)', borderBottom: '1px solid var(--border)', padding: '16px 32px' } 
+        : { padding: '16px 20px', borderTop: '1px solid var(--border)' };
+
     return (
-        <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "12px 20px", gap: "24px", background: 'var(--panel)', borderTop: '1px solid var(--border)', borderRadius: '0 0 6px 6px' }}>
+        <div className="pagination" style={{ position: 'relative', zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "24px", background: 'var(--panel)', ...edgeStyles }}>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <select className="control" style={{ width: "70px", height: "30px", padding: '0 8px', fontSize: '13px' }} value={rpp} onChange={(e) => { setRpp(Number(e.target.value)); setPage(1); }}>
-                    <option value={10}>10</option>
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
-                    <option value={10000}>All</option>
-                </select>
+                <span className="pager-info" style={{color: "var(--muted)" }}>Rows per page:</span>
+                <FancySelect options={rppOptions} value={rpp} onChange={v => { setRpp(Number(v)); setPage(1); }} width="80px" menuPlacement="top" searchable={false} />
             </div>
-            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
+            <span className="pager-info" style={{  color: "var(--muted)" }}>
                 {total > 0 ? (page - 1) * rpp + 1 : 0}-{Math.min(page * rpp, total)} of {total}
             </span>
             <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
                 <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt;</button>
+                <button className={`pager-btn ${page === 1 ? 'active' : ''}`} onClick={() => setPage(1)}>1</button>
+                {totalPages > 1 && <button className={`pager-btn ${page === 2 ? 'active' : ''}`} onClick={() => setPage(2)}>2</button>}
+                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
+                {totalPages > 2 && page > 2 && page < totalPages && <button className="pager-btn active">{page}</button>}
+                {totalPages > 2 && <button className={`pager-btn ${page === totalPages ? 'active' : ''}`} onClick={() => setPage(totalPages)}>{totalPages}</button>}
                 <button className="pager-btn" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>&gt;</button>
             </div>
         </div>
@@ -138,7 +163,6 @@ export default function RoleManagement({ onClose, role, username }) {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [modalConfig, setModalConfig] = useState({ open: false, title: "", message: "", onConfirm: null, onCancel: null, hideCancel: false });
 
-  // CREATE FORM STATE
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [perms, setPerms] = useState({
@@ -150,7 +174,6 @@ export default function RoleManagement({ onClose, role, username }) {
 
   const handlePermChange = (key, val) => { setPerms(prev => ({ ...prev, [key]: val })); };
 
-  // Computers Tree State
   const [totalComps, setTotalComps] = useState(0);
   const [properties, setProperties] = useState([]);
   const [patchSetuGroups, setPatchSetuGroups] = useState([]);
@@ -159,7 +182,6 @@ export default function RoleManagement({ onClose, role, username }) {
   const [loadingStates, setLoadingStates] = useState({});
   const [selectedComputers, setSelectedComputers] = useState([]); 
 
-  // Sites State
   const [availableSites, setAvailableSites] = useState([]);
   const [selectedSites, setSelectedSites] = useState([]);
   const [availSiteSearch, setAvailSiteSearch] = useState("");
@@ -171,7 +193,6 @@ export default function RoleManagement({ onClose, role, username }) {
   const [selSiteRpp, setSelSiteRpp] = useState(10);
   const [selSiteSort, setSelSiteSort] = useState({ key: 'name', direction: 'asc' });
 
-  // Operators State
   const [patchSetuUsers, setPatchSetuUsers] = useState([]);
   const [selectedOperators, setSelectedOperators] = useState([]);
   const [operatorWarnings, setOperatorWarnings] = useState({});
@@ -332,9 +353,6 @@ export default function RoleManagement({ onClose, role, username }) {
       executeSave();
   };
 
-  // ==========================================
-  // RENDER: DETAILS TAB
-  // ==========================================
   const renderDetails = () => {
       const SelectRow = ({ label, value, onChange, options, menuPlacement = 'bottom' }) => (
           <div className="field flex-row items-center m-0" style={{ gap: '16px', marginBottom: '12px' }}>
@@ -396,9 +414,6 @@ export default function RoleManagement({ onClose, role, username }) {
       );
   };
 
-  // ==========================================
-  // RENDER: COMPUTERS TAB (Infinite Deep Tree)
-  // ==========================================
   const renderPropList = (currentFilters = [], parentNodeKey = "ROOT") => {
       const availableProps = properties.filter(p => !currentFilters.some(f => f.prop === p.name));
       return availableProps.map(pObj => {
@@ -526,9 +541,6 @@ export default function RoleManagement({ onClose, role, username }) {
       </div>
   );
 
-  // ==========================================
-  // RENDER: SITES TAB
-  // ==========================================
   const renderSites = () => { 
       let availSortable = [...availableSites];
       if (availSiteSort.key) {
@@ -570,22 +582,18 @@ export default function RoleManagement({ onClose, role, username }) {
                     <table style={{ margin: 0 }}>
                        <thead className="kpi-th-sticky">
                          <tr>
-                           <th className="w-35p cursor-pointer" onClick={() => handleASort('name')}>Site Name {availSiteSort.key === 'name' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                           <th className="w-20p cursor-pointer" onClick={() => handleASort('type')}>Type {availSiteSort.key === 'type' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                           <th className="w-15p cursor-pointer" onClick={() => handleASort('domain')}>Domain {availSiteSort.key === 'domain' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                           <th className="w-15p cursor-pointer" onClick={() => handleASort('creator')}>Creator {availSiteSort.key === 'creator' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                           <th className="text-center w-15p">Action</th>
+                           <th className="w-50p cursor-pointer" onClick={() => handleASort('name')}>Site Name {availSiteSort.key === 'name' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                           <th className="w-30p cursor-pointer" onClick={() => handleASort('type')}>Type {availSiteSort.key === 'type' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                           <th className="text-center w-20p">Action</th>
                          </tr>
                        </thead>
                        <tbody>
-                         {availPaginated.length === 0 ? (<tr><td colSpan={5} className="text-center text-muted">No sites found.</td></tr>) : availPaginated.map(s => {
+                         {availPaginated.length === 0 ? (<tr><td colSpan={3} className="text-center text-muted">No sites found.</td></tr>) : availPaginated.map(s => {
                            const isSelected = selectedSites.some(sel => sel.url === s.url);
                            return (
                              <tr key={s.url} style={{ background: isSelected ? '#f8fafc' : 'transparent' }}>
                                <td style={{ opacity: isSelected ? 0.5 : 1 }} className="fw-500">{s.name}</td>
                                <td style={{ opacity: isSelected ? 0.5 : 1 }}>{s.type}</td>
-                               <td style={{ opacity: isSelected ? 0.5 : 1 }}>{s.domain || "—"}</td>
-                               <td style={{ opacity: isSelected ? 0.5 : 1 }}>{s.creator || "—"}</td>
                                <td className="text-center">
                                  <button className="btn outline small" onClick={() => handleSiteAdd(s)} disabled={isSelected}>{isSelected ? 'Added' : 'Add'}</button>
                                </td>
@@ -595,7 +603,7 @@ export default function RoleManagement({ onClose, role, username }) {
                        </tbody>
                     </table>
                  </div>
-                 <Paginator total={availFiltered.length} rpp={availSiteRpp} setRpp={setAvailSiteRpp} page={availSitePage} setPage={setAvailSitePage} />
+                 <Paginator total={availFiltered.length} rpp={availSiteRpp} setRpp={setAvailSiteRpp} page={availSitePage} setPage={setAvailSitePage} edgeToEdge={false} />
               </div>
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '650px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--panel)', overflow: 'hidden' }}>
@@ -607,21 +615,17 @@ export default function RoleManagement({ onClose, role, username }) {
                     <table style={{ margin: 0 }}>
                         <thead className="kpi-th-sticky">
                             <tr>
-                              <th className="w-30p cursor-pointer" onClick={() => handleSSort('name')}>Site Name {selSiteSort.key === 'name' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                              <th className="w-15p cursor-pointer" onClick={() => handleSSort('type')}>Type {selSiteSort.key === 'type' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                              <th className="w-15p cursor-pointer" onClick={() => handleSSort('domain')}>Domain {selSiteSort.key === 'domain' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                              <th className="w-15p cursor-pointer" onClick={() => handleSSort('creator')}>Creator {selSiteSort.key === 'creator' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-45p cursor-pointer" onClick={() => handleSSort('name')}>Site Name {selSiteSort.key === 'name' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-25p cursor-pointer" onClick={() => handleSSort('type')}>Type {selSiteSort.key === 'type' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
                               <th className="w-20p">Permissions</th>
-                              <th className="w-5p text-center"></th>
+                              <th className="w-10p text-center"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {selPaginated.length === 0 ? (<tr><td colSpan={6} className="text-center text-muted" style={{padding: '24px'}}>No sites assigned.</td></tr>) : selPaginated.map(s => (
+                            {selPaginated.length === 0 ? (<tr><td colSpan={4} className="text-center text-muted" style={{padding: '24px'}}>No sites assigned.</td></tr>) : selPaginated.map(s => (
                                 <tr key={s.url}>
                                     <td className="fw-500">{s.name}</td>
                                     <td>{s.type}</td>
-                                    <td>{s.domain || "—"}</td>
-                                    <td>{s.creator || "—"}</td>
                                     <td>
                                        {s.type === 'External' ? (
                                            <span className="muted-text font-mono">Reader</span>
@@ -647,15 +651,12 @@ export default function RoleManagement({ onClose, role, username }) {
                         </tbody>
                     </table>
                  </div>
-                 <Paginator total={selFiltered.length} rpp={selSiteRpp} setRpp={setSelSiteRpp} page={selSitePage} setPage={setSelSitePage} />
+                 <Paginator total={selFiltered.length} rpp={selSiteRpp} setRpp={setSelSiteRpp} page={selSitePage} setPage={setSelSitePage} edgeToEdge={false} />
               </div>
           </div>
       );
   };
 
-  // ==========================================
-  // RENDER: OPERATORS TAB (Dual Table Layout)
-  // ==========================================
   const renderOperators = () => { 
       const availOpsRaw = patchSetuUsers.filter(u => !selectedOperators.includes(u.username || u.LoginName));
       const availFiltered = availOpsRaw.filter(u => (u.username || u.LoginName || "").toLowerCase().includes(availOpSearch.toLowerCase()));
@@ -696,7 +697,7 @@ export default function RoleManagement({ onClose, role, username }) {
                        </tbody>
                     </table>
                  </div>
-                 <Paginator total={availFiltered.length} rpp={availOpRpp} setRpp={setAvailOpRpp} page={availOpPage} setPage={setAvailOpPage} />
+                 <Paginator total={availFiltered.length} rpp={availOpRpp} setRpp={setAvailOpRpp} page={availOpPage} setPage={setAvailOpPage} edgeToEdge={false} />
               </div>
 
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '650px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--panel)', overflow: 'hidden' }}>
@@ -731,15 +732,12 @@ export default function RoleManagement({ onClose, role, username }) {
                         </tbody>
                     </table>
                  </div>
-                 <Paginator total={selFiltered.length} rpp={selOpRpp} setRpp={setSelOpRpp} page={selOpPage} setPage={setSelOpPage} />
+                 <Paginator total={selFiltered.length} rpp={selOpRpp} setRpp={setSelOpRpp} page={selOpPage} setPage={setSelOpPage} edgeToEdge={false} />
               </div>
           </div>
       );
   };
 
-  // ==========================================
-  // MAIN RENDER SWITCH
-  // ==========================================
   if (view === "CREATE") {
       const getTabTitle = (tab) => {
           if(tab === 'DETAILS') return 'Details';
@@ -793,7 +791,6 @@ export default function RoleManagement({ onClose, role, username }) {
       );
   }
 
-  // --- DEFAULT LIST VIEW ---
   let sortedListRoles = [...roles];
   if (roleSort.key) {
       sortedListRoles.sort((a,b) => {
@@ -859,7 +856,7 @@ export default function RoleManagement({ onClose, role, username }) {
                         </tbody>
                     </table>
                 </div>
-                <Paginator total={roles.length} rpp={roleRpp} setRpp={setRoleRpp} page={rolePage} setPage={setRolePage} />
+                <Paginator total={roles.length} rpp={roleRpp} setRpp={setRoleRpp} page={rolePage} setPage={setRolePage} edgeToEdge={true} />
             </div>
         )}
       </div>
