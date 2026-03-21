@@ -5,8 +5,8 @@
   --severity-critical: #dc2626;
   --severity-high: #ea580c;
   --severity-important: #d97706;
-  --severity-moderate: #16a34a;
-  --severity-low: #2563eb;
+  --severity-moderate: #facc15;
+  --severity-low: #16a34a;
 }
 
 .severity-critical { 
@@ -29,13 +29,13 @@
 
 .severity-moderate { 
   background: color-mix(in srgb, var(--severity-moderate) 15%, transparent); 
-  color: var(--severity-moderate); 
+  color: #a16207; 
   border: 1px solid var(--severity-moderate); 
 }
 
 .severity-medium { 
   background: color-mix(in srgb, var(--severity-moderate) 15%, transparent); 
-  color: var(--severity-moderate); 
+  color: #a16207; 
   border: 1px solid var(--severity-moderate); 
 }
 
@@ -43,6 +43,12 @@
   background: color-mix(in srgb, var(--severity-low) 15%, transparent); 
   color: var(--severity-low); 
   border: 1px solid var(--severity-low); 
+}
+
+.severity-unspecified {
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  color: var(--muted);
+  border: 1px solid var(--muted);
 }
 
 .severity-unknown {

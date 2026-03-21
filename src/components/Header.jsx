@@ -361,49 +361,55 @@ export function Topbar({ onNavHistory, username, onLogout }) {
   const hasMultipleRoles = !isMO && roles.length > 1;
 
   return (
-    // Z-INDEX 99999 FORCES THE TOPBAR DROPDOWN OVER ALL STICKY ELEMENTS IN ALL TABS
-    <div className="topbar-main" style={{ position: 'relative', zIndex: 99999 }}>
-       <div className="flex-row items-center gap-12">
-           <div style={{ display: 'flex', gap: 4 }}>
-             <button className="iconbtn" onClick={handleBack}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg></button>
-             <button className="iconbtn" onClick={handleForward}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg></button>
-           </div>
-       </div>
-       <div className="flex-row items-center gap-16">
-          
-          <div className="user-info-top" style={{ position: 'relative' }} ref={dropdownRef}>
-             <div className="user-avatar">{username ? username[0].toUpperCase() : 'U'}</div>
-             
-             {/* UPGRADED UX: Interactive Role Switcher Trigger */}
-             <div className="user-details" 
-                  onClick={() => { if (hasMultipleRoles) setShowDropdown(!showDropdown); }}
-                  style={{ 
-                      cursor: hasMultipleRoles ? 'pointer' : 'default', 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '12px',
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: hasMultipleRoles ? (showDropdown ? '1px solid var(--primary)' : '1px solid var(--border)') : '1px solid transparent',
-                      background: showDropdown ? 'var(--bg)' : 'transparent',
-                      transition: 'all 0.2s ease'
-                  }}
-                  onMouseOver={(e) => { if(hasMultipleRoles && !showDropdown) e.currentTarget.style.backgroundColor = 'var(--bg)'; }}
-                  onMouseOut={(e) => { if(!showDropdown) e.currentTarget.style.backgroundColor = 'transparent'; }}
-             >
-                <div>
-                    <div className="user-name" title={username || 'User'}>{username || 'User'}</div>
-                    <div className="user-role" style={{ 
-                        color: 'var(--primary)', 
-                        fontWeight: 600, 
-                        maxWidth: '180px', 
-                        whiteSpace: 'nowrap', 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis' 
-                    }}>
-                        {userRoleDisplay}
-                    </div>
-                </div>
+   <div className="topbar-main" style={{ position: 'relative', zIndex: 99999 }}>
+
+      <div className="flex-row items-center gap-16">
+
+        {/* ✅ ENTERPRISE USER BLOCK FIX */}
+        <div ref={dropdownRef} style={{ position: 'relative' }}>
+          <div
+            onClick={() => { if (hasMultipleRoles) setShowDropdown(!showDropdown); }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '6px 12px',
+              borderRadius: '10px',
+              border: showDropdown ? '1px solid var(--primary)' : '1px solid var(--border)',
+              background: 'var(--panel)',
+              cursor: hasMultipleRoles ? 'pointer' : 'default'
+            }}
+          >
+            <div style={{
+              width: 34,
+              height: 34,
+              borderRadius: '50%',
+              background: 'var(--primary-light)',
+              color: 'var(--primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 600
+            }}>
+              {username ? username[0].toUpperCase() : 'U'}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>
+                {username || 'User'}
+              </div>
+
+              <div style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--primary)',
+                background: 'var(--primary-light)',
+                borderRadius: 6,
+                marginTop: 2
+              }}>
+                {userRoleDisplay}
+              </div>
+            </div>
                 {hasMultipleRoles && (
                     <div style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -417,23 +423,24 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                 )}
              </div>
 
-             {/* UPGRADED UX: Modern Role Dropdown Menu */}
+             {/* UPGRADED UX: Modern Role Dropdown Menu – now dynamically matches button width */}
              {showDropdown && (
                 <div style={{ 
                     position: 'absolute', 
                     top: 'calc(100% + 8px)', 
-                    right: 0, 
+                    left: 0,
+                    width: '100%',               // matches parent container width exactly
                     background: 'var(--panel)', 
                     border: '1px solid var(--border)', 
                     borderRadius: '10px', 
                     boxShadow: '0 8px 24px rgba(0,0,0,0.12)', 
                     zIndex: 99999, 
-                    minWidth: '240px', 
-                    overflow: 'hidden'
+                    overflow: 'hidden',
+                    boxSizing: 'border-box'      // ensures padding/border are included in width
                 }}>
                     <div style={{ padding: '12px 16px', background: 'var(--bg)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        <span style={{ fontSize: '8px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                             Select Workspace Role
                         </span>
                     </div>
@@ -444,7 +451,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                                 <div key={r} onClick={() => handleRoleChange(r)} 
                                      style={{ 
                                          padding: '10px 12px', 
-                                         fontSize: '13px', 
+                                         fontSize: '10px', 
                                          fontWeight: isActive ? 600 : 500,
                                          cursor: 'pointer', 
                                          display: 'flex', 
@@ -474,7 +481,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
              )}
           </div>
 
-          <button className="btn outline dan" onClick={onLogout} style={{height: 32, padding: "0 12px"}}>
+          <button className="btn outline dan" onClick={onLogout} style={{height: 45, padding: "0 12px"}}>
              <IconLogout /> Logout
           </button>
        </div>

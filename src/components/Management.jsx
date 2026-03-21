@@ -6,6 +6,9 @@ const API = window.env.VITE_API_BASE;
 const REQUIRED_KEYS = new Set(["BIGFIX_BASE_URL", "BIGFIX_USER", "BIGFIX_PASS"]);
 const LABELS = {
   BIGFIX_BASE_URL: "BIGFIX BASE URL", BIGFIX_USER: "BIGFIX API USERNAME", BIGFIX_PASS: "BIGFIX API PASSWORD", BIGFIX_ALLOW_SELF_SIGNED: "BIGFIX ALLOW SELF SIGNED",
+  SANDBOX_BIGFIX_BASE_URL: "SANDBOX BIGFIX BASE URL", SANDBOX_BIGFIX_USER: "SANDBOX BIGFIX API USERNAME", SANDBOX_BIGFIX_PASS: "SANDBOX BIGFIX API PASSWORD", SANDBOX_BIGFIX_ALLOW_SELF_SIGNED: "SANDBOX BIGFIX ALLOW SELF SIGNED",
+  PILOT_BIGFIX_BASE_URL: "PILOT BIGFIX BASE URL", PILOT_BIGFIX_USER: "PILOT BIGFIX API USERNAME", PILOT_BIGFIX_PASS: "PILOT BIGFIX API PASSWORD", PILOT_BIGFIX_ALLOW_SELF_SIGNED: "PILOT BIGFIX ALLOW SELF SIGNED",
+  PRODUCTION_BIGFIX_BASE_URL: "PRODUCTION BIGFIX BASE URL", PRODUCTION_BIGFIX_USER: "PRODUCTION BIGFIX API USERNAME", PRODUCTION_BIGFIX_PASS: "PRODUCTION BIGFIX API PASSWORD", PRODUCTION_BIGFIX_ALLOW_SELF_SIGNED: "PRODUCTION BIGFIX ALLOW SELF SIGNED",
   SMTP_HOST: "SMTP HOST", SMTP_USER: "SMTP USERNAME", SMTP_PASSWORD: "SMTP PASSWORD", SMTP_FROM: "EMAIL FROM", SMTP_TO: "EMAIL TO", SMTP_CC: "EMAIL CC", SMTP_BCC: "EMAIL BCC", SMTP_PORT: "SMTP PORT", SMTP_SECURE: "SMTP SECURE", SMTP_ALLOW_SELF_SIGNED: "SMTP ALLOW SELF SIGNED",
   SN_URL: "SERVICENOW URL", SN_USER: "SERVICENOW USERNAME", SN_PASSWORD: "SERVICENOW PASSWORD", SN_ALLOW_SELF_SIGNED: "SERVICENOW ALLOW SELF SIGNED",
   VCENTER_URL: "VCENTER URL", VCENTER_USER: "VCENTER USERNAME", VCENTER_PASSWORD: "VCENTER PASSWORD", VCENTER_ALLOW_SELF_SIGNED:"VCENTER ALLOW SELF SIGNED",
@@ -18,6 +21,19 @@ const TEMPLATE = [
   { key: "BIGFIX_USER", value: "", type: "string", secret: false, hint: "e.g. bigfix", required: true },
   { key: "BIGFIX_PASS", value: "", type: "string", secret: true, hint: "", required: true },
   { key: "BIGFIX_ALLOW_SELF_SIGNED", value: "false", type: "boolean", secret: false, hint: "Allow self-signed" },
+  // Stage-specific BigFix
+  { key: "SANDBOX_BIGFIX_BASE_URL", value: "", type: "string", secret: false, hint: "https://sandbox-server:52311", required: false },
+  { key: "SANDBOX_BIGFIX_USER", value: "", type: "string", secret: false, hint: "sandbox-user", required: false },
+  { key: "SANDBOX_BIGFIX_PASS", value: "", type: "string", secret: true, hint: "", required: false },
+  { key: "SANDBOX_BIGFIX_ALLOW_SELF_SIGNED", value: "false", type: "boolean", secret: false, hint: "Allow self-signed (sandbox)" },
+  { key: "PILOT_BIGFIX_BASE_URL", value: "", type: "string", secret: false, hint: "https://pilot-server:52311", required: false },
+  { key: "PILOT_BIGFIX_USER", value: "", type: "string", secret: false, hint: "pilot-user", required: false },
+  { key: "PILOT_BIGFIX_PASS", value: "", type: "string", secret: true, hint: "", required: false },
+  { key: "PILOT_BIGFIX_ALLOW_SELF_SIGNED", value: "false", type: "boolean", secret: false, hint: "Allow self-signed (pilot)" },
+  { key: "PRODUCTION_BIGFIX_BASE_URL", value: "", type: "string", secret: false, hint: "https://prod-server:52311", required: false },
+  { key: "PRODUCTION_BIGFIX_USER", value: "", type: "string", secret: false, hint: "prod-user", required: false },
+  { key: "PRODUCTION_BIGFIX_PASS", value: "", type: "string", secret: true, hint: "", required: false },
+  { key: "PRODUCTION_BIGFIX_ALLOW_SELF_SIGNED", value: "false", type: "boolean", secret: false, hint: "Allow self-signed (production)" },
   { key: "LDAP_ENABLED", value: "false", type: "boolean", secret: false, hint: "Authenticate via Active Directory" },
   { key: "LDAP_URL", value: "", type: "string", secret: false, hint: "ldaps://dc.example.com:636" }, 
   { key: "LDAP_DOMAIN", value: "", type: "string", secret: false, hint: "example.com" },
@@ -47,7 +63,6 @@ function getHeaders() {
     return { "Content-Type": "application/json", "Accept": "application/json", "x-user-role": sessionStorage.getItem("user_role") || "Admin" };
 }
 
-// Special helper for auth routes that require the secure HTTP-Only cookie
 async function fetchAuth(endpoint, body) {
     const res = await fetch(`${API}${endpoint}`, {
         method: "POST",
@@ -132,7 +147,6 @@ export default function Management({ onClose }) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
-  // My Account State
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -141,14 +155,33 @@ export default function Management({ onClose }) {
   const [savingPersonal, setSavingPersonal] = useState(false);
   const [personalCreds, setPersonalCreds] = useState({ username: "Loading...", hasCreds: false });
 
-  // ONLY SHOW ADVANCED SETTINGS IF USER IS MASTER OPERATOR
   const isMO = sessionStorage.getItem("isMO") === "true";
 
   const sections = useMemo(() => {
-    const ord = { BIGFIX_: ["BIGFIX_BASE_URL","BIGFIX_USER","BIGFIX_PASS","BIGFIX_ALLOW_SELF_SIGNED"], LDAP_: ["LDAP_ENABLED", "LDAP_URL", "LDAP_DOMAIN", "LDAP_ALLOW_SELF_SIGNED"], SMTP_: ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_PORT","SMTP_SECURE","SMTP_CC","SMTP_BCC","SMTP_ALLOW_SELF_SIGNED"], SN_: ["SN_URL","SN_USER","SN_PASSWORD","SN_ALLOW_SELF_SIGNED"], VCENTER_:["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD", "VCENTER_ALLOW_SELF_SIGNED"], DEBUG_: ["DEBUG_LOG"] };
+    const ord = {
+      BIGFIX_: ["BIGFIX_BASE_URL","BIGFIX_USER","BIGFIX_PASS","BIGFIX_ALLOW_SELF_SIGNED"],
+      SANDBOX_: ["SANDBOX_BIGFIX_BASE_URL","SANDBOX_BIGFIX_USER","SANDBOX_BIGFIX_PASS","SANDBOX_BIGFIX_ALLOW_SELF_SIGNED"],
+      PILOT_: ["PILOT_BIGFIX_BASE_URL","PILOT_BIGFIX_USER","PILOT_BIGFIX_PASS","PILOT_BIGFIX_ALLOW_SELF_SIGNED"],
+      PRODUCTION_: ["PRODUCTION_BIGFIX_BASE_URL","PRODUCTION_BIGFIX_USER","PRODUCTION_BIGFIX_PASS","PRODUCTION_BIGFIX_ALLOW_SELF_SIGNED"],
+      LDAP_: ["LDAP_ENABLED", "LDAP_URL", "LDAP_DOMAIN", "LDAP_ALLOW_SELF_SIGNED"],
+      SMTP_: ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_PORT","SMTP_SECURE","SMTP_CC","SMTP_BCC","SMTP_ALLOW_SELF_SIGNED"],
+      SN_: ["SN_URL","SN_USER","SN_PASSWORD","SN_ALLOW_SELF_SIGNED"],
+      VCENTER_:["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD", "VCENTER_ALLOW_SELF_SIGNED"],
+      DEBUG_: ["DEBUG_LOG"]
+    };
     const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
-    if (!isMO) return { BIGFIX: [], LDAP: [], SMTP: [], SN: [], VCENTER: [], DEBUG: [] };
-    return { BIGFIX: pick("BIGFIX_"), LDAP: pick("LDAP_"), SMTP: pick("SMTP_"), SN: pick("SN_"), VCENTER:pick("VCENTER_"), DEBUG: pick("DEBUG_") };
+    if (!isMO) return { BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SMTP: [], SN: [], VCENTER: [], DEBUG: [] };
+    return {
+      BIGFIX: pick("BIGFIX_"),
+      SANDBOX: pick("SANDBOX_"),
+      PILOT: pick("PILOT_"),
+      PRODUCTION: pick("PRODUCTION_"),
+      LDAP: pick("LDAP_"),
+      SMTP: pick("SMTP_"),
+      SN: pick("SN_"),
+      VCENTER: pick("VCENTER_"),
+      DEBUG: pick("DEBUG_")
+    };
   }, [isMO]);
 
   const smtpTouched = useMemo(() => isMO ? ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_CC","SMTP_BCC"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isMO]);
@@ -172,7 +205,12 @@ export default function Management({ onClose }) {
   }, [values, smtpTouched, vcenterTouched, ldapEnabled, editingSection, isMO]);
 
   const validationMap = useMemo(() => {
-      const map = { BIGFIX: sections.BIGFIX.every(it => !invalidMap[it.key]) };
+      const map = {
+        BIGFIX: sections.BIGFIX.every(it => !invalidMap[it.key]),
+        SANDBOX: sections.SANDBOX.every(it => !invalidMap[it.key]),
+        PILOT: sections.PILOT.every(it => !invalidMap[it.key]),
+        PRODUCTION: sections.PRODUCTION.every(it => !invalidMap[it.key]),
+      };
       if (isMO) {
           map.LDAP = sections.LDAP.every(it => !invalidMap[it.key]);
           map.SMTP = sections.SMTP.every(it => !(smtpTouched ? invalidMap[it.key] : false));
@@ -186,7 +224,6 @@ export default function Management({ onClose }) {
   async function fetchAllSettings() {
     setMsg(""); setErr(""); setLoading(true);
     try {
-      // 1. Fetch Personal Credentials (For Everyone)
       const pRes = await fetch(`${API}/api/auth/my-bigfix-creds`, { credentials: 'include' }).catch(()=>({}));
       if (pRes.ok) {
           const pData = await pRes.json();
@@ -194,7 +231,6 @@ export default function Management({ onClose }) {
           else setPersonalCreds({ username: "Authentication Error", hasCreds: false });
       }
 
-      // 2. Fetch System Environment Configs (Only if Master Operator)
       if (isMO) {
           const eRes = await fetch(`${API}/api/env`, { headers: getHeaders() });
           if (eRes.ok) {
@@ -214,6 +250,7 @@ export default function Management({ onClose }) {
   }
   
   useEffect(() => { fetchAllSettings(); }, []);
+
   const onChange = (k, v) => setValues(prev => ({ ...prev, [k]: v }));
 
   async function onSave(sectionKey) {
@@ -233,12 +270,30 @@ export default function Management({ onClose }) {
 
   function onCancel() { setValues(originalValues); setEditingSection(null); setMsg(""); setErr(""); }
 
-  // --- MY ACCOUNT HANDLERS ---
+  // Replicate root settings to stages via backend (saves automatically)
+  const replicateAndSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/env/replicate-bigfix`, { method: "POST", headers: getHeaders() });
+      const data = await res.json();
+      if (data.ok) {
+        setMsg(data.message);
+        // Reload settings to show updated values
+        await fetchAllSettings();
+      } else {
+        setErr(data.error || "Replication failed");
+      }
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleChangePassword = async (e) => {
       e.preventDefault();
       setErr(""); setMsg("");
       if (newPassword !== confirmPassword) return setErr("New passwords do not match.");
-      
       setSavingPassword(true);
       try {
           const data = await fetchAuth('/api/auth/change-password', { currentPassword, newPassword });
@@ -281,17 +336,13 @@ export default function Management({ onClose }) {
 
       {!loading && (
           <>
-            {/* ------------------------------------------------------------- */}
-            {/* MY ACCOUNT SECTION (VISIBLE TO EVERYONE)                        */}
-            {/* ------------------------------------------------------------- */}
+            {/* My Account Section */}
             <div className="section overflow-visible" style={{ border: !personalCreds.hasCreds ? '1px solid #ff9800' : '' }}>
               <div className="section-head">
                 <span className="title">My Account</span>
                 {!personalCreds.hasCreds && <span className="pill soft" style={{ backgroundColor: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>Action Required</span>}
               </div>
-
               <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '40px', padding: '0 24px 24px' }}>
-                 {/* Left Column: Local Password */}
                  <div>
                     <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)' }}>Change Local Password</h3>
                     <form onSubmit={handleChangePassword}>
@@ -310,8 +361,6 @@ export default function Management({ onClose }) {
                         <button type="submit" className="btn pri small" disabled={savingPassword}>{savingPassword ? "Updating..." : "Update Password"}</button>
                     </form>
                  </div>
-
-                 {/* Right Column: BigFix Vault */}
                  <div>
                     <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         Personal BigFix Vault
@@ -319,13 +368,11 @@ export default function Management({ onClose }) {
                         {!personalCreds.hasCreds && <span className="pill err" style={{ fontSize: '11px', padding: '2px 6px', backgroundColor: '#ff9800', color: 'white', border: 'none' }}>Missing/Invalid</span>}
                     </h3>
                     <p className="text-13 muted-text" style={{ marginBottom: '20px' }}>Store your personal BigFix password in the secure vault to allow Patch Setu to seamlessly perform orchestration actions on your behalf.</p>
-                    
                     {!personalCreds.hasCreds && (
                         <div style={{ padding: '12px', backgroundColor: '#fff3e0', border: '1px solid #ffcc80', borderRadius: '6px', color: '#e65100', fontSize: '12px', marginBottom: '20px' }}>
                            ⚠️ BigFix rejected the stored credentials or you have not configured them yet. Provide your active BigFix password to continue using the app.
                         </div>
                     )}
-
                     <form onSubmit={handleVerifyBf}>
                         <div className="field">
                             <span className="label">BigFix Username</span>
@@ -341,14 +388,19 @@ export default function Management({ onClose }) {
               </div>
             </div>
 
-            {/* ------------------------------------------------------------- */}
-            {/* GLOBAL SETTINGS (VISIBLE TO MASTER OPERATORS ONLY)            */}
-            {/* ------------------------------------------------------------- */}
+            {/* Master Operator Settings */}
             {isMO && (
                 <>
+                    {/* Global BigFix Settings */}
                     <details className="section overflow-visible" open>
                         <summary className="section-head">
-                            <span className="title">Global BigFix Settings</span><span className="pill soft">Required</span><div className="spacer" />
+                            <span className="title">Global BigFix Settings</span><span className="pill soft">Required</span>
+                            <div className="spacer" />
+                            {editingSection !== 'BIGFIX' && (
+                                <button className="btn ghost small" onClick={replicateAndSave} style={{ marginRight: '8px' }} disabled={saving} title="Copy root settings to Sandbox, Pilot, and Production and save">
+                                    Replicate to All Stages & Save
+                                </button>
+                            )}
                             {editingSection === 'BIGFIX' ? (
                             <div className="actions">
                                 <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
@@ -360,6 +412,56 @@ export default function Management({ onClose }) {
                             {sections.BIGFIX.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'BIGFIX'} />)}
                         </div>
                     </details>
+
+                    {/* Sandbox BigFix Settings */}
+                    <details className="section overflow-visible" open>
+                        <summary className="section-head">
+                            <span className="title">Sandbox BigFix Settings</span><span className="pill soft">Optional</span><div className="spacer" />
+                            {editingSection === 'SANDBOX' ? (
+                            <div className="actions">
+                                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                                <button className="btn primary" onClick={() => onSave('SANDBOX')} disabled={saving || !validationMap['SANDBOX']}>{saving?"Saving…":"Save"}</button>
+                            </div>
+                            ) : <button className="btn" onClick={() => setEditingSection('SANDBOX')} disabled={saving || editingSection !== null}>Edit</button>}
+                        </summary>
+                        <div className="grid">
+                            {sections.SANDBOX.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'SANDBOX'} />)}
+                        </div>
+                    </details>
+
+                    {/* Pilot BigFix Settings */}
+                    <details className="section overflow-visible" open>
+                        <summary className="section-head">
+                            <span className="title">Pilot BigFix Settings</span><span className="pill soft">Optional</span><div className="spacer" />
+                            {editingSection === 'PILOT' ? (
+                            <div className="actions">
+                                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                                <button className="btn primary" onClick={() => onSave('PILOT')} disabled={saving || !validationMap['PILOT']}>{saving?"Saving…":"Save"}</button>
+                            </div>
+                            ) : <button className="btn" onClick={() => setEditingSection('PILOT')} disabled={saving || editingSection !== null}>Edit</button>}
+                        </summary>
+                        <div className="grid">
+                            {sections.PILOT.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'PILOT'} />)}
+                        </div>
+                    </details>
+
+                    {/* Production BigFix Settings */}
+                    <details className="section overflow-visible" open>
+                        <summary className="section-head">
+                            <span className="title">Production BigFix Settings</span><span className="pill soft">Optional</span><div className="spacer" />
+                            {editingSection === 'PRODUCTION' ? (
+                            <div className="actions">
+                                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                                <button className="btn primary" onClick={() => onSave('PRODUCTION')} disabled={saving || !validationMap['PRODUCTION']}>{saving?"Saving…":"Save"}</button>
+                            </div>
+                            ) : <button className="btn" onClick={() => setEditingSection('PRODUCTION')} disabled={saving || editingSection !== null}>Edit</button>}
+                        </summary>
+                        <div className="grid">
+                            {sections.PRODUCTION.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'PRODUCTION'} />)}
+                        </div>
+                    </details>
+
+                    {/* Other sections remain unchanged */}
                     <details className="section overflow-visible" open>
                         <summary className="section-head">
                             <span className="title">Directory Services (LDAP)</span><span className="pill soft">Optional</span><div className="spacer" />

@@ -32,7 +32,11 @@ export default function DashboardTab({
           api.get("/patches"),
           api.get("/cves"),
         ]);
-        setPatches(patchRes.data || []);
+        
+        // FIXED: Safely extract array out of potential { data: [], pagination: {} } wrapper
+        const patchData = Array.isArray(patchRes.data) ? patchRes.data : (patchRes.data?.data || []);
+        
+        setPatches(patchData);
         setCves(cveRes.data?.data || []);
       } catch (err) {
         console.error("Dashboard load failed:", err);

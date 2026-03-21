@@ -19,6 +19,41 @@ async function postJSON(url, body) {
   return r.json();
 }
 
+function evaluateCondition(f, operator, s, colId) {
+    if (!s) return true;
+    const dateFields = ['createdAt'];
+    if (dateFields.includes(colId) || (!isNaN(Date.parse(f)) && isNaN(f))) {
+        const dateF = new Date(f).getTime();
+        const dateS = new Date(s).getTime();
+        if (!isNaN(dateF) && !isNaN(dateS)) {
+            if (operator === "=") return new Date(f).toDateString() === new Date(s).toDateString();
+            if (operator === "!=") return new Date(f).toDateString() !== new Date(s).toDateString();
+            if (operator === ">") return dateF > dateS;
+            if (operator === "<") return dateF < dateS;
+            if (operator === ">=") return dateF >= dateS;
+            if (operator === "<=") return dateF <= dateS;
+        }
+    }
+    const numF = Number(f); const numS = Number(s);
+    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
+        if (operator === "=") return numF === numS;
+        if (operator === "!=") return numF !== numS;
+        if (operator === ">") return numF > numS;
+        if (operator === "<") return numF < numS;
+        if (operator === ">=") return numF >= numS;
+        if (operator === "<=") return numF <= numS;
+    }
+    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
+    if (operator === "contains") return strF.includes(strS);
+    if (operator === "=") return strF === strS;
+    if (operator === "!=") return strF !== strS;
+    if (operator === ">") return strF > strS;
+    if (operator === "<") return strF < strS;
+    if (operator === ">=") return strF >= strS;
+    if (operator === "<=") return strF <= strS;
+    return true;
+}
+
 function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
     const visibleCols = columns.filter(c => c.show);
     const headers = visibleCols.map(c => c.label);
@@ -52,10 +87,10 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
             if (document.querySelector(`script[src="${src}"]`)) return resolve();
             const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
         });
-        Promise.all([
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
-        ]).then(() => {
+        // FIXED: Load jsPDF first, THEN autotable to prevent race conditions
+        loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+        .then(() => loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js'))
+        .then(() => {
             const { jsPDF } = window.jspdf; const doc = new jsPDF();
             doc.text(`Export: ${filenamePrefix}`, 14, 15);
             const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
@@ -389,15 +424,30 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
-        validConds++; let condition = true;
-        const query = String(c.value).toLowerCase();
+        validConds++; 
+        
+        // FIXED: Translate raw statuses to display-matching formats
         let field = "";
-        if (c.column === "ips") field = (item.ips || []).join(", ").toLowerCase();
-        else field = String(item[c.column] || "").toLowerCase();
+        if (c.column === "ips") {
+            field = (item.ips || []).join(", ").toLowerCase();
+        } else if (c.column === "status" && item.status !== undefined) {
+            const st = String(item.status).toLowerCase();
+            if (st === 'completed' || st === 'success') field = 'success';
+            else if (st === 'running') field = 'running...';
+            else if (st === 'queued') field = 'queued...';
+            else if (st === 'failed' || st === 'error') field = 'failed';
+            else field = st;
+        } else if (c.column === "vcStatus" && item.vcStatus !== undefined) {
+            const st = String(item.vcStatus).toLowerCase();
+            if (st === 'ready') field = `ready (${item.vcId})`;
+            else if (st === 'not_found') field = 'not found';
+            else if (st === 'resolving') field = 'resolving...';
+            else field = 'waiting...';
+        } else {
+            field = String(item[c.column] || "").toLowerCase();
+        }
 
-        if (c.operator === "contains") condition = field.includes(query);
-        else if (c.operator === "=") condition = field === query;
-        else if (c.operator === "!=") condition = field !== query;
+        const condition = evaluateCondition(field, c.operator, String(c.value).toLowerCase(), c.column);
         blockMatch = blockMatch && condition;
       }
       if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);

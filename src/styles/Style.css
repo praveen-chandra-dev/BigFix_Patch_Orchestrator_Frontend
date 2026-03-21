@@ -84,7 +84,7 @@ h1, h2, h3, h4, .brand-text, .page-title, .modal-title, .dash-header-title {
 
 /* TOPBAR & TOP RIGHT USER INFO FIX */
 .main-wrapper { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; overflow: hidden; background: var(--bg); height: 100vh; }
-.topbar-main { height: var(--header-h); background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; flex-shrink: 0; }
+.topbar-main { height: var(--header-h); background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end; padding: 0 24px; flex-shrink: 0; }
 
 .user-info-top { display: flex; align-items: center; padding-left: 16px; border-left: 1px solid var(--border); height: 40px; }
 .user-avatar { width: 32px; height: 32px; background: var(--primary); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; margin-right: 10px; flex-shrink: 0;}

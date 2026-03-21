@@ -20,6 +20,7 @@ export default function RiskModule({
   const [patches, setPatches] = useState([]);
   const [patchLoading, setPatchLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState("");
+  const [editingBaseline, setEditingBaseline] = useState(false); 
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [globalLogic, setGlobalLogic] = useState("AND");
@@ -37,7 +38,6 @@ export default function RiskModule({
 
   const addBaseline = (data) => {
     setPendingPatches(data.patches);
-
     if (onSetPending) onSetPending(data.patches);
     if (setRiskTab) setRiskTab("baseline");
   };
@@ -51,7 +51,9 @@ export default function RiskModule({
     setPatchLoading(true);
     try {
       const res = await api.get("/patches");
-      setPatches(res.data || []);
+      // FIXED: Safely extract the array whether it's wrapped in { data: [] } or not
+      const patchData = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      setPatches(patchData);
       if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
     } catch (err) {
       console.error("Failed to load patches", err);
@@ -62,14 +64,16 @@ export default function RiskModule({
 
   const loadBaselines = useCallback(async () => {
     try {
-      const res = await api.get("/baselines");
+      const res = await api.get("/baselines/list");
       const raw = res.data;
 
       const normalized = Array.isArray(raw)
         ? raw
         : Array.isArray(raw?.data)
           ? raw.data
-          : [];
+          : Array.isArray(raw?.baselines)
+            ? raw.baselines
+            : [];
 
       setBaselines(normalized);
     } catch (err) {
@@ -221,14 +225,7 @@ export default function RiskModule({
         }}
       >
         <div>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: "22px",
-              fontWeight: 600,
-              color: "var(--text)",
-            }}
-          >
+          <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>
             Risk Prioritization
           </h2>
           <div className="text-13 muted-text" style={{ marginTop: "4px" }}>
@@ -243,62 +240,26 @@ export default function RiskModule({
                 onClick={() => setDrawerOpen(true)}
                 title="Filter Data"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  width="16"
-                  height="16"
-                >
-                  <line x1="4" y1="21" x2="4" y2="14"></line>
-                  <line x1="4" y1="10" x2="4" y2="3"></line>
-                  <line x1="12" y1="21" x2="12" y2="12"></line>
-                  <line x1="12" y1="8" x2="12" y2="3"></line>
-                  <line x1="20" y1="21" x2="20" y2="16"></line>
-                  <line x1="20" y1="12" x2="20" y2="3"></line>
-                  <line x1="1" y1="14" x2="7" y2="14"></line>
-                  <line x1="9" y1="8" x2="15" y2="8"></line>
-                  <line x1="17" y1="16" x2="23" y2="16"></line>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                  <line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>
                 </svg>
               </button>
               {activeFilterCount > 0 && (
-                <span
-                  className="pill blue"
-                  style={{
-                    position: "absolute",
-                    top: -8,
-                    right: -8,
-                    padding: "2px 6px",
-                    fontSize: 10,
-                  }}
-                >
+                <span className="pill blue" style={{ position: "absolute", top: -8, right: -8, padding: "2px 6px", fontSize: 10 }}>
                   {activeFilterCount}
                 </span>
               )}
             </div>
           )}
-          <button
-            className="iconbtn"
-            onClick={handleRefresh}
-            title="Refresh Data"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              width="16"
-              height="16"
-            >
-              <path d="M23 4v6h-6"></path>
-              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          <button className="iconbtn" onClick={handleRefresh} title="Refresh Data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+              <path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
             </svg>
           </button>
         </div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {activeFilterCount > 0 && showFilter && (
           <div className="active-filter-banner active">
             <div className="filter-tags">
@@ -306,55 +267,15 @@ export default function RiskModule({
                 const validConds = b.conds.filter((c) => c.value);
                 if (!validConds.length) return null;
                 return (
-                  <div
-                    key={bIdx}
-                    style={{ display: "inline-flex", alignItems: "center" }}
-                  >
-                    {bIdx > 0 && (
-                      <span
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: "var(--primary)",
-                          margin: "0 8px",
-                        }}
-                      >
-                        {globalLogic}
-                      </span>
-                    )}
+                  <div key={bIdx} style={{ display: "inline-flex", alignItems: "center" }}>
+                    {bIdx > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: "var(--primary)", margin: "0 8px" }}>{globalLogic}</span>}
                     {validConds.map((c, cIdx) => (
-                      <span
-                        key={cIdx}
-                        style={{ display: "inline-flex", alignItems: "center" }}
-                      >
-                        {cIdx > 0 && (
-                          <span
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: "var(--primary)",
-                              margin: "0 6px",
-                            }}
-                          >
-                            AND
-                          </span>
-                        )}
+                      <span key={cIdx} style={{ display: "inline-flex", alignItems: "center" }}>
+                        {cIdx > 0 && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--primary)", margin: "0 6px" }}>AND</span>}
                         <span className="filter-tag">
-                          <strong>
-                            {propertyOptions.find((o) => o.value === c.column)
-                              ?.label || c.column}
-                          </strong>
-                          &nbsp;
-                          {c.operator === "="
-                            ? "equals"
-                            : c.operator === "!="
-                              ? "not equals"
-                              : c.operator === ">"
-                                ? "greater than"
-                                : c.operator === "<"
-                                  ? "less than"
-                                  : c.operator}
-                          &nbsp;<strong>'{c.value}'</strong>
+                          <strong>{propertyOptions.find((o) => o.value === c.column)?.label || c.column}</strong>&nbsp;
+                          {c.operator === "=" ? "equals" : c.operator === "!=" ? "not equals" : c.operator === ">" ? "greater than" : c.operator === "<" ? "less than" : c.operator}&nbsp;
+                          <strong>'{c.value}'</strong>
                         </span>
                       </span>
                     ))}
@@ -362,52 +283,57 @@ export default function RiskModule({
                 );
               })}
             </div>
-            <button className="btn outline" onClick={() => setFilters([])}>
-              Clear Filters
-            </button>
+            <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
           </div>
         )}
 
-        <div className="risk-content" style={{ flex: 1 }}>
-          {activeTab === "patches" && (
-            <PatchTab
-              patches={patches}
-              patchLoading={patchLoading}
-              addBaseline={addBaseline}
-              selectedMap={selectedPatches}
-              setSelectedMap={setSelectedPatches}
-              parentFilters={filters}
-              parentLogic={globalLogic}
-              navigate={(section, incomingFilters = [], logic = "AND") => {
-                setNormalizedFilters(incomingFilters);
-                setGlobalLogic(logic);
-                setRiskSubTab(section);
-                setRiskTab("dashboard");
-              }}
-            />
-          )}
+        <div className="risk-content" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          
+          <div style={{ display: activeTab === "patches" ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
+             <PatchTab
+                patches={patches}
+                patchLoading={patchLoading}
+                addBaseline={addBaseline}
+                selectedMap={selectedPatches}
+                setSelectedMap={setSelectedPatches}
+                parentFilters={filters}
+                parentLogic={globalLogic}
+                isEditingBaseline={editingBaseline}
+                navigate={(section, incomingFilters = [], logic = "AND") => {
+                  setNormalizedFilters(incomingFilters);
+                  setGlobalLogic(logic);
+                  setRiskSubTab(section);
+                  setRiskTab("dashboard");
+                }}
+              />
+          </div>
 
-          {activeTab === "baseline" && (
-            <BaselineTab
-              baselines={baselines}
-              pendingPatches={pendingPatches}
-            />
-          )}
+          <div style={{ display: activeTab === "baseline" ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
+             <BaselineTab
+                baselines={baselines}
+                pendingPatches={pendingPatches}
+                clearPendingPatches={() => setPendingPatches([])}
+                setEditingBaseline={setEditingBaseline}
+                onGoToPatches={() => setRiskTab("patches")}
+              />
+          </div>
 
           {activeTab === "dashboard" && (
-            <DashboardTab
-              baselines={baselines}
-              activeSection={activeSubTab}
-              onNavigateSubTab={setRiskSubTab}
-              setGlobalFilters={setNormalizedFilters}
-              setGlobalLogic={setGlobalLogic}
-              parentFilters={filters}
-              parentLogic={globalLogic}
-              refreshTrigger={refreshTrigger}
-              onDataLoaded={() => {
-                if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
-              }}
-            />
+             <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <DashboardTab
+                  baselines={baselines}
+                  activeSection={activeSubTab}
+                  onNavigateSubTab={setRiskSubTab}
+                  setGlobalFilters={setNormalizedFilters}
+                  setGlobalLogic={setGlobalLogic}
+                  parentFilters={filters}
+                  parentLogic={globalLogic}
+                  refreshTrigger={refreshTrigger}
+                  onDataLoaded={() => {
+                    if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
+                  }}
+                />
+             </div>
           )}
         </div>
       </div>

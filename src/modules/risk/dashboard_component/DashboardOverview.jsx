@@ -1,3 +1,4 @@
+// src/modules/risk/dashboard_component/DashboardOverview.jsx
 import { useEffect, useState, useMemo } from "react";
 import api from "../../../api/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
@@ -9,11 +10,10 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 const SEVERITY_COLORS = {
   CRITICAL: "#dc2626",
   HIGH: "#ea580c",
-  IMPORTANT: "#facc15",
-  MEDIUM: "#facc15", // Added professional color for MEDIUM
-
-  MODERATE: "#22c55e",
+  IMPORTANT: "#d97706",
+  MODERATE: "#facc15", 
   LOW: "#3b82f6",
+  UNSPECIFIED: "#9ca3af",
   UNKNOWN: "#9ca3af",
 };
 
@@ -76,17 +76,6 @@ const renderSmartLabel = ({
       </text>
     </g>
   );
-};
-/* =========================================
-   PATCH SCORE → SEVERITY
-========================================= */
-
-const getSeverityFromScore = (score) => {
-  if (score >= 90) return "CRITICAL";
-  if (score >= 75) return "HIGH";
-  if (score >= 60) return "IMPORTANT";
-  if (score >= 40) return "MODERATE";
-  return "LOW";
 };
 
 export default function DashboardOverview({ navigate }) {
@@ -164,20 +153,36 @@ export default function DashboardOverview({ navigate }) {
       IMPORTANT: 0,
       MODERATE: 0,
       LOW: 0,
+      UNSPECIFIED: 0
     };
 
     patches.forEach((p) => {
-      const score = Number(p.final_score || 0);
+      const sevRaw = String(p.severity || p.source_severity || "").toUpperCase().trim();
+      let finalSev = "UNSPECIFIED";
+      
+      // Trust the API string completely first
+      if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW", "UNSPECIFIED"].includes(sevRaw)) {
+          finalSev = sevRaw;
+      } else {
+          // Only fallback to calculating via score if the text field is garbage
+          const score = Number(p.final_score || 0);
+          if (score >= 90) finalSev = "CRITICAL";
+          else if (score >= 75) finalSev = "HIGH";
+          else if (score >= 60) finalSev = "IMPORTANT";
+          else if (score >= 40) finalSev = "MODERATE";
+          else if (score > 0) finalSev = "LOW";
+      }
 
-      const severity = getSeverityFromScore(score);
-
-      distribution[severity]++;
+      if (distribution[finalSev] !== undefined) {
+          distribution[finalSev]++;
+      } else {
+          distribution[finalSev] = 1;
+      }
     });
 
-    return Object.entries(distribution).map(([name, value]) => ({
-      name,
-      value,
-    }));
+    return Object.entries(distribution)
+      .filter(([name, value]) => value > 0) // Only render slices that exist
+      .map(([name, value]) => ({ name, value }));
   }, [patches]);
 
   const uniqueDeviceCount = useMemo(() => {

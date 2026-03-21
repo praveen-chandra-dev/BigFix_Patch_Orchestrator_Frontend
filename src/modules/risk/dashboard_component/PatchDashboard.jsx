@@ -49,14 +49,6 @@ function performExport(dataToExport, columns, format, filenamePrefix, getVal = (
     }
 }
 
-const getSeverityFromScore = (score) => {
-  if (score >= 90) return "CRITICAL";
-  if (score >= 75) return "HIGH";
-  if (score >= 60) return "IMPORTANT";
-  if (score >= 40) return "MODERATE";
-  return "LOW";
-};
-
 const getScoreColorClass = (score) => {
   if (score >= 90) return "score-critical";
   if (score >= 75) return "score-high";
@@ -122,12 +114,26 @@ export default function PatchDashboard({
       const cvesForPatch = patchCveMap[patch.patch_id] || [];
       const devices = patch.applicable_computers || [];
       const score = Number(patch.final_score || 0);
+
+      // Map Actual Text String FIRST
+      const sevRaw = String(patch.severity || patch.source_severity || "").toUpperCase().trim();
+      let finalSev = "UNSPECIFIED";
+      if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW", "UNSPECIFIED"].includes(sevRaw)) {
+          finalSev = sevRaw;
+      } else if (score > 0) {
+          if (score >= 90) finalSev = "CRITICAL";
+          else if (score >= 75) finalSev = "HIGH";
+          else if (score >= 60) finalSev = "IMPORTANT";
+          else if (score >= 40) finalSev = "MODERATE";
+          else finalSev = "LOW";
+      }
+
       return {
         patch_id: patch.patch_id ? patch.patch_id.replace(/^BIGFIX-/i, "") : "",
         patch_name: patch.patch_name || "Unknown",
         vendor: patch.vendor || "Unknown",
         final_score: score,
-        severity: getSeverityFromScore(score),
+        severity: finalSev,
         cve_count: cvesForPatch.length,
         device_count: devices.length,
         cves: cvesForPatch,
