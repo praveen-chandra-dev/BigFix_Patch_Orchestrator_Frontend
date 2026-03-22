@@ -1,109 +1,13 @@
 // src/modules/risk/PatchTab.jsx
 import { useState, useMemo, useRef, useEffect } from "react";
 import api from "../../api/api";
-
-function performExport(
-  dataToExport,
-  columns,
-  format,
-  filenamePrefix,
-  getVal = (row, colId) => row[colId],
-) {
-  const visibleCols = columns.filter((c) => c.show);
-  const headers = visibleCols.map((c) => c.label);
-
-  const triggerDownload = (content, type, ext) => {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${filenamePrefix}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-  if (format === "JSON") {
-    const json = dataToExport.map((row) => {
-      let obj = {};
-      visibleCols.forEach((c) => (obj[c.label] = getVal(row, c.id)));
-      return obj;
-    });
-    triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
-  } else if (format === "XML") {
-    let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
-    dataToExport.forEach((row) => {
-      xml += "  <row>\n";
-      visibleCols.forEach((c) => {
-        const tag = c.label.replace(/[^a-zA-Z0-9]/g, "_");
-        xml += `    <${tag}>${getVal(row, c.id) || ""}</${tag}>\n`;
-      });
-      xml += "  </row>\n";
-    });
-    xml += "</rows>";
-    triggerDownload(xml, "application/xml", "xml");
-  } else if (format === "HTML") {
-    let html = '<table border="1"><thead><tr>';
-    headers.forEach((h) => (html += `<th>${h}</th>`));
-    html += "</tr></thead><tbody>";
-    dataToExport.forEach((row) => {
-      html += "<tr>";
-      visibleCols.forEach(
-        (c) => (html += `<td>${getVal(row, c.id) || ""}</td>`),
-      );
-      html += "</tr>";
-    });
-    html += "</tbody></table>";
-    triggerDownload(html, "text/html", "html");
-  } else if (format === "TXT") {
-    const txt = [
-      headers.join("\t"),
-      ...dataToExport.map((r) =>
-        visibleCols.map((c) => getVal(r, c.id) || "").join("\t"),
-      ),
-    ].join("\n");
-    triggerDownload(txt, "text/plain", "txt");
-  } else if (format === "PDF") {
-    const loadScript = (src) =>
-      new Promise((resolve) => {
-        if (document.querySelector(`script[src="${src}"]`)) return resolve();
-        const script = document.createElement("script");
-        script.src = src;
-        script.onload = resolve;
-        document.body.appendChild(script);
-      });
-    Promise.all([
-      loadScript(
-        "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
-      ),
-      loadScript(
-        "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js",
-      ),
-    ]).then(() => {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      doc.text(`Export: ${filenamePrefix}`, 14, 15);
-      const body = dataToExport.map((row) =>
-        visibleCols.map((c) => getVal(row, c.id) || ""),
-      );
-      doc.autoTable({ head: [headers], body: body, startY: 20 });
-      doc.save(`${filenamePrefix}.pdf`);
-    });
-  } else {
-    const csv = [
-      headers.join(","),
-      ...dataToExport.map((r) =>
-        visibleCols
-          .map((c) => `"${String(getVal(r, c.id) || "").replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n");
-    triggerDownload(csv, "text/csv", "csv");
-  }
-}
+import { performExport } from "../../utils/exportUtils";
+import Paginator from "../../components/common/Paginator";
 
 const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
 
 export default function PatchTab({
-  patches = [], // FIXED: Bulletproof default array
+  patches = [],
   patchLoading,
   addBaseline,
   selectedMap,
@@ -133,13 +37,13 @@ export default function PatchTab({
   const [toast, setToast] = useState(null);
 
   const [cols, setCols] = useState([
-    { id: "patch_id", label: "Patch ID", show: true },
-    { id: "patch_name", label: "Name", show: true },
-    { id: "applicable_count", label: "Applicable Computers", show: true },
-    { id: "cve_count", label: "Associated CVE IDs", show: true },
-    { id: "severity", label: "Vulnerability Severity", show: true },
-    { id: "final_score", label: "Score", show: true },
-    { id: "status", label: "Approval Status", show: true },
+    { id: "patch_id", label: "Patch ID", show: true, width: "140px" },
+    { id: "patch_name", label: "Name", show: true, width: "auto" },
+    { id: "applicable_count", label: "Applicable", show: true, width: "100px" },
+    { id: "cve_count", label: "CVEs", show: true, width: "70px" },
+    { id: "severity", label: "Severity", show: true, width: "120px" },
+    { id: "final_score", label: "Score", show: true, width: "80px" },
+    { id: "status", label: "Status", show: true, width: "110px" },
   ]);
 
   useEffect(() => {
@@ -251,7 +155,6 @@ export default function PatchTab({
     return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
   };
 
-  // FIXED: Defensive spread of patches array
   const filteredPatches = [...(patches || [])].filter(applyFilters).sort((a, b) => {
     if (!sortConfig.key) return 0;
     let aVal, bVal;
@@ -282,7 +185,6 @@ export default function PatchTab({
   const allSelected = filteredPatches.length > 0 && filteredPatches.every((p) => selectedMap[getPatchKey(p)]);
   const someSelected = filteredPatches.some((p) => selectedMap[getPatchKey(p)]) && !allSelected;
 
-  const totalPages = Math.ceil(filteredPatches.length / rowsPerPage);
   const paginatedPatches = filteredPatches.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
   const selectedCount = Object.keys(selectedMap).length;
 
@@ -345,7 +247,7 @@ export default function PatchTab({
   if (patchLoading) return <div className="app-loading-content">Loading patches...</div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
       {toast && (
         <div className={`custom-toast show ${toast.type}`}>
           <div className="toast-content">
@@ -354,40 +256,28 @@ export default function PatchTab({
           </div>
         </div>
       )}
+      
+      {/* TOOLBAR */}
       <div className="grid-toolbar" style={{ margin: "0 0 16px 0", padding: 0 }}>
         <div className="grid-toolbar-right" style={{ display: "flex", gap: "12px", marginLeft: "auto" }}>
-          <button
-            className="btn outline sec small"
-            disabled={!isMaster || !hasApprovable}
-            onClick={() => handleApprovePatches(true)}
-            style={{ color: selectedCount === 0 ? "var(--muted)" : "var(--text)", borderColor: "var(--border)" }}
-          >
+          <button className="btn outline sec small" disabled={!isMaster || !hasApprovable} onClick={() => handleApprovePatches(true)} style={{ color: selectedCount === 0 ? "var(--muted)" : "var(--text)", borderColor: "var(--border)" }}>
             Approve Patches
           </button>
-          <button
-            className="btn outline sec small"
-            disabled={!isMaster || !hasUnapprovable}
-            onClick={() => handleApprovePatches(false)}
-          >
+          <button className="btn outline sec small" disabled={!isMaster || !hasUnapprovable} onClick={() => handleApprovePatches(false)}>
             Unapprove
           </button>
-          
-          <button
-            className="btn outline sec small"
-            disabled={selectedCount === 0}
-            onClick={approvePatches}
-            style={{ color: selectedCount === 0 ? "var(--muted)" : "var(--text)", borderColor: "var(--border)" }}
-          >
+          <button className="btn outline sec small" disabled={selectedCount === 0} onClick={approvePatches} style={{ color: selectedCount === 0 ? "var(--muted)" : "var(--text)", borderColor: "var(--border)" }}>
             {isEditingBaseline ? "Add Patches" : "Create Baseline"}
           </button>
 
+          {/* Columns Dropdown */}
           <div className="dropdown" ref={colRef}>
             <button className="btn outline sec small" onClick={(e) => { e.stopPropagation(); setShowColDrop(!showColDrop); setShowExpDrop(false); }} title="Columns">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
               &nbsp; Columns
             </button>
             {showColDrop && (
-              <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+              <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0, zIndex: 10 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                   {cols.map((col, i) => (
                     <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={(e) => (e.currentTarget.style.background = "#f8fafc")} onMouseOut={(e) => (e.currentTarget.style.background = "transparent")} onClick={(e) => e.stopPropagation()}>
@@ -400,13 +290,14 @@ export default function PatchTab({
             )}
           </div>
 
+          {/* Export Dropdown */}
           <div className="dropdown" ref={expRef}>
             <button className="btn outline small" onClick={(e) => { e.stopPropagation(); setShowExpDrop(!showExpDrop); setShowColDrop(false); }} title="Export">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
               &nbsp; Export
             </button>
             {showExpDrop && (
-              <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+              <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0, zIndex: 10 }}>
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: "0.05em" }}>Format</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
@@ -424,40 +315,41 @@ export default function PatchTab({
         </div>
       </div>
 
-      <div className="tableWrap border-top" style={{ flex: 1, overflow: "auto", margin: "0 -32px", width: "calc(100% + 64px)", borderLeft: "none", borderRight: "none", borderRadius: 0 }}>
-        <table>
+      {/* FIXED TABLE LAYOUT */}
+      <div className="tableWrap border-top" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", margin: "0 -32px", width: "calc(100% + 64px)", borderLeft: "none", borderRight: "none", borderRadius: 0 }}>
+        <table style={{ tableLayout: 'fixed', width: '100%', minWidth: '800px' }}>
           <thead className="kpi-th-sticky">
             <tr>
-              <th style={{ width: 48, textAlign: "center" }}>
+              <th style={{ width: "40px", textAlign: "center" }}>
                 <input ref={headerCheckboxRef} type="checkbox" className="custom-checkbox" checked={allSelected} onChange={() => toggleSelectAll(filteredPatches)} />
               </th>
               {cols.find((c) => c.id === "patch_id")?.show && (
-                <th onClick={() => handleSort("patch_id")} className="cursor-pointer">Patch ID{getSortIcon("patch_id")}</th>
+                <th style={{ width: cols.find((c) => c.id === "patch_id").width }} onClick={() => handleSort("patch_id")} className="cursor-pointer">Patch ID{getSortIcon("patch_id")}</th>
               )}
               {cols.find((c) => c.id === "patch_name")?.show && (
-                <th onClick={() => handleSort("patch_name")} className="cursor-pointer">Name{getSortIcon("patch_name")}</th>
+                <th style={{ width: cols.find((c) => c.id === "patch_name").width }} onClick={() => handleSort("patch_name")} className="cursor-pointer">Name{getSortIcon("patch_name")}</th>
               )}
               {cols.find((c) => c.id === "applicable_count")?.show && (
-                <th onClick={() => handleSort("applicable_count")} className="cursor-pointer">Applicable Computers{getSortIcon("applicable_count")}</th>
+                <th style={{ width: cols.find((c) => c.id === "applicable_count").width, textAlign: "center" }} onClick={() => handleSort("applicable_count")} className="cursor-pointer">Applicable{getSortIcon("applicable_count")}</th>
               )}
               {cols.find((c) => c.id === "cve_count")?.show && (
-                <th onClick={() => handleSort("cve_count")} className="cursor-pointer">Associated CVE IDs{getSortIcon("cve_count")}</th>
+                <th style={{ width: cols.find((c) => c.id === "cve_count").width, textAlign: "center" }} onClick={() => handleSort("cve_count")} className="cursor-pointer">CVEs{getSortIcon("cve_count")}</th>
               )}
               {cols.find((c) => c.id === "severity")?.show && (
-                <th>Vulnerability Severity</th>
+                <th style={{ width: cols.find((c) => c.id === "severity").width }}>Severity</th>
               )}
               {cols.find((c) => c.id === "final_score")?.show && (
-                <th onClick={() => handleSort("final_score")} className="cursor-pointer">Risk Score{getSortIcon("final_score")}</th>
+                <th style={{ width: cols.find((c) => c.id === "final_score").width, textAlign: "center" }} onClick={() => handleSort("final_score")} className="cursor-pointer">Score{getSortIcon("final_score")}</th>
               )}
               {cols.find((c) => c.id === "status")?.show && (
-                <th onClick={() => handleSort("status")} className="cursor-pointer">Status{getSortIcon("status")}</th>
+                <th style={{ width: cols.find((c) => c.id === "status").width }} onClick={() => handleSort("status")} className="cursor-pointer">Status{getSortIcon("status")}</th>
               )}
             </tr>
           </thead>
           <tbody>
             {paginatedPatches.length === 0 ? (
               <tr>
-                <td colSpan="7" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>No patches found.</td>
+                <td colSpan={cols.filter(c => c.show).length + 1} style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>No patches found.</td>
               </tr>
             ) : (
               paginatedPatches.map((p) => {
@@ -485,17 +377,17 @@ export default function PatchTab({
                       <td>{p.patch_id?.replace(/^BIGFIX-/, "")} {p.has_kev && <span className="kev-badge">KEV</span>}</td>
                     )}
                     {cols.find((c) => c.id === "patch_name")?.show && (
-                      <td style={{ maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.patch_name}>{p.patch_name}</td>
+                      <td style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={p.patch_name}>{p.patch_name}</td>
                     )}
                     {cols.find((c) => c.id === "applicable_count")?.show && (
-                      <td>
+                      <td style={{ textAlign: "center" }}>
                         <span className="cell-link" onClick={(e) => { e.stopPropagation(); navigate("computer", [{ conds: [{ column: "patch_id", operator: "=", value: String(p.patch_id).replace(/^BIGFIX-/, "") }] }], "AND"); }}>
                           {p.applicable_count || 0}
                         </span>
                       </td>
                     )}
                     {cols.find((c) => c.id === "cve_count")?.show && (
-                      <td>
+                      <td style={{ textAlign: "center" }}>
                         <span className="cell-link" onClick={(e) => { e.stopPropagation(); navigate("cve", [{ conds: [{ column: "patch_id", operator: "=", value: String(p.patch_id).replace(/^BIGFIX-/, "") }] }], "AND"); }}>
                           {p.cve_count || 0}
                         </span>
@@ -505,7 +397,7 @@ export default function PatchTab({
                       <td><span className={`severity-badge severity-${derivedSeverity.toLowerCase()}`}>{derivedSeverity}</span></td>
                     )}
                     {cols.find((c) => c.id === "final_score")?.show && (
-                      <td><span className={`score-badge ${getScoreColorClass(score)}`}>{score.toFixed(2)}</span></td>
+                      <td style={{ textAlign: "center" }}><span className={`score-badge ${getScoreColorClass(score)}`}>{score.toFixed(2)}</span></td>
                     )}
                     {cols.find((c) => c.id === "status")?.show && (
                       <td>{p.status === 1 ? <span className="status-approved">Approved</span> : <span className="status-pending">Not Approved</span>}</td>
@@ -518,29 +410,7 @@ export default function PatchTab({
         </table>
       </div>
 
-      <div className="pagination" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-          <select className="control" style={{ width: "70px", height: "32px", padding: "0 8px" }} value={rowsPerPage} onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </div>
-        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-          {filteredPatches.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredPatches.length)} of {filteredPatches.length}
-        </span>
-        <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-          <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>&lt;</button>
-          <button className={`pager-btn ${currentPage === 1 ? "active" : ""}`} onClick={() => setCurrentPage(1)}>1</button>
-          {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? "active" : ""}`} onClick={() => setCurrentPage(2)}>2</button>}
-          {totalPages > 2 && <span style={{ padding: "0 4px", color: "var(--muted)" }}>..</span>}
-          {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-          {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? "active" : ""}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-          <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage((p) => p + 1)}>&gt;</button>
-        </div>
-      </div>
+      <Paginator total={filteredPatches.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
     </div>
   );
 }

@@ -1,6 +1,10 @@
 // src/components/FlowCard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
 import FilterDrawer from "./FilterDrawer";
+import { performExport } from "../utils/exportUtils";
+import { evaluateCondition } from "../utils/filterUtils";
+import FancySelect from "./common/FancySelect";
+import Paginator from "./common/Paginator";
 
 export const Stage = {
   HISTORY: "HISTORY", CONFIG: "CONFIG", SANDBOX: "SANDBOX", PILOT: "PILOT", PRODUCTION: "PRODUCTION", FinalResult: "FINAL RESULT",
@@ -26,145 +30,6 @@ function classify(raw) {
   if (/wait|pending/i.test(L)) return "Waiting";
   return s; 
 }
-
-function evaluateCondition(f, operator, s, colId) {
-    if (!s) return true;
-    const dateFields = ['date', 'month', 'CreatedAt', 'lastReportTime', 'issued', 'stopped', 'start', 'end', 'createdAt'];
-    if (dateFields.includes(colId) || (!isNaN(Date.parse(f)) && isNaN(f))) {
-        const dateF = new Date(f).getTime(); const dateS = new Date(s).getTime();
-        if (!isNaN(dateF) && !isNaN(dateS)) {
-            if (operator === "=") return new Date(f).toDateString() === new Date(s).toDateString();
-            if (operator === "!=") return new Date(f).toDateString() !== new Date(s).toDateString();
-            if (operator === ">") return dateF > dateS;
-            if (operator === "<") return dateF < dateS;
-            if (operator === ">=") return dateF >= dateS;
-            if (operator === "<=") return dateF <= dateS;
-        }
-    }
-    const numF = Number(f); const numS = Number(s);
-    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
-        if (operator === "=") return numF === numS;
-        if (operator === "!=") return numF !== numS;
-        if (operator === ">") return numF > numS;
-        if (operator === "<") return numF < numS;
-        if (operator === ">=") return numF >= numS;
-        if (operator === "<=") return numF <= numS;
-    }
-    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
-    if (operator === "contains") return strF.includes(strS);
-    if (operator === "=") return strF === strS;
-    if (operator === "!=") return strF !== strS;
-    if (operator === ">") return strF > strS;
-    if (operator === "<") return strF < strS;
-    if (operator === ">=") return strF >= strS;
-    if (operator === "<=") return strF <= strS;
-    return true;
-}
-
-function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
-    const visibleCols = columns.filter(c => c.show);
-    const headers = visibleCols.map(c => c.label);
-    const triggerDownload = (content, type, ext) => {
-        const blob = new Blob([content], { type });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a"); a.href = url; a.download = `${filenamePrefix}.${ext}`; a.click(); URL.revokeObjectURL(url);
-    };
-    if (format === 'JSON') {
-        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
-        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
-    } else if (format === 'XML') {
-        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
-        dataToExport.forEach(row => {
-            xml += '  <row>\n';
-            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
-            xml += '  </row>\n';
-        });
-        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
-    } else if (format === 'HTML') {
-        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
-        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
-        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
-    } else if (format === 'TXT') {
-        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
-        triggerDownload(txt, "text/plain", "txt");
-    } else if (format === 'PDF') {
-        const loadScript = (src) => new Promise(resolve => {
-            if (document.querySelector(`script[src="${src}"]`)) return resolve();
-            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
-        });
-        Promise.all([
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
-        ]).then(() => {
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text(`Export: ${filenamePrefix}`, 14, 15);
-            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
-            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
-        });
-    } else { 
-        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
-        triggerDownload(csv, "text/csv", "csv");
-    }
-}
-
-// FIXED: FancySelect to prevent clipping and empty rendering
-const FancySelect = ({ label, options = [], value, onChange, disabled, width = '100%', menuPlacement = 'bottom' }) => {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef(null);
-
-  useEffect(() => {
-    function handleClickOutside(event) { 
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside); 
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find(o => (o.value !== undefined ? o.value : o) === value);
-  const displayText = selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : value;
-
-  return (
-    <div className="field flex-1 m-0" style={{ width }}>
-      {label && <span className="label">{label}</span>}
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
-        <button type="button" className="fx-trigger" onClick={() => !disabled && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: disabled ? 'var(--bg)' : 'var(--panel)' }}>
-          <span className="fx-value" title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: disabled ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
-          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
-        </button>
-        {open && (
-          <div className="fx-menu" style={{ 
-              position: 'absolute',
-              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
-              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
-              left: 0,
-              minWidth: '100%',
-              width: 'max-content',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
-              border: '1px solid var(--border)',
-              zIndex: 99999,
-              background: 'var(--panel)',
-              borderRadius: '6px'
-          }}>
-            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {options.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
-                options.map((opt) => {
-                  const optVal = opt.value !== undefined ? opt.value : opt;
-                  const optLabel = opt.label !== undefined ? opt.label : opt;
-                  const isSelected = value === optVal;
-                  return (
-                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
-                      <span className="fx-label">{optLabel}</span>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 export default function DeploymentHistory() {
   const [loading, setLoading] = useState(true);
@@ -266,7 +131,6 @@ export default function DeploymentHistory() {
     return sortableItems;
   }, [filteredItems, sortConfig]);
 
-  const totalPages = Math.ceil(sortedItems.length / rowsPerPage);
   const paginatedItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   useEffect(() => { setCurrentPage(1); }, [filters, rowsPerPage]);
@@ -287,14 +151,6 @@ export default function DeploymentHistory() {
   };
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
-  
-  // Options for FancySelect
-  const rppOptions = [
-      {value: 10, label: "10"}, 
-      {value: 20, label: "20"}, 
-      {value: 50, label: "50"}, 
-      {value: 10000, label: "All"}
-  ];
 
   if (detailAction) {
      return <ActionResultsView action={detailAction} loading={detailResults.loading} rows={detailResults.rows} error={detailResults.error} lastUpdated={detailLastUpdated} onBack={() => setDetailAction(null)} onRefresh={() => openActionDetails(detailAction)} />
@@ -431,25 +287,7 @@ export default function DeploymentHistory() {
             )}
         </div>
         
-        {/* ADDED position: "relative" and zIndex: 50 to prevent FancySelect menu from hiding behind the table */}
-        <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <FancySelect options={rppOptions} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
-            </div>
-            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                {sortedItems.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, filteredItems.length)} of {filteredItems.length}
-            </span>
-            <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
-                <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
-                {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
-                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-                {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-                <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
-            </div>
-        </div>
+        <Paginator total={sortedItems.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
 
       </div>
 
@@ -482,13 +320,6 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
     const propertyOptions = [
       { value: "server", label: "Server Name" },
       { value: "status", label: "Status" }
-    ];
-
-    const rppOptions = [
-        {value: 10, label: "10"}, 
-        {value: 20, label: "20"}, 
-        {value: 50, label: "50"}, 
-        {value: 10000, label: "All"}
     ];
 
     useEffect(() => {
@@ -532,7 +363,6 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
         });
     }, [filtered, sortConfig]);
 
-    const totalPages = Math.ceil(sorted.length / rowsPerPage);
     const paginated = sorted.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
     const handleSort = (key) => setSortConfig(c => ({ key, direction: c.key === key && c.direction === "asc" ? "desc" : "asc" }));
@@ -688,26 +518,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                     </table>
                 </div>
 
-                {/* ADDED position: "relative" and zIndex: 50 to prevent FancySelect menu from hiding behind the table */}
-                <div className="pagination" style={{ position: "relative", zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", padding: "16px 32px", gap: "24px", margin: "0 -32px", width: "calc(100% + 64px)", borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                        <FancySelect options={rppOptions} value={rowsPerPage} onChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }} width="80px" menuPlacement="top" />
-                    </div>
-                    <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                        {sorted.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-{Math.min(currentPage * rowsPerPage, sorted.length)} of {sorted.length}
-                    </span>
-                    <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                        <button className="pager-btn" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>&lt;</button>
-                        <button className={`pager-btn ${currentPage === 1 ? 'active' : ''}`} onClick={() => setCurrentPage(1)}>1</button>
-                        {totalPages > 1 && <button className={`pager-btn ${currentPage === 2 ? 'active' : ''}`} onClick={() => setCurrentPage(2)}>2</button>}
-                        {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                        {totalPages > 2 && currentPage > 2 && currentPage < totalPages && <button className="pager-btn active">{currentPage}</button>}
-                        {totalPages > 2 && <button className={`pager-btn ${currentPage === totalPages ? 'active' : ''}`} onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>}
-                        <button className="pager-btn" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)}>&gt;</button>
-                    </div>
-                </div>
-
+                <Paginator total={sorted.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
             </div>
 
             <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />

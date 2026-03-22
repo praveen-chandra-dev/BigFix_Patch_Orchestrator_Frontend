@@ -1,6 +1,10 @@
 // src/components/CloneSelector.jsx
 import { useState, useEffect, useRef, useMemo } from "react";
 import FilterDrawer from "./FilterDrawer";
+import { performExport } from "../utils/exportUtils";
+import { evaluateCondition } from "../utils/filterUtils";
+import FancySelect from "./common/FancySelect";
+import Paginator from "./common/Paginator";
 
 // --- SECURE IN-MEMORY VM CACHE ---
 const vmResolutionCache = new Map();
@@ -18,199 +22,6 @@ async function postJSON(url, body) {
   const r = await fetch(`${API}${url}`, { method: "POST", headers: getHeaders(), body: JSON.stringify(body) });
   return r.json();
 }
-
-function evaluateCondition(f, operator, s, colId) {
-    if (!s) return true;
-    const dateFields = ['createdAt'];
-    if (dateFields.includes(colId) || (!isNaN(Date.parse(f)) && isNaN(f))) {
-        const dateF = new Date(f).getTime();
-        const dateS = new Date(s).getTime();
-        if (!isNaN(dateF) && !isNaN(dateS)) {
-            if (operator === "=") return new Date(f).toDateString() === new Date(s).toDateString();
-            if (operator === "!=") return new Date(f).toDateString() !== new Date(s).toDateString();
-            if (operator === ">") return dateF > dateS;
-            if (operator === "<") return dateF < dateS;
-            if (operator === ">=") return dateF >= dateS;
-            if (operator === "<=") return dateF <= dateS;
-        }
-    }
-    const numF = Number(f); const numS = Number(s);
-    if (!isNaN(numF) && !isNaN(numS) && String(s).trim() !== '') {
-        if (operator === "=") return numF === numS;
-        if (operator === "!=") return numF !== numS;
-        if (operator === ">") return numF > numS;
-        if (operator === "<") return numF < numS;
-        if (operator === ">=") return numF >= numS;
-        if (operator === "<=") return numF <= numS;
-    }
-    let strF = String(f).toLowerCase(); let strS = String(s).toLowerCase();
-    if (operator === "contains") return strF.includes(strS);
-    if (operator === "=") return strF === strS;
-    if (operator === "!=") return strF !== strS;
-    if (operator === ">") return strF > strS;
-    if (operator === "<") return strF < strS;
-    if (operator === ">=") return strF >= strS;
-    if (operator === "<=") return strF <= strS;
-    return true;
-}
-
-function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
-    const visibleCols = columns.filter(c => c.show);
-    const headers = visibleCols.map(c => c.label);
-    const triggerDownload = (content, type, ext) => {
-        const blob = new Blob([content], { type });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `${filenamePrefix}.${ext}`;
-        a.click(); URL.revokeObjectURL(url);
-    };
-    if (format === 'JSON') {
-        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
-        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
-    } else if (format === 'XML') {
-        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
-        dataToExport.forEach(row => {
-            xml += '  <row>\n';
-            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
-            xml += '  </row>\n';
-        });
-        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
-    } else if (format === 'HTML') {
-        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
-        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
-        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
-    } else if (format === 'TXT') {
-        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
-        triggerDownload(txt, "text/plain", "txt");
-    } else if (format === 'PDF') {
-        const loadScript = (src) => new Promise(resolve => {
-            if (document.querySelector(`script[src="${src}"]`)) return resolve();
-            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
-        });
-        // FIXED: Load jsPDF first, THEN autotable to prevent race conditions
-        loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
-        .then(() => loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js'))
-        .then(() => {
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text(`Export: ${filenamePrefix}`, 14, 15);
-            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
-            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
-        });
-    } else { 
-        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
-        triggerDownload(csv, "text/csv", "csv");
-    }
-}
-
-const FancySelect = ({ label, options, value, onChange, disabled, placeholder, searchable, isLoading, width = '100%', menuPlacement = 'bottom' }) => {
-  const [open, setOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const wrapperRef = useRef(null);
-  const searchInputRef = useRef(null);
-
-  useEffect(() => {
-    function handleClickOutside(event) { 
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
-        setOpen(false);
-        setSearchTerm("");
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside); 
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (open && searchable && searchInputRef.current) searchInputRef.current.focus();
-  }, [open, searchable]);
-
-  const selectedOption = options.find(o => String(o.value !== undefined ? o.value : o) === String(value));
-  const displayText = isLoading ? "Loading..." : (selectedOption ? (selectedOption.label !== undefined ? selectedOption.label : selectedOption) : (placeholder || "— Select —"));
-  const isPlaceholder = !selectedOption && !isLoading;
-
-  const filteredOptions = searchable && searchTerm.trim() !== ""
-    ? options.filter(opt => String(opt.label !== undefined ? opt.label : opt).toLowerCase().includes(searchTerm.toLowerCase()))
-    : options;
-
-  return (
-    <div className="field flex-1 m-0" style={{ minWidth: label ? '200px' : 'auto' }}>
-      {label && <span className="label">{label}</span>}
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${(disabled || isLoading) ? "disabled" : ""}`} ref={wrapperRef} style={{ position: 'relative' }}>
-        <button type="button" className="fx-trigger" onClick={() => !disabled && !isLoading && setOpen(!open)} style={{ height: '32px', minHeight: '32px', padding: '0 10px', background: (disabled || isLoading) ? 'var(--bg)' : 'var(--panel)' }} disabled={disabled || isLoading}>
-          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={displayText} style={{ fontSize: '13px', fontWeight: 500, color: (disabled || isLoading) ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayText}</span>
-          <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
-        </button>
-        {open && (
-          <div className="fx-menu" style={{ 
-              position: 'absolute',
-              top: menuPlacement === 'bottom' ? 'calc(100% + 4px)' : 'auto', 
-              bottom: menuPlacement === 'top' ? 'calc(100% + 4px)' : 'auto',
-              left: 0,
-              minWidth: '100%',
-              width: 'max-content',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
-              border: '1px solid var(--border)',
-              zIndex: 99999,
-              background: 'var(--panel)',
-              borderRadius: '6px'
-          }}>
-            {searchable && (
-              <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2, borderRadius: '6px 6px 0 0' }}>
-                <input 
-                  ref={searchInputRef} type="text" className="control" placeholder="Search..." 
-                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onClick={e => e.stopPropagation()} 
-                  style={{ width: '100%', height: '28px', fontSize: '12px', padding: '0 8px' }} 
-                />
-              </div>
-            )}
-            <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-              {filteredOptions.length === 0 ? ( <div className="fx-item fx-empty" style={{ fontSize: '13px', padding: '8px' }}>No options</div> ) : (
-                filteredOptions.map((opt) => {
-                  const optVal = opt.value !== undefined ? opt.value : opt;
-                  const optLabel = opt.label !== undefined ? opt.label : opt;
-                  const isSelected = String(value) === String(optVal);
-                  return (
-                    <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(optVal); setOpen(false); setSearchTerm(""); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
-                      <span className="fx-label">{optLabel}</span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const Paginator = ({ total, rpp, setRpp, page, setPage, edgeToEdge = false }) => {
-    const totalPages = Math.ceil(total / rpp) || 1;
-    const rppOptions = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
-    const edgeStyles = edgeToEdge 
-        ? { margin: '0 -32px', width: 'calc(100% + 64px)', borderBottom: '1px solid var(--border)', padding: '16px 32px' } 
-        : { padding: '16px 20px', borderTop: '1px solid var(--border)' };
-
-    return (
-        <div className="pagination" style={{ position: 'relative', zIndex: 50, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "24px", background: 'var(--panel)', ...edgeStyles }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>Rows per page:</span>
-                <FancySelect options={rppOptions} value={rpp} onChange={v => { setRpp(Number(v)); setPage(1); }} width="80px" menuPlacement="top" searchable={false} />
-            </div>
-            <span className="pager-info" style={{ fontSize: "13px", color: "var(--muted)" }}>
-                {total > 0 ? (page - 1) * rpp + 1 : 0}-{Math.min(page * rpp, total)} of {total}
-            </span>
-            <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-                <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt;</button>
-                <button className={`pager-btn ${page === 1 ? 'active' : ''}`} onClick={() => setPage(1)}>1</button>
-                {totalPages > 1 && <button className={`pager-btn ${page === 2 ? 'active' : ''}`} onClick={() => setPage(2)}>2</button>}
-                {totalPages > 2 && <span style={{ padding: '0 4px', color: 'var(--muted)' }}>..</span>}
-                {totalPages > 2 && page > 2 && page < totalPages && <button className="pager-btn active">{page}</button>}
-                {totalPages > 2 && <button className={`pager-btn ${page === totalPages ? 'active' : ''}`} onClick={() => setPage(totalPages)}>{totalPages}</button>}
-                <button className="pager-btn" disabled={page === totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>&gt;</button>
-            </div>
-        </div>
-    );
-};
 
 export default function CloneManager({ onClose, groupName: initialGroup, onComplete, environment }) {
   const [activeTab, setActiveTab] = useState("TARGETS");
@@ -426,7 +237,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
         if (!c.value) continue;
         validConds++; 
         
-        // FIXED: Translate raw statuses to display-matching formats
         let field = "";
         if (c.column === "ips") {
             field = (item.ips || []).join(", ").toLowerCase();

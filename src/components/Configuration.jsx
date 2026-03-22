@@ -1,6 +1,7 @@
 // src/components/Configuration.jsx
 import { useEffect, useState, useRef } from "react";
 import { useEnvironment } from "./Environment.jsx";
+import FancySelect from "./common/FancySelect";
 
 const API_BASE = window.env.VITE_API_BASE;
 
@@ -24,103 +25,11 @@ async function postJSON(url, body) {
   return j;
 }
 
-function enhanceNativeSelect(selectEl) {
-  if (!selectEl || selectEl.dataset.fx === "ok") return;
-  selectEl.dataset.fx = "ok";
-  selectEl.style.display = "none";
-  
-  const wrap = document.createElement("div");
-  wrap.className = "fx-wrap";
-  selectEl.parentNode.insertBefore(wrap, selectEl);
-  wrap.appendChild(selectEl);
-  
-  const getLabel = () => {
-    const opt = selectEl.options[selectEl.selectedIndex];
-    return opt ? opt.text : "— select —";
-  };
-  
-  const trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "fx-trigger";
-  trigger.innerHTML = `<span class="fx-value" style="overflow:hidden;text-overflow:ellipsis;">${getLabel()}</span><span class="fx-chevron" style="opacity:0.5;font-size:12px;">▼</span>`;
-  wrap.insertBefore(trigger, selectEl);
-  
-  const menu = document.createElement("div");
-  menu.className = "fx-menu";
-  const menuInner = document.createElement("div");
-  menuInner.className = "fx-menu-inner";
-  menu.appendChild(menuInner);
-  wrap.appendChild(menu);
-  
-  const allOptions = Array.from(selectEl.querySelectorAll("option"));
-  const itemsOnly = () => allOptions.filter(o => !o.disabled && o.value !== "");
-  
-  function renderMenu() {
-    menuInner.innerHTML = "";
-    const real = itemsOnly();
-    if (!real.length) {
-      menuInner.innerHTML = `<div class="fx-item fx-empty">No options</div>`;
-      return;
-    }
-    real.forEach((option, i) => {
-      const it = document.createElement("div");
-      const active = option.selected;
-      it.className = "fx-item" + (active ? " fx-active" : "");
-      it.innerHTML = `<span class="fx-label">${option.textContent}</span>${active ? "" : ""}`;
-      it.onclick = () => commit(i);
-      menuInner.appendChild(it);
-    });
-  }
-  
-  function open() {
-    if (wrap.classList.contains("fx-open")) return;
-    wrap.classList.add("fx-open");
-    renderMenu();
-    document.addEventListener("mousedown", onDocDown);
-  }
-  
-  function close() {
-    wrap.classList.remove("fx-open");
-    document.removeEventListener("mousedown", onDocDown);
-  }
-  
-  function onDocDown(e) { if (!wrap.contains(e.target)) close(); }
-  
-  function commit(i) {
-    const real = itemsOnly();
-    if (!real[i]) return;
-    allOptions.forEach(o => o.selected = false);
-    real[i].selected = true;
-    selectEl.value = real[i].value;
-    trigger.querySelector(".fx-value").textContent = real[i].textContent;
-    close();
-    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-  
-  trigger.onclick = (e) => { e.stopPropagation(); wrap.classList.contains("fx-open") ? close() : open(); };
-
-  const obs = new MutationObserver(() => {
-    const selectedOption = selectEl.options[selectEl.selectedIndex];
-    const displayText = selectedOption ? selectedOption.text : "— select —";
-    const valEl = trigger.querySelector(".fx-value");
-    if (valEl) {
-      valEl.textContent = displayText;
-    }
-  });
-  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected", "value"] });
-}
-
-function enhanceNativeSelects(root = document) {
-  if (!root) return;
-  root.querySelectorAll("select.control").forEach(enhanceNativeSelect);
-}
-
-function Switch({ checked, onChange, label, subLabel, disabled }) {
+function Switch({ checked, onChange, id, disabled = false }) {
   return (
     <div className={`switch-row ${disabled ? "disabled" : ""}`}>
       <div className="switch-text">
-        <div className="switch-label">{label}</div>
-        {subLabel && <div className="switch-sub">{subLabel}</div>}
+        <div className="switch-label">{id}</div>
       </div>
       <button
         type="button"
@@ -225,8 +134,6 @@ export default function Configuration({ onSaved, locked = false }) {
         
       } catch (e) { 
         if (e.name !== 'AbortError') setErr(e.message || String(e)); 
-      } finally { 
-        setTimeout(() => enhanceNativeSelects(configRef.current), 100); 
       }
     })();
     return () => controller.abort();
@@ -298,7 +205,6 @@ export default function Configuration({ onSaved, locked = false }) {
               <div className="help-text">Servers below this limit will fail health checks.</div>
             </div>
             
-            {/* FIX 4: Hide these specific fields for NMOs */}
             {isAdmin && (
               <>
                 <div className="field">
@@ -319,51 +225,48 @@ export default function Configuration({ onSaved, locked = false }) {
               <label className="label">Last Report Time Threshold</label>
               <div className="input-combo">
                 <div className="env-patch-input"><input type="number" min="0" className="control input-modern" placeholder="10" value={lastReportValue} onChange={handleNumChange(setLastReportValue)} onBlur={() => handleBlur(lastReportValue, setLastReportValue, 0, 365)} disabled={locked} /></div>
-                <div style={{ flex: 1.5, minWidth: '140px' }}><select value={lastReportUnit} onChange={(e) => setLastReportUnit(e.target.value)} disabled={locked} className="control"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option></select></div>
+                <div style={{ flex: 1.5, minWidth: '140px' }}>
+                   <FancySelect 
+                     options={[{value:"minutes", label:"Minutes"}, {value:"hours", label:"Hours"}, {value:"days", label:"Days"}]}
+                     value={lastReportUnit} 
+                     onChange={setLastReportUnit} 
+                     disabled={locked} 
+                     searchable={false}
+                   />
+                </div>
               </div>
               <div className="help-text">Max time allowed since last BigFix report.</div>
             </div>
-            {!isLinux && <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px solid var(--border)' }}><Switch checked={checkService} onChange={setCheckService} label="Check Window Update Service" subLabel="Fail health check if 'wuauserv' is not running." disabled={locked} /></div>}
+            {!isLinux && <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px solid var(--border)' }}><Switch id="Check Window Update Service" checked={checkService} onChange={setCheckService} disabled={locked} /></div>}
           </div>
         </Section>
         <Section title="Process Gates & Controls" icon="⚙️">
-          <Switch checked={requireChg} onChange={setRequireChg} label="ITSM Change Required" subLabel="Validate CHG status at 'Implement' stage before proceeding." disabled={locked} />
+          <Switch id="ITSM Change Required" checked={requireChg} onChange={setRequireChg} disabled={locked} />
           
           {!isEUC && (
             <>
-              <Switch checked={cloneVM} onChange={setCloneVM} label="Clone VM" subLabel="Create a full clone of the VM before patching." disabled={locked} />
-              <Switch checked={snapshotVM} onChange={setSnapshotVM} label="Snapshot VM" subLabel="Trigger a VM snapshot for quick rollback capability." disabled={locked} />
+              <Switch id="Clone VM" checked={cloneVM} onChange={setCloneVM} disabled={locked} />
+              <Switch id="Snapshot VM" checked={snapshotVM} onChange={setSnapshotVM} disabled={locked} />
               
-              {/* FIX 4: Hide these entire toggles for NMOs */}
               {isAdmin && (
-                  <div style={{marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16}}>
-                     <Switch 
-                       checked={enableSandbox} 
-                       onChange={setEnableSandbox} 
-                       label="Enable Sandbox Stage" 
-                       subLabel="Include Sandbox verification in the patch workflow." 
-                       disabled={locked} 
-                     />
-                     <Switch 
-                       checked={enablePilot} 
-                       onChange={setEnablePilot} 
-                       label="Enable Pilot Stage" 
-                       subLabel="Include Pilot group deployment in the patch workflow." 
-                       disabled={locked} 
-                     />
+                  <div style={{marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 16, display: 'flex', flexDirection: 'column', gap: '12px'}}>
+                     <Switch id="Enable Sandbox Stage" checked={enableSandbox} onChange={setEnableSandbox} disabled={locked} />
+                     <Switch id="Enable Pilot Stage" checked={enablePilot} onChange={setEnablePilot} disabled={locked} />
                   </div>
               )}
             </>
           )}
         </Section>
         <Section title="Notifications" icon="📬">
-          <Switch checked={!!env.autoMail} onChange={(val) => setEnv(f => ({ ...f, autoMail: val }))} label="Pre-Patch Notifications" subLabel="Email stakeholders when a new patch cycle is triggered." disabled={locked} />
-          <Switch checked={!!env.postMail} onChange={(val) => setEnv(f => ({ ...f, postMail: val }))} label="Post-Patch Report" subLabel="Email results summary after action completion." disabled={locked} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <Switch id="Pre-Patch Notifications" checked={!!env.autoMail} onChange={(val) => setEnv(f => ({ ...f, autoMail: val }))} disabled={locked} />
+              <Switch id="Post-Patch Report" checked={!!env.postMail} onChange={(val) => setEnv(f => ({ ...f, postMail: val }))} disabled={locked} />
+          </div>
         </Section>
       </div>
       <div className="footer-actions">
-        <button className="btn secondary" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(1); setLastReportUnit("days"); setSuccessThreshold(90); setAllowableCriticalHF(0); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
-        <button className="btn outline small" onClick={save} disabled={busy || locked}>{busy ? "Saving Settings..." : "Save Configuration"}</button>
+        <button className="btn outline" disabled={locked} onClick={() => { if(!locked) { setDisk(10); setRequireChg(true); setCheckService(false); setCloneVM(false); setSnapshotVM(false); setEnableSandbox(true); setEnablePilot(true); setLastReportValue(1); setLastReportUnit("days"); setSuccessThreshold(90); setAllowableCriticalHF(0); setEnv(f => ({ ...f, autoMail: false, postMail: false })); } }}>Reset to Defaults</button>
+        <button className="btn pri small" onClick={save} disabled={busy || locked}>{busy ? "Saving Settings..." : "Save Configuration"}</button>
       </div>
     </section>
   );

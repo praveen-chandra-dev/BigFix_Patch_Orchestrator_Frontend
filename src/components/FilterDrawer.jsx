@@ -1,56 +1,18 @@
 // src/components/FilterDrawer.jsx
-import React, { useState, useEffect, useRef } from 'react';
-
-const DrawerSelect = ({ options, value, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e) => { 
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false); 
-    };
-    document.addEventListener("mousedown", handleClickOutside); 
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedLabel = options.find(o => String(o.value) === String(value))?.label || "Select";
-
-  return (
-    <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""}`} ref={ref} style={{ position: 'relative', width: '100%' }}>
-      <button type="button" className="fx-trigger" onClick={() => setOpen(!open)} style={{ height: '36px', minHeight: '36px', padding: '0 12px', background: 'var(--panel)' }}>
-        <span className="fx-value" style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedLabel}</span>
-        <span className="fx-chevron" style={{ fontSize: '10px', marginLeft: '8px' }}>▼</span>
-      </button>
-      {open && (
-        <div className="fx-menu" style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, minWidth: '100%', width: 'max-content', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', border: '1px solid var(--border)', zIndex: 99999, background: 'var(--panel)', borderRadius: '6px' }}>
-          <div className="fx-menu-inner" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-            {options.map((opt) => {
-              const isSelected = String(value) === String(opt.value);
-              return (
-                <div key={opt.value} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={() => { onChange(opt.value); setOpen(false); }} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
-                  <span className="fx-label">{opt.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+import React, { useState, useEffect } from 'react';
+import FancySelect from './common/FancySelect';
 
 export default function FilterDrawer({ isOpen, onClose, filters, setFilters, globalLogic, setGlobalLogic, propertyOptions }) {
   const [draftFilters, setDraftFilters] = useState([]);
   const [draftLogic, setDraftLogic] = useState("AND");
 
-  // Fix: Only run when isOpen transitions to true to prevent overwriting inputs on background renders
   useEffect(() => {
     if (isOpen) {
       if (filters && filters.length > 0) setDraftFilters(JSON.parse(JSON.stringify(filters)));
       else setDraftFilters([{ logic: 'Single', conds: [{ column: propertyOptions[0]?.value || '', operator: 'contains', value: '' }] }]);
       setDraftLogic(globalLogic || "AND");
     }
-  }, [isOpen]);
+  }, [isOpen, filters, globalLogic, propertyOptions]);
 
   const updateBlockLogic = (bIdx, logic) => {
     const d = [...draftFilters]; d[bIdx].logic = logic;
@@ -118,11 +80,11 @@ export default function FilterDrawer({ isOpen, onClose, filters, setFilters, glo
                     <div className="filter-row">
                       <div className="filter-col">
                         <label>Property</label>
-                        <DrawerSelect options={propertyOptions} value={cond.column} onChange={v => updateCond(bIdx, cIdx, "column", v)} />
+                        <FancySelect options={propertyOptions} value={cond.column} onChange={v => updateCond(bIdx, cIdx, "column", v)} />
                       </div>
                       <div className="filter-col">
                         <label>Operator</label>
-                        <DrawerSelect options={operatorOptions} value={cond.operator} onChange={v => updateCond(bIdx, cIdx, "operator", v)} />
+                        <FancySelect options={operatorOptions} value={cond.operator} onChange={v => updateCond(bIdx, cIdx, "operator", v)} />
                       </div>
                       <div className="filter-col flex-15">
                         <label>Value</label>

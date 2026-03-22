@@ -1,53 +1,7 @@
 // src/modules/risk/dashboard_component/PatchDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
-
-function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
-    const visibleCols = columns.filter(c => c.show);
-    const headers = visibleCols.map(c => c.label);
-    const triggerDownload = (content, type, ext) => {
-        const blob = new Blob([content], { type });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `${filenamePrefix}.${ext}`;
-        a.click(); URL.revokeObjectURL(url);
-    };
-    if (format === 'JSON') {
-        const json = dataToExport.map(row => { let obj = {}; visibleCols.forEach(c => obj[c.label] = getVal(row, c.id)); return obj; });
-        triggerDownload(JSON.stringify(json, null, 2), "application/json", "json");
-    } else if (format === 'XML') {
-        let xml = '<?xml version="1.0" encoding="UTF-8"?><rows>\n';
-        dataToExport.forEach(row => {
-            xml += '  <row>\n';
-            visibleCols.forEach(c => { const tag = c.label.replace(/[^a-zA-Z0-9]/g, '_'); xml += `    <${tag}>${getVal(row, c.id) || ''}</${tag}>\n`; });
-            xml += '  </row>\n';
-        });
-        xml += '</rows>'; triggerDownload(xml, "application/xml", "xml");
-    } else if (format === 'HTML') {
-        let html = '<table border="1"><thead><tr>'; headers.forEach(h => html += `<th>${h}</th>`); html += '</tr></thead><tbody>';
-        dataToExport.forEach(row => { html += '<tr>'; visibleCols.forEach(c => html += `<td>${getVal(row, c.id) || ''}</td>`); html += '</tr>'; });
-        html += '</tbody></table>'; triggerDownload(html, "text/html", "html");
-    } else if (format === 'TXT') {
-        const txt = [headers.join('\t'), ...dataToExport.map(r => visibleCols.map(c => getVal(r, c.id) || '').join('\t'))].join('\n');
-        triggerDownload(txt, "text/plain", "txt");
-    } else if (format === 'PDF') {
-        const loadScript = (src) => new Promise(resolve => {
-            if (document.querySelector(`script[src="${src}"]`)) return resolve();
-            const script = document.createElement('script'); script.src = src; script.onload = resolve; document.body.appendChild(script);
-        });
-        Promise.all([
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
-            loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js')
-        ]).then(() => {
-            const { jsPDF } = window.jspdf; const doc = new jsPDF();
-            doc.text(`Export: ${filenamePrefix}`, 14, 15);
-            const body = dataToExport.map(row => visibleCols.map(c => getVal(row, c.id) || ''));
-            doc.autoTable({ head: [headers], body: body, startY: 20 }); doc.save(`${filenamePrefix}.pdf`);
-        });
-    } else { 
-        const csv = [headers.join(','), ...dataToExport.map(r => visibleCols.map(c => `"${String(getVal(r, c.id) || '').replace(/"/g, '""')}"`).join(','))].join('\n');
-        triggerDownload(csv, "text/csv", "csv");
-    }
-}
+import { performExport } from "../../../utils/exportUtils";
+import Paginator from "../../../components/common/Paginator";
 
 const getScoreColorClass = (score) => {
   if (score >= 90) return "score-critical";
@@ -115,7 +69,6 @@ export default function PatchDashboard({
       const devices = patch.applicable_computers || [];
       const score = Number(patch.final_score || 0);
 
-      // Map Actual Text String FIRST
       const sevRaw = String(patch.severity || patch.source_severity || "").toUpperCase().trim();
       let finalSev = "UNSPECIFIED";
       if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW", "UNSPECIFIED"].includes(sevRaw)) {
@@ -309,11 +262,7 @@ export default function PatchDashboard({
     return sortable;
   }, [filteredPatches, sortConfig]);
 
-  const totalPages = Math.ceil(sortedPatches.length / rowsPerPage);
-  const paginatedPatches = sortedPatches.slice(
-    (currentPage - 1) * rowsPerPage,
-    currentPage * rowsPerPage,
-  );
+  const paginatedPatches = sortedPatches.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   const handleSort = (key) =>
     setSortConfig((prev) => ({
@@ -341,39 +290,11 @@ export default function PatchDashboard({
   };
 
   const handleCveRedirect = (cve) => {
-    navigate(
-      "cve",
-      [
-        {
-          conds: [
-            {
-              column: "cve_id",
-              operator: "=",
-              value: cve,
-            },
-          ],
-        },
-      ],
-      "AND",
-    );
+    navigate("cve", [{ conds: [{ column: "cve_id", operator: "=", value: cve }] }], "AND");
   };
 
   const handleDeviceRedirect = (device) => {
-    navigate(
-      "computer",
-      [
-        {
-          conds: [
-            {
-              column: "device_name",
-              operator: "contains",
-              value: device,
-            },
-          ],
-        },
-      ],
-      "AND",
-    );
+    navigate("computer", [{ conds: [{ column: "device_name", operator: "contains", value: device }] }], "AND");
   };
 
   return (
@@ -552,7 +473,7 @@ export default function PatchDashboard({
           borderRadius: 0,
         }}
       >
-        <table>
+        <table style={{ tableLayout: "fixed", width: "100%" }}>
           <thead className="kpi-th-sticky">
             <tr>
               {cols.find((c) => c.id === "patch_id")?.show && (
@@ -719,89 +640,7 @@ export default function PatchDashboard({
         </table>
       </div>
 
-      <div
-        className="pagination"
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          alignItems: "center",
-          padding: "16px 32px",
-          gap: "24px",
-          margin: "0 -32px",
-          width: "calc(100% + 64px)",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span className="pager-info">Rows per page:</span>
-          <select
-            className="control"
-            style={{ width: "70px", height: "32px", padding: "0 8px" }}
-            value={rowsPerPage}
-            onChange={(e) => {
-              setRowsPerPage(Number(e.target.value));
-              setCurrentPage(1);
-            }}
-          >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </div>
-        <span
-          className="pager-info"
-          style={{ fontSize: "13px", color: "var(--muted)" }}
-        >
-          {sortedPatches.length > 0 ? (currentPage - 1) * rowsPerPage + 1 : 0}-
-          {Math.min(currentPage * rowsPerPage, sortedPatches.length)} of{" "}
-          {sortedPatches.length}
-        </span>
-        <div className="pager-btns" style={{ display: "flex", gap: "4px" }}>
-          <button
-            className="pager-btn"
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage((p) => p - 1)}
-          >
-            &lt;
-          </button>
-          <button
-            className={`pager-btn ${currentPage === 1 ? "active" : ""}`}
-            onClick={() => setCurrentPage(1)}
-          >
-            1
-          </button>
-          {totalPages > 1 && (
-            <button
-              className={`pager-btn ${currentPage === 2 ? "active" : ""}`}
-              onClick={() => setCurrentPage(2)}
-            >
-              2
-            </button>
-          )}
-          {totalPages > 2 && (
-            <span style={{ padding: "0 4px", color: "var(--muted)" }}>..</span>
-          )}
-          {totalPages > 2 && currentPage > 2 && currentPage < totalPages && (
-            <button className="pager-btn active">{currentPage}</button>
-          )}
-          {totalPages > 2 && (
-            <button
-              className={`pager-btn ${currentPage === totalPages ? "active" : ""}`}
-              onClick={() => setCurrentPage(totalPages)}
-            >
-              {totalPages}
-            </button>
-          )}
-          <button
-            className="pager-btn"
-            disabled={currentPage === totalPages || totalPages === 0}
-            onClick={() => setCurrentPage((p) => p + 1)}
-          >
-            &gt;
-          </button>
-        </div>
-      </div>
+      <Paginator total={sortedPatches.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
     </div>
   );
 }
