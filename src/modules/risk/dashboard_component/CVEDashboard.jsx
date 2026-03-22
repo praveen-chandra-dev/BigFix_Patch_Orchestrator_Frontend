@@ -1,5 +1,6 @@
 // src/modules/risk/dashboard_component/CVEDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import api from "../../../api/api";
 import { performExport } from "../../../utils/exportUtils";
 import Paginator from "../../../components/common/Paginator";
 
@@ -32,6 +33,53 @@ export default function CVEDashboard({
     { id: "device_count", label: "Devices", show: true },
   ]);
 
+  // Store baseline patch IDs for filtering
+  const [baselinePatchMap, setBaselinePatchMap] = useState(() => {
+    const map = {};
+    baselines.forEach(b => {
+      const name = (b.baseline_name || b.name || "").toLowerCase();
+      const patchIds = (b.patch_ids || []).map(id => String(id).replace(/^BIGFIX-/i, "").trim());
+      if (patchIds.length) map[name] = new Set(patchIds);
+    });
+    return map;
+  });
+
+  // Fetch full baseline list (with patch IDs) when needed
+  useEffect(() => {
+    const neededBaselines = new Set();
+    for (const block of parentFilters) {
+      for (const cond of block.conds || []) {
+        if (cond.column === "baseline_name" && cond.value) {
+          const name = String(cond.value).toLowerCase().trim();
+          if (!baselinePatchMap[name]) {
+            neededBaselines.add(name);
+          }
+        }
+      }
+    }
+    if (neededBaselines.size === 0) return;
+
+    const fetchBaselines = async () => {
+      try {
+        const res = await api.get("/baselines/list");
+        const raw = Array.isArray(res.data?.baselines) ? res.data.baselines : [];
+        const newMap = { ...baselinePatchMap };
+        for (const b of raw) {
+          const name = (b.baseline_name || b.name || "").toLowerCase();
+          const patchIds = (b.patches || []).map(p => {
+            const id = typeof p === 'object' ? p.patch_id : p;
+            return String(id).replace(/^BIGFIX-/i, "").trim();
+          }).filter(Boolean);
+          newMap[name] = new Set(patchIds);
+        }
+        setBaselinePatchMap(newMap);
+      } catch (err) {
+        console.warn("Failed to load baselines for filtering", err);
+      }
+    };
+    fetchBaselines();
+  }, [parentFilters, baselinePatchMap]);
+
   useEffect(() => {
     const handleOutside = (e) => {
       if (colRef.current && !colRef.current.contains(e.target))
@@ -56,17 +104,7 @@ export default function CVEDashboard({
     return map;
   }, [patches]);
 
-  const baselinePatchMap = useMemo(() => {
-    const map = {};
-    baselines.forEach((b) => {
-      const name = (b.baseline_name || b.name || "").toLowerCase();
-      const patchIds = (b.patch_ids || []).map((id) =>
-        String(id).replace(/^BIGFIX-/i, ""),
-      );
-      map[name] = patchIds;
-    });
-    return map;
-  }, [baselines]);
+  const baselinePatchMapMemo = baselinePatchMap; // use the state directly
 
   const cveExposure = useMemo(() => {
     const map = {};
@@ -121,19 +159,14 @@ export default function CVEDashboard({
             x.toLowerCase().includes(search),
           );
         } else if (c.column === "baseline_name") {
-          const matchedBaseline = baselines.find(
-            (b) => String(b.baseline_name || "").toLowerCase() === search,
-          );
-
-          if (!matchedBaseline) {
+          const baselineName = search;
+          const baselinePatchSet = baselinePatchMap[baselineName];
+          if (!baselinePatchSet) {
             condition = false;
           } else {
-            const baselinePatchIds = (matchedBaseline.patch_ids || []).map(
-              (id) => String(id).replace(/^BIGFIX-/i, ""),
-            );
-
-            condition = (cve.patches || []).some((p) =>
-              baselinePatchIds.includes(String(p).replace(/^BIGFIX-/i, "")),
+            // Check if any of the CVE's patches are in the baseline
+            condition = (cve.patches || []).some(patchId =>
+              baselinePatchSet.has(patchId)
             );
           }
         } else if (c.column === "device_name") {
@@ -392,7 +425,7 @@ export default function CVEDashboard({
           borderRadius: 0,
         }}
       >
-        <table>
+        <table style={{ width: "100%" }}>
           <thead className="kpi-th-sticky">
             <tr>
               {cols.find((c) => c.id === "cve_id")?.show && (

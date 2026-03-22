@@ -1,5 +1,6 @@
 // src/modules/risk/dashboard_component/PatchDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import api from "../../../api/api";
 import { performExport } from "../../../utils/exportUtils";
 import Paginator from "../../../components/common/Paginator";
 
@@ -14,7 +15,7 @@ const getScoreColorClass = (score) => {
 export default function PatchDashboard({
   patches = [],
   cves = [],
-  baselines = [],
+  baselines = [], // from parent, may be incomplete
   parentFilters = [],
   parentLogic = "AND",
   onDataLoaded,
@@ -38,6 +39,54 @@ export default function PatchDashboard({
     { id: "cve_count", label: "CVEs", show: true },
     { id: "device_count", label: "Devices", show: true },
   ]);
+
+  // Store baseline patch IDs for filtering
+  const [baselinePatchMap, setBaselinePatchMap] = useState(() => {
+    // Initialize from passed baselines if they already have patch_ids
+    const map = {};
+    baselines.forEach(b => {
+      const name = (b.baseline_name || b.name || "").toLowerCase();
+      const patchIds = (b.patch_ids || []).map(id => String(id).replace(/^BIGFIX-/i, "").trim());
+      if (patchIds.length) map[name] = new Set(patchIds);
+    });
+    return map;
+  });
+
+  // Fetch full baseline list (with patch IDs) when needed
+  useEffect(() => {
+    const neededBaselines = new Set();
+    for (const block of parentFilters) {
+      for (const cond of block.conds || []) {
+        if (cond.column === "baseline_name" && cond.value) {
+          const name = String(cond.value).toLowerCase().trim();
+          if (!baselinePatchMap[name]) {
+            neededBaselines.add(name);
+          }
+        }
+      }
+    }
+    if (neededBaselines.size === 0) return;
+
+    const fetchBaselines = async () => {
+      try {
+        const res = await api.get("/baselines/list");
+        const raw = Array.isArray(res.data?.baselines) ? res.data.baselines : [];
+        const newMap = { ...baselinePatchMap };
+        for (const b of raw) {
+          const name = (b.baseline_name || b.name || "").toLowerCase();
+          const patchIds = (b.patches || []).map(p => {
+            const id = typeof p === 'object' ? p.patch_id : p;
+            return String(id).replace(/^BIGFIX-/i, "").trim();
+          }).filter(Boolean);
+          newMap[name] = new Set(patchIds);
+        }
+        setBaselinePatchMap(newMap);
+      } catch (err) {
+        console.warn("Failed to load baselines for filtering", err);
+      }
+    };
+    fetchBaselines();
+  }, [parentFilters, baselinePatchMap]);
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -105,7 +154,7 @@ export default function PatchDashboard({
         if (!c.value) continue;
         validConds++;
         let condition = true;
-        const search = String(c.value).toLowerCase();
+        const search = String(c.value).toLowerCase().trim();
 
         if (c.column === "cve_id") {
           condition = (patch.cves || []).some((x) =>
@@ -125,9 +174,17 @@ export default function PatchDashboard({
             else if (c.operator === ">=") condition = field >= val;
             else if (c.operator === "<=") condition = field <= val;
           }
+        } else if (c.column === "baseline_name") {
+          const baselineName = search;
+          const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
+          const baselinePatchSet = baselinePatchMap[baselineName];
+          if (!baselinePatchSet) {
+            condition = false;
+          } else {
+            condition = baselinePatchSet.has(patchId);
+          }
         } else {
           let field;
-
           if (c.column === "severity") {
             field = String(patch.severity || "").toLowerCase();
           } else {
@@ -162,26 +219,20 @@ export default function PatchDashboard({
         },
       ];
     }
-
     return parentFilters;
   }, [parentFilters]);
 
   const filteredPatches = patchExposure.filter((patch) => {
     if (!normalizedFilters.length) return true;
-
     let globalMatch = parentLogic === "OR" ? false : true;
-
     for (let b of normalizedFilters) {
       let blockMatch = true;
       let validConds = 0;
-
       for (let c of b.conds) {
         if (!c.value) continue;
-
         validConds++;
-
         let condition = true;
-        const search = String(c.value).toLowerCase();
+        const search = String(c.value).toLowerCase().trim();
 
         if (c.column === "severity") {
           condition = String(patch.severity || "").toLowerCase() === search;
@@ -194,28 +245,10 @@ export default function PatchDashboard({
             .toLowerCase()
             .includes(search);
         } else if (c.column === "baseline_name") {
-          const matchedBaseline = baselines.find((b) =>
-            String(b.baseline_name || "")
-              .toLowerCase()
-              .includes(search),
-          );
-
-          if (!matchedBaseline) {
-            condition = false;
-          } else {
-            const baselinePatchIds = (matchedBaseline.patch_ids || []).map(
-              (id) =>
-                String(id)
-                  .replace(/^BIGFIX-/i, "")
-                  .trim(),
-            );
-
-            const patchId = String(patch.patch_id)
-              .replace(/^BIGFIX-/i, "")
-              .trim();
-
-            condition = baselinePatchIds.includes(patchId);
-          }
+          const baselineName = search;
+          const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
+          const baselinePatchSet = baselinePatchMap[baselineName];
+          condition = baselinePatchSet ? baselinePatchSet.has(patchId) : false;
         } else if (c.column === "cve_id") {
           condition = (patch.cves || []).some(
             (x) => String(x).toLowerCase() === search,
@@ -225,17 +258,14 @@ export default function PatchDashboard({
             (x) => String(x).toLowerCase() === search,
           );
         }
-
         blockMatch = blockMatch && condition;
       }
-
       if (validConds > 0)
         globalMatch =
           parentLogic === "OR"
             ? globalMatch || blockMatch
             : globalMatch && blockMatch;
     }
-
     return globalMatch;
   });
 

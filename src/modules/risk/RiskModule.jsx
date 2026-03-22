@@ -28,8 +28,6 @@ export default function RiskModule({
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPatches, setSelectedPatches] = useState({});
 
-  useEffect(() => {}, [filters]);
-
   useEffect(() => {
     if (activeTab !== "dashboard") {
       setFilters([]);
@@ -42,31 +40,24 @@ export default function RiskModule({
     if (setRiskTab) setRiskTab("baseline");
   };
 
-  const handleRefresh = useCallback(() => {
-    setRefreshTrigger((prev) => prev + 1);
-    setLastUpdated(new Date().toLocaleString());
-  }, []);
-
   const loadPatches = useCallback(async () => {
     setPatchLoading(true);
     try {
       const res = await api.get("/patches");
-      // FIXED: Safely extract the array whether it's wrapped in { data: [] } or not
       const patchData = Array.isArray(res.data) ? res.data : (res.data?.data || []);
       setPatches(patchData);
-      if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
     } catch (err) {
       console.error("Failed to load patches", err);
     } finally {
       setPatchLoading(false);
     }
-  }, [refreshTrigger]);
+  }, []);
 
   const loadBaselines = useCallback(async () => {
     try {
+      // 🚀 Explicitly calling the pure BigFix list for editor
       const res = await api.get("/baselines/list");
       const raw = res.data;
-
       const normalized = Array.isArray(raw)
         ? raw
         : Array.isArray(raw?.data)
@@ -74,16 +65,33 @@ export default function RiskModule({
           : Array.isArray(raw?.baselines)
             ? raw.baselines
             : [];
-
       setBaselines(normalized);
     } catch (err) {
       console.error("Failed to load baselines", err);
     }
   }, []);
 
+  // 🚀 FIXED: Global Refresh triggers backend Prism sync AND reloads component data
+  const handleRefresh = useCallback(async () => {
+    try {
+        // Send a ping to both endpoints with refresh=true to wake up caches
+        await Promise.all([
+           api.get("/baselines/list?refresh=true").catch(()=>null),
+           api.get("/baselines?refresh=true").catch(()=>null)
+        ]);
+    } catch(e) {}
+    
+    // Now trigger React children to remount and re-fetch
+    setRefreshTrigger((prev) => prev + 1);
+    await loadBaselines();
+    await loadPatches();
+    setLastUpdated(new Date().toLocaleString());
+  }, [loadBaselines, loadPatches]);
+
   useEffect(() => {
     loadPatches();
     loadBaselines();
+    if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
   }, [loadPatches, loadBaselines]);
 
   const propertyOptions = useMemo(() => {
@@ -291,6 +299,7 @@ export default function RiskModule({
           
           <div style={{ display: activeTab === "patches" ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
              <PatchTab
+                refreshTrigger={refreshTrigger}
                 patches={patches}
                 patchLoading={patchLoading}
                 addBaseline={addBaseline}
@@ -310,6 +319,7 @@ export default function RiskModule({
 
           <div style={{ display: activeTab === "baseline" ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
              <BaselineTab
+                refreshTrigger={refreshTrigger} // 🚀 Ensure BaselineTab unmounts/remounts cleanly
                 baselines={baselines}
                 pendingPatches={pendingPatches}
                 clearPendingPatches={() => setPendingPatches([])}
@@ -320,7 +330,9 @@ export default function RiskModule({
 
           {activeTab === "dashboard" && (
              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                {/* 🚀 FIXED: Dashboard forces remount on refresh */}
                 <DashboardTab
+                  key={`dash-${refreshTrigger}`} 
                   baselines={baselines}
                   activeSection={activeSubTab}
                   onNavigateSubTab={setRiskSubTab}

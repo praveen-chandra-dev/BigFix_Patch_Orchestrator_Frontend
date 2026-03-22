@@ -61,16 +61,17 @@ const RiskDropdown = ({ options, value, onChange, width = "100%", disabled = fal
   );
 };
 
-export default function BaselineTab({ pendingPatches = [], clearPendingPatches, setEditingBaseline, onGoToPatches }) {
+export default function BaselineTab({ pendingPatches = [], clearPendingPatches, setEditingBaseline, onGoToPatches, refreshTrigger }) {
   const [patches, setPatches] = useState([]);
   const [baselineName, setBaselineName] = useState("");
+  const [description, setDescription] = useState("");
   const [siteType, setSiteType] = useState("Custom");
   const [selectedSite, setSelectedSite] = useState("");
-  const [isExternal, setIsExternal] = useState(false); 
+  const [isExternal, setIsExternal] = useState(false);
 
   const [baselineList, setBaselineList] = useState([]);
   const [allSites, setAllSites] = useState([]);
-  const [isMaster, setIsMaster] = useState(null); 
+  const [isMaster, setIsMaster] = useState(null);
 
   const [showCVE, setShowCVE] = useState(false);
   const [cveData, setCveData] = useState([]);
@@ -83,7 +84,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
   const [patchLookup, setPatchLookup] = useState({});
 
   const [baselineDetails, setBaselineDetails] = useState(null);
-  const [loadingDetails, setLoadingDetails] = useState(false); // ADDED STATE FOR LOADER
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   useEffect(() => {
      if (setEditingBaseline) setEditingBaseline(!!selectedBaselineId && !isExternal);
@@ -100,7 +101,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
       } else {
          setPatches(pendingPatches);
       }
-      if (clearPendingPatches) clearPendingPatches(); 
+      if (clearPendingPatches) clearPendingPatches();
     }
   }, [pendingPatches, clearPendingPatches, patches.length]);
 
@@ -109,7 +110,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
       const res = await api.get("/baselines/list");
       const rawArray = Array.isArray(res.data?.baselines) ? res.data.baselines : [];
       const formatted = rawArray.map((b) => ({
-        id: b.id, 
+        id: b.id,
         name: b.name || "Unnamed Baseline",
         siteType: String(b.siteType || "").toLowerCase(),
         siteName: b.siteName,
@@ -122,9 +123,10 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
     }
   };
 
+  // 🚀 FIXED: List & Sites refresh via Global Trigger
   useEffect(() => {
     refreshList();
-  }, []);
+  }, [refreshTrigger]);
 
   useEffect(() => {
     api.get("/baselines/risk-sites").then((res) => {
@@ -155,7 +157,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
         setAllSites([]);
         setIsMaster(false);
     });
-  }, []);
+  }, [refreshTrigger]);
 
   const filteredSites = useMemo(() => {
      return allSites.filter(site => site.type === siteType);
@@ -181,7 +183,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
       .catch((err) => {
         console.error("Failed to load patches for lookup", err);
       });
-  }, []);
+  }, [refreshTrigger]);
 
   const movePatch = (index, direction) => {
     if (isExternal) return;
@@ -224,6 +226,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
     setBaselineDetails(null);
     setSelectedBaselineId(null);
     setBaselineName("");
+    setDescription("");
     setShowCVE(false);
     setIsExternal(false);
     if (clearPatches) setPatches([]);
@@ -240,6 +243,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
       setCreatingBaseline(true);
       await api.post("/baselines/create", {
         name: baselineName,
+        description: description,
         siteType,
         site: selectedSite,
         patches: patches.map((p) => ({
@@ -250,7 +254,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
         })),
       });
 
-      alert("Baseline created successfully");
+      alert("Baseline created successfully!");
       clearEditor();
       refreshList();
     } catch (err) {
@@ -270,6 +274,7 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
         const b = baselineList.find(x => x.id === selectedBaselineId);
         await api.put(`/baselines/${selectedBaselineId}?siteType=${b?.siteType}&siteName=${b?.siteName}`, {
             name: baselineName,
+            description: description,
             patches: patches.map((p) => ({
                 patch_id: String(p.patch_id).replace(/^BIGFIX-/, ""),
                 patch_name: p.patch_name,
@@ -277,8 +282,9 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
                 site_url: p.site_url 
             }))
         });
-        alert("Baseline updated successfully");
+        
         clearEditor();
+        alert("Baseline updated successfully!\nNote: It may take 10-15 seconds for BigFix to fully reflect these changes in the list.");
         refreshList();
     } catch (e) {
         alert(e.response?.data?.error || e.response?.data?.details || "Update failed");
@@ -287,19 +293,28 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
     }
   };
 
-  const fetchBaselineDetails = async (b) => {
+ const fetchBaselineDetails = async (b) => {
     try {
-      setLoadingDetails(true); // START LOADING SPINNER
+      setLoadingDetails(true);
+      setPatches([]); 
+      
       const res = await api.get(`/baselines/${b.id}?siteType=${b.siteType}&siteName=${b.siteName}`);
       const data = res.data?.data?.[0] || res.data;
       
       setBaselineDetails(data);
       setSelectedBaselineId(b.id);
       setBaselineName(data.baseline_name || data.name || "");
+      setDescription(data.description || ""); 
       setShowCVE(false);
       
       const extCheck = b.siteType === 'external';
       setIsExternal(extCheck);
+      
+      if (b.siteType) {
+        const capitalizedType = b.siteType.charAt(0).toUpperCase() + b.siteType.slice(1);
+        setSiteType(capitalizedType);
+      }
+      setSelectedSite(data.site_name || b.siteName || "");
       
       const loadedPatches = (data.patches || data.patch_ids || []).map(p => {
           const isObj = typeof p === 'object';
@@ -323,11 +338,10 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
       console.error(err);
       alert("Failed to fetch baseline details");
     } finally {
-      setLoadingDetails(false); // STOP LOADING SPINNER
+      setLoadingDetails(false);
     }
   };
 
-  // BACKGROUND RESOLVER FOR MISSING NAMES
   useEffect(() => {
       const unknownIds = patches.filter(p => p.patch_name === "Unknown Patch").map(p => String(p.patch_id).replace(/^BIGFIX-/, ""));
       if (unknownIds.length > 0 && baselineDetails) {
@@ -371,226 +385,495 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
   if (isMaster === null) return <div className="app-loading-content">Loading Permissions...</div>;
 
   return (
-    // NEW GRID LAYOUT: Fixes visual overlapping and provides robust responsive structure
-    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: '20px', height: 'calc(100vh - 140px)', minHeight: '500px' }}>
+    <div className="baseline-tab-container" style={{
+      display: 'grid',
+      gridTemplateColumns: 'minmax(300px, 380px) 1fr',
+      gap: '24px',
+      height: 'calc(100vh - 140px)',
+      minHeight: '500px',
+      padding: '0 0 8px 0'
+    }}>
       
       {/* LEFT PANEL: BASELINE LIST */}
-      <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-        <div style={{ padding: '16px', background: 'var(--panel-2)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>Baselines</span>
-            <button className="btn outline small" style={{ height: '28px', padding: '0 12px' }} onClick={() => clearEditor()}>+ New</button>
+      <div className="baseline-list-panel" style={{
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--panel)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        overflow: 'hidden',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        <div style={{
+          padding: '18px 20px',
+          background: 'var(--panel-2)',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text)' }}>Baselines</span>
         </div>
 
         <div style={{ flex: 1, overflowY: "auto" }}>
-            <table className="baseline-list-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--panel-2)' }}>
-                <tr>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>NAME</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--muted)', borderBottom: '1px solid var(--border)', width: '80px' }}>STATUS</th>
+          <table className="baseline-list-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--panel-2)' }}>
+              <tr>
+                <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 500, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>NAME</th>
+                <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 500, color: 'var(--muted)', borderBottom: '1px solid var(--border)', width: '80px' }}>STATUS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {baselineList.map((b) => (
+                <tr
+                  key={b.id}
+                  onClick={() => fetchBaselineDetails(b)}
+                  style={{
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--border)',
+                    background: b.id === selectedBaselineId ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                    transition: 'background 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (b.id !== selectedBaselineId) e.currentTarget.style.background = 'var(--bg-hover)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (b.id !== selectedBaselineId) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <td style={{ padding: '14px 20px', wordBreak: 'break-word', fontWeight: 500, color: 'var(--primary)' }}>{b.name}</td>
+                  <td style={{ padding: '14px 20px' }}><span className="pill green text-10" style={{ background: '#e6f7e6', color: '#2e7d32', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 500 }}>READY</span></td>
                 </tr>
-              </thead>
-              <tbody>
-                {baselineList.map((b) => (
-                  <tr
-                    key={b.id}
-                    onClick={() => fetchBaselineDetails(b)}
-                    style={{ cursor: 'pointer', borderBottom: '1px solid var(--border)', background: b.id === selectedBaselineId ? 'var(--bg)' : 'transparent' }}
-                  >
-                    <td style={{ padding: '12px 16px', wordBreak: 'break-word', fontWeight: 500, color: 'var(--primary)' }}>{b.name}</td>
-                    <td style={{ padding: '12px 16px' }}><span className="pill green text-10">READY</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         {!isExternal && selectedBaselineId && (
-            <div style={{ padding: "16px", borderTop: "1px solid var(--border)", background: 'var(--panel-2)' }}>
-              <button
-                className="btn danger"
-                onClick={deleteBaseline}
-                style={{ width: "100%", background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)' }}
-              >
-                Delete Baseline
-              </button>
-            </div>
+          <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)", background: 'var(--panel-2)' }}>
+            <button
+              className="btn danger"
+              onClick={deleteBaseline}
+              style={{
+                width: "100%",
+                background: 'transparent',
+                border: '1px solid var(--danger)',
+                color: 'var(--danger)',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                fontWeight: 500,
+                transition: 'all 0.2s'
+              }}
+            >
+              Delete Baseline
+            </button>
+          </div>
         )}
       </div>
 
       {/* RIGHT PANEL: EDITOR */}
-      <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
+      <div className="baseline-editor-panel" style={{
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'var(--panel)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        overflow: 'hidden',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
         
         {loadingDetails ? (
-           // LOADING SPINNER ADDED HERE
-           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)' }}>
-               <svg className="spinner" viewBox="0 0 50 50" style={{ width: 40, height: 40, stroke: 'var(--primary)', marginBottom: '16px' }}><circle cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle></svg>
-               <div style={{ fontSize: '15px', fontWeight: 500 }}>Loading Baseline Data...</div>
-           </div>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            color: 'var(--muted)',
+            gap: '16px'
+          }}>
+            <div className="spinner" style={{
+              width: '40px',
+              height: '40px',
+              border: '3px solid rgba(var(--primary-rgb), 0.2)',
+              borderTopColor: 'var(--primary)',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite'
+            }} />
+            <div style={{ fontSize: '15px', fontWeight: 500 }}>Loading Baseline Data...</div>
+          </div>
         ) : patches.length > 0 || baselineName ? (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             
             {/* Editor Header */}
-            <div style={{ padding: "16px 24px", display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--panel-2)', borderBottom: '1px solid var(--border)' }}>
-                <div>
-                    <h3 style={{ margin: 0, fontSize: "16px", color: "var(--primary)" }}>{selectedBaselineId ? `Editing: ${baselineDetails?.baseline_name || baselineName}` : "Create New Baseline"}</h3>
-                    {selectedBaselineId && <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>BigFix ID: {selectedBaselineId}</div>}
-                </div>
-                <button className="close-btn" onClick={() => clearEditor()}>✕</button>
+            <div style={{
+              padding: "16px 24px",
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'var(--panel-2)',
+              borderBottom: '1px solid var(--border)'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: "var(--primary)" }}>
+                  {selectedBaselineId ? `Editing: ${baselineDetails?.baseline_name || baselineName}` : "Create New Baseline"}
+                </h3>
+                {selectedBaselineId && (
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
+                    BigFix ID: {selectedBaselineId}
+                  </div>
+                )}
+              </div>
+              <button
+                className="close-btn"
+                onClick={() => clearEditor()}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  fontSize: '20px',
+                  cursor: 'pointer',
+                  color: 'var(--muted)',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'color 0.2s'
+                }}
+              >
+                ✕
+              </button>
             </div>
 
             {/* Scrollable Body */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-                {isExternal && (
-                    <div style={{ padding: '12px', background: '#e0f2fe', color: '#0369a1', borderRadius: '8px', border: '1px solid #bae6fd', marginBottom: '24px', fontSize: '13px', fontWeight: 500, display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                        This baseline belongs to an External Site. It is read-only and cannot be modified or deleted.
+              {isExternal && (
+                <div style={{
+                  padding: '12px 16px',
+                  background: '#eef2ff',
+                  color: '#1e40af',
+                  borderRadius: '10px',
+                  border: '1px solid #c7d2fe',
+                  marginBottom: '24px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  display: 'flex',
+                  gap: '10px',
+                  alignItems: 'center'
+                }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  <span>This baseline belongs to an External Site. It is read-only and cannot be modified or deleted.</span>
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '16px' }}>
+                <div className="field m-0">
+                  <label className="label" style={{ fontWeight: 500, marginBottom: '6px', display: 'block' }}>Baseline Name</label>
+                  <input
+                    className="control"
+                    value={baselineName}
+                    onChange={(e) => setBaselineName(e.target.value)}
+                    placeholder="Enter Baseline Name"
+                    disabled={isExternal}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border)',
+                      background: isExternal ? 'var(--bg)' : 'var(--panel)',
+                      transition: 'border-color 0.2s'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: isMaster ? '1fr 1fr' : '1fr', gap: '16px' }}>
+                  {isMaster && (
+                    <div className="field m-0">
+                      <label className="label" style={{ fontWeight: 500, marginBottom: '6px', display: 'block' }}>Site Type</label>
+                      <RiskDropdown
+                        value={isExternal ? "External" : siteType}
+                        disabled={!!selectedBaselineId || isExternal}
+                        onChange={(val) => {
+                          setSiteType(val);
+                          setSelectedSite("");
+                        }}
+                        options={isExternal ? [{value:"External", label:"External"}] : [{ value: "Master", label: "Master" }, { value: "Custom", label: "Custom" }]}
+                      />
                     </div>
-                )}
+                  )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                  <div className="field m-0">
-                    <label className="label">Baseline Name</label>
-                    <input
-                      className="control"
-                      value={baselineName}
-                      onChange={(e) => setBaselineName(e.target.value)}
-                      placeholder="Enter Baseline Name"
-                      disabled={isExternal}
-                    />
-                  </div>
+                  {(siteType === "Custom" || !isMaster || isExternal) && (
+                    <div className="field m-0">
+                      <label className="label" style={{ fontWeight: 500, marginBottom: '6px', display: 'block' }}>Target Site</label>
+                      <RiskDropdown
+                        value={isExternal ? baselineDetails?.site_name : selectedSite}
+                        disabled={!!selectedBaselineId || isExternal}
+                        onChange={(val) => setSelectedSite(val)}
+                        options={isExternal ? [{value: baselineDetails?.site_name, label: baselineDetails?.site_name}] : [{ value: "", label: "Select Site" }, ...filteredSites]}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: isMaster ? '1fr 1fr' : '1fr', gap: '16px' }}>
-                      {isMaster && (
-                          <div className="field m-0">
-                            <label className="label">Site Type</label>
-                            <RiskDropdown
-                              value={isExternal ? "External" : siteType}
-                              disabled={!!selectedBaselineId || isExternal} 
-                              onChange={(val) => {
-                                setSiteType(val);
-                                setSelectedSite(""); 
-                              }}
-                              options={isExternal ? [{value:"External", label:"External"}] : [{ value: "Master", label: "Master" }, { value: "Custom", label: "Custom" }]}
-                            />
+              <div className="field m-0" style={{ marginBottom: '28px' }}>
+                <label className="label" style={{ fontWeight: 500, marginBottom: '6px', display: 'block' }}>Description</label>
+                <textarea
+                  className="control"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Enter Baseline Description (Optional)"
+                  disabled={isExternal}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border)',
+                    background: isExternal ? 'var(--bg)' : 'var(--panel)',
+                    transition: 'border-color 0.2s',
+                    resize: 'vertical',
+                    fontFamily: 'inherit',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              {/* PATCH ORDER */}
+              <div style={{ marginBottom: "28px" }}>
+                <div style={{
+                  fontWeight: 600,
+                  color: "var(--text)",
+                  marginBottom: "12px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center"
+                }}>
+                  <span>Patch Order ({patches.length})</span>
+                  {patches.length > 0 && onGoToPatches && !isExternal && (
+                    <button
+                      className="btn outline small"
+                      onClick={onGoToPatches}
+                      style={{
+                        height: "32px",
+                        padding: "0 14px",
+                        borderRadius: "6px",
+                        fontWeight: 500
+                      }}
+                    >
+                      + Add Patches
+                    </button>
+                  )}
+                </div>
+
+                <div style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                  background: 'var(--panel)'
+                }}>
+                  {patches.map((p, index) => {
+                    const cleanId = String(p.patch_id).replace(/^BIGFIX-/, "");
+                    const patchName = p.patch_name || "Unknown Patch";
+                    
+                    return (
+                      <div
+                        key={`${p.patch_id}-${index}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: isExternal ? 'flex-start' : 'center',
+                          padding: '14px 20px',
+                          borderBottom: index < patches.length - 1 ? '1px solid var(--border)' : 'none',
+                          background: index % 2 === 0 ? 'transparent' : 'rgba(var(--bg), 0.5)',
+                          transition: 'background 0.15s'
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ display: "block", marginBottom: "6px", color: "var(--primary)", fontSize: '14px' }}>
+                            {index + 1}. {cleanId}
+                          </strong>
+                          <div style={{ color: "var(--muted)", fontSize: "13px", lineHeight: '1.4' }}>
+                            {patchName}
                           </div>
-                      )}
-
-                      {(siteType === "Custom" || !isMaster || isExternal) && (
-                        <div className="field m-0">
-                          <label className="label">Target Site</label>
-                          <RiskDropdown
-                            value={isExternal ? baselineDetails?.site_name : selectedSite}
-                            disabled={!!selectedBaselineId || isExternal} 
-                            onChange={(val) => setSelectedSite(val)}
-                            options={isExternal ? [{value: baselineDetails?.site_name, label: baselineDetails?.site_name}] : [{ value: "", label: "Select Site" }, ...filteredSites]}
-                          />
                         </div>
-                      )}
-                  </div>
-                </div>
 
-                {/* PATCH ORDER */}
-                <div style={{ marginBottom: "24px" }}>
-                  <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>Patch Order ({patches.length})</span>
-                    {patches.length > 0 && onGoToPatches && !isExternal && (
-                        <button className="btn outline small" onClick={onGoToPatches} style={{ height: "26px", padding: "0 10px" }}>
-                           + Add Patches
-                        </button>
-                    )}
-                  </div>
-
-                  <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-                    {patches.map((p, index) => {
-                      const cleanId = String(p.patch_id).replace(/^BIGFIX-/, "");
-                      const patchName = p.patch_name || "Unknown Patch";
-                      
-                      return (
-                          <div key={`${p.patch_id}-${index}`} style={{ display: 'flex', alignItems: isExternal ? 'flex-start' : 'center', padding: '12px 16px', borderBottom: index < patches.length - 1 ? '1px solid var(--border)' : 'none', background: index % 2 === 0 ? 'transparent' : 'var(--bg)' }}>
-                            <div style={{ flex: 1 }}>
-                              <strong style={{ display: "block", marginBottom: "4px", color: "var(--primary)" }}>
-                                {index + 1}. {cleanId}
-                              </strong>
-                              <div style={{ color: "var(--muted)", fontSize: "13px" }}>
-                                {patchName}
-                              </div>
-                            </div>
-
-                            {!isExternal && (
-                                <div style={{ display: "flex", gap: "6px" }}>
-                                  <button className="btn ghost small" style={{ padding: "0 8px", height: "28px" }} onClick={() => movePatch(index, -1)}>↑</button>
-                                  <button className="btn ghost small" style={{ padding: "0 8px", height: "28px" }} onClick={() => movePatch(index, 1)}>↓</button>
-                                  <button className="btn danger small" style={{ padding: "0 8px", height: "28px" }} onClick={() => removePatch(index)}>✕</button>
-                                </div>
-                            )}
+                        {!isExternal && (
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <button
+                              className="btn ghost small"
+                              onClick={() => movePatch(index, -1)}
+                              disabled={index === 0}
+                              style={{
+                                padding: "0 10px",
+                                height: "30px",
+                                borderRadius: "6px",
+                                opacity: index === 0 ? 0.4 : 1,
+                                cursor: index === 0 ? 'not-allowed' : 'pointer'
+                              }}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              className="btn ghost small"
+                              onClick={() => movePatch(index, 1)}
+                              disabled={index === patches.length - 1}
+                              style={{
+                                padding: "0 10px",
+                                height: "30px",
+                                borderRadius: "6px",
+                                opacity: index === patches.length - 1 ? 0.4 : 1,
+                                cursor: index === patches.length - 1 ? 'not-allowed' : 'pointer'
+                              }}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              className="btn danger small"
+                              onClick={() => removePatch(index)}
+                              style={{
+                                padding: "0 10px",
+                                height: "30px",
+                                borderRadius: "6px",
+                                background: 'transparent',
+                                border: '1px solid var(--danger)',
+                                color: 'var(--danger)'
+                              }}
+                            >
+                              ✕
+                            </button>
                           </div>
-                      );
-                    })}
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* CVE SECTION */}
+              {showCVE && (
+                <div style={{
+                  marginTop: '28px',
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "14px 20px",
+                    background: 'var(--panel-2)',
+                    borderBottom: '1px solid var(--border)'
+                  }}>
+                    <span style={{ fontWeight: 600, color: "var(--text)" }}>CVE Details ({cveData.length})</span>
+                    <button
+                      className="btn ghost small"
+                      onClick={() => setShowCVE(false)}
+                      style={{ padding: "4px 12px", borderRadius: "6px" }}
+                    >
+                      Hide
+                    </button>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="cve-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                      <thead style={{ background: 'var(--bg)' }}>
+                        <tr>
+                          <th style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', fontWeight: 500 }}>CVE</th>
+                          <th style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', fontWeight: 500 }}>Severity</th>
+                          <th style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', fontWeight: 500 }}>CVSS</th>
+                          <th style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', fontWeight: 500 }}>EPSS</th>
+                          <th style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', fontWeight: 500 }}>KEV</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cveData.length === 0 ? (
+                          <tr><td colSpan="5" style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>No CVE mappings found for these patches.</td></tr>
+                        ) : cveData.map((cve) => {
+                          const severityClass = cve.cvss_severity?.toLowerCase() || "low";
+                          return (
+                            <tr key={cve.cve_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '12px 16px', fontWeight: 500 }}>{cve.cve_id}</td>
+                              <td style={{ padding: '12px 16px' }}>
+                                <span className={`severity-badge severity-${severityClass}`} style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '20px',
+                                  fontSize: '11px',
+                                  fontWeight: 500,
+                                  background: severityClass === 'critical' ? '#ffebee' : severityClass === 'high' ? '#fff3e0' : '#e8f5e9',
+                                  color: severityClass === 'critical' ? '#c62828' : severityClass === 'high' ? '#ed6c02' : '#2e7d32'
+                                }}>
+                                  {cve.cvss_severity}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 16px' }}>{cve.cvss_base_score}</td>
+                              <td style={{ padding: '12px 16px' }}>{cve.epss_score}</td>
+                              <td style={{ padding: '12px 16px' }}>
+                                <span style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '20px',
+                                  fontSize: '11px',
+                                  fontWeight: 500,
+                                  background: cve.is_kev ? '#ffebee' : '#e8f5e9',
+                                  color: cve.is_kev ? '#c62828' : '#2e7d32'
+                                }}>
+                                  {cve.is_kev ? "Yes" : "No"}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-
-                {/* CVE SECTION */}
-                {showCVE && (
-                  <div style={{ marginTop: '24px', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: 'var(--panel-2)', borderBottom: '1px solid var(--border)' }}>
-                      <span style={{ fontWeight: 600, color: "var(--text)" }}>CVE Details ({cveData.length})</span>
-                      <button className="btn ghost small" onClick={() => setShowCVE(false)}>Hide</button>
-                    </div>
-
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="cve-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                        <thead style={{ background: 'var(--bg)' }}>
-                          <tr>
-                              <th style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>CVE</th>
-                              <th style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>Severity</th>
-                              <th style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>CVSS</th>
-                              <th style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>EPSS</th>
-                              <th style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>KEV</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cveData.length === 0 ? (
-                             <tr><td colSpan="5" style={{ textAlign: "center", padding: "20px", color: "var(--muted)" }}>No CVE mappings found for these patches.</td></tr>
-                          ) : cveData.map((cve) => {
-                            const severityClass = cve.cvss_severity?.toLowerCase() || "low";
-                            return (
-                              <tr key={cve.cve_id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                <td style={{ padding: '10px 16px', fontWeight: 500 }}>{cve.cve_id}</td>
-                                <td style={{ padding: '10px 16px' }}><span className={`severity-badge severity-${severityClass}`}>{cve.cvss_severity}</span></td>
-                                <td style={{ padding: '10px 16px' }}>{cve.cvss_base_score}</td>
-                                <td style={{ padding: '10px 16px' }}>{cve.epss_score}</td>
-                                <td style={{ padding: '10px 16px' }}><span className={cve.is_kev ? "kev-yes-badge" : "kev-no-badge"}>{cve.is_kev ? "Yes" : "No"}</span></td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
+              )}
             </div>
 
             {/* Sticky Editor Footer */}
-            <div style={{ padding: "16px 24px", borderTop: "1px solid var(--border)", background: 'var(--panel-2)', display: "flex", justifyContent: "space-between", alignItems: 'center' }}>
-              <button className="btn outline" onClick={fetchCVE} disabled={showCVE}>View CVE Details</button>
-              
+            <div style={{
+              padding: "16px 24px",
+              borderTop: "1px solid var(--border)",
+              background: 'var(--panel-2)',
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: 'center',
+              gap: '16px'
+            }}>
               {!isExternal && (
-                  <button
-                    className="btn pri"
-                    onClick={selectedBaselineId ? updateBaseline : createBaseline}
-                    disabled={creatingBaseline}
-                  >
-                    {creatingBaseline ? "Saving..." : selectedBaselineId ? "Update Baseline" : "Create Baseline"}
-                  </button>
+                <button
+                  className="btn pri"
+                  onClick={selectedBaselineId ? updateBaseline : createBaseline}
+                  disabled={creatingBaseline}
+                  style={{
+                    padding: '8px 24px',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    background: 'var(--primary)',
+                    color: 'white',
+                    border: 'none',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {creatingBaseline ? "Saving..." : selectedBaselineId ? "Update Baseline" : "Create Baseline"}
+                </button>
               )}
             </div>
           </div>
         ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)' }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="48" height="48" style={{ marginBottom: '16px', opacity: 0.5 }}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                <div style={{ fontSize: '16px', fontWeight: 500 }}>Select a Baseline to Edit</div>
-                <div style={{ fontSize: '13px', marginTop: '8px' }}>Or go to the Patches tab and select patches to create a new one.</div>
-            </div>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            color: 'var(--muted)',
+            textAlign: 'center',
+            padding: '40px'
+          }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="56" height="56" style={{ marginBottom: '16px', opacity: 0.4 }}>
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <div style={{ fontSize: '16px', fontWeight: 500 }}>Select a Baseline to Edit</div>
+            <div style={{ fontSize: '13px', marginTop: '8px' }}>Or go to the Patches tab and select patches to create a new one.</div>
+          </div>
         )}
       </div>
     </div>

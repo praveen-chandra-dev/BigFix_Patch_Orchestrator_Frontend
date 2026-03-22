@@ -68,7 +68,7 @@ export default function UserManagement({ onClose, currentUserId }) {
 
   const roleOptions = useMemo(() => {
     return [
-      { value: "Admin", label: "Admin (Master Operator)" },
+      { value: "Admin", label: "Admin (Patch Setu)" },
       ...availableRoles.filter(r => r !== 'Admin').map(r => ({ value: r, label: r }))
     ];
   }, [availableRoles]);
