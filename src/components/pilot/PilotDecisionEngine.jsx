@@ -63,6 +63,7 @@ async function getActionMailStatus(id, signal) {
   }
 }
 
+/* AI API CALL (Commented out logically below, keeping function just in case) */
 async function getPrediction(baselineName, groupName) {
   try {
     const res = await postJSON(`${API_BASE}/api/predict/success`, { baselineName, groupName });
@@ -110,7 +111,7 @@ export default function PilotDecisionEngine({
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const isRefreshing = useRef(false);
-  const hasAutoRefreshed = useRef(false); // Tracks auto-initialization
+  const hasAutoRefreshed = useRef(false); 
   
   const [enableEvaluate, setEnableEvaluate] = useState(false);
   const [enableTriggerPilot, setEnableTriggerPilot] = useState(false);
@@ -203,19 +204,16 @@ export default function PilotDecisionEngine({
        setEnableTriggerPilot(true);
        setIsPrevStageComplete(true);
        setDecision("Ready to trigger (Prior stages bypassed).");
-       // Instantly unlock all settings (Baseline/Group/PatchWindow) if we bypassed earlier stages
        setEnv(p => ({ ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true }));
     }
   }, [inProduction, localPilotEnabled, localSandboxEnabled, isGateSatisfied, mode, setEnv]);
 
-  // Identify Previous Action ID safely for dependency arrays
   const prevActionId = useMemo(() => {
     return inProduction 
       ? (localPilotEnabled ? lastActions?.PILOT?.id : lastActions?.SANDBOX?.id) 
       : lastActions?.SANDBOX?.id;
   }, [inProduction, localPilotEnabled, lastActions]);
 
-  // Reset auto-refresh trigger if the action ID significantly changes
   useEffect(() => {
     hasAutoRefreshed.current = false;
   }, [prevActionId]);
@@ -237,7 +235,7 @@ export default function PilotDecisionEngine({
     async function poll() {
       if (cancelled) return;
       const { mailSent, state } = await getActionMailStatus(prevActionId);
-      if (mailSent || String(state).toLowerCase() === "expired") { 
+      if (mailSent || String(state).toLowerCase() === "expired" || String(state).toLowerCase() === "stopped") { 
           if (cancelled) return; 
           setIsPrevStageComplete(true); setEnableEvaluate(true); 
           if (timer) clearInterval(timer); 
@@ -317,7 +315,6 @@ export default function PilotDecisionEngine({
 
       if (approved) {
           setEvaluated(true);
-          // UNLOCKS BASELINE, TARGET GROUP, AND PATCH WINDOWS SIMULTANEOUSLY
           setEnv(p => ({ ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true }));
           
           if (requireChg) {
@@ -349,7 +346,6 @@ export default function PilotDecisionEngine({
     }
   }, [prevActionId, inProduction, localPilotEnabled, lastActions, mode, isGateSatisfied, isPrevStageComplete, requireChg, setEnv]);
 
-  // NEW: Automatically restore state from sessionStorage immediately on mount/poll completion
   useEffect(() => {
     if (isGateSatisfied && isPrevStageComplete && prevActionId && !hasAutoRefreshed.current) {
       hasAutoRefreshed.current = true;
@@ -357,13 +353,12 @@ export default function PilotDecisionEngine({
     }
   }, [isGateSatisfied, isPrevStageComplete, prevActionId, refreshKpis]);
 
-  // AUTO REFRESH LOOP EVERY 10 MINS
   useEffect(() => {
     const intervalId = setInterval(() => {
       if (!busy && !checkingBaseline) {
         refreshKpis();
       }
-    }, 600000); // 10 minutes
+    }, 600000); 
     return () => clearInterval(intervalId);
   }, [refreshKpis, busy, checkingBaseline]);
 
@@ -438,13 +433,20 @@ export default function PilotDecisionEngine({
     if (!canProceed || busy || readOnly) return;
     if (requireChg && !chgValidated) { setShowChg(true); setChgErr(""); if (!chgNumber) setChgNumber("CHG"); return; }
 
-    setCheckingBaseline(true); setBaselineWarning(null); setPrediction(null);
+    setCheckingBaseline(true); 
+    setBaselineWarning(null); 
+    // setPrediction(null); // 🚀 AI COMMENTED OUT
+
+    const warning = await checkBaselineStatus();
+    if (warning) setBaselineWarning(warning);
+
+    /* 🚀 AI PREDICTION COMMENTED OUT
     const baseline = env?.baselineName || env?.baseline || "";
     const group = inProduction ? env?.prodGroup : env?.pilotGroup;
-
     const [warning, predResult] = await Promise.all([ checkBaselineStatus(), getPrediction(baseline, group) ]);
     if (warning) setBaselineWarning(warning);
     setPrediction(predResult && predResult.ok ? predResult : { error: true, analysis: "AI Service Connection Failed", details: [] });
+    */
     
     setCheckingBaseline(false); setShowConfirmModal(true);
   }
@@ -541,7 +543,7 @@ export default function PilotDecisionEngine({
           <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>
         )}
         
-        {/* UNLOCK OVERRIDE BUTTON */}
+        {/* 🚀 FIXED: UNLOCK SETTINGS OVERRIDE BUTTON */}
         {evaluated && !enableTriggerPilot && !chgValidated && !readOnly && !isEUC && (
            <button className="btn outline amber" onClick={() => setShowUnlockConfirm(true)}>Unlock Settings</button>
         )}
@@ -552,7 +554,7 @@ export default function PilotDecisionEngine({
             disabled={isTriggerDisabled} 
             title={isTriggerBlocked ? "Complete Validation first" : "Trigger"}
         >
-          {busy ? "Triggering…" : checkingBaseline ? "AI Analysis..." : (inProduction ? "Trigger Production" : "Trigger Pilot")}
+          {busy ? "Triggering…" : checkingBaseline ? "Checking..." : (inProduction ? "Trigger Production" : "Trigger Pilot")}
         </button>
 
         {isEUC && (
@@ -575,32 +577,87 @@ export default function PilotDecisionEngine({
         )}
       </div>
 
+      {/* 🚀 FIXED: UNLOCK MODAL NOW FORCES EVALUATE & APPROVE */}
       {showUnlockConfirm && (
         <ConfirmationModal
           open={showUnlockConfirm}
           title="Override Configuration Limits"
           onClose={() => setShowUnlockConfirm(false)}
           onConfirm={() => {
-             setEnv(p => ({ ...p, [`${mode}Unlocked`]: true }));
+             // Forcefully approve the evaluation gate
+             setEnv(p => ({ ...p, [`${mode}Unlocked`]: true, [`${mode}Evaluated`]: true }));
+             setEvaluated(true);
+             
+             if (prevActionId) {
+                 sessionStorage.setItem(`approved_${mode}_${prevActionId}`, "true");
+             }
+
+             if (requireChg) {
+                 setDecision("PASS (Override): Thresholds bypassed. Validate CHG.");
+                 setEnableTriggerPilot(false);
+             } else {
+                 setDecision("PASS (Override): Configuration Unlocked & Approved.");
+                 setEnableTriggerPilot(true);
+             }
+             
              setShowUnlockConfirm(false);
           }}
         >
           <p style={{ marginTop: 0 }}>The evaluation failed to meet the configured thresholds.</p>
-          <p style={{ marginTop: '10px' }}>Do you want to forcefully unlock and modify the configuration (Baseline, Group, Thresholds) for this stage?</p>
+          <p style={{ marginTop: '10px' }}>Do you want to forcefully unlock the configuration and <strong>Approve the Gates</strong> to proceed?</p>
           <p className="muted-text text-12" style={{ marginTop: '10px' }}>Note: To completely abandon this deployment and start over, we recommend using the <strong>Reset to Sandbox</strong> button instead.</p>
         </ConfirmationModal>
       )}
 
+      {/* IMPROVED ITSM VALIDATION MODAL */}
       {showChg && (
-        <div className="modal show" role="dialog" aria-modal="true">
-          <div className="box" style={{ maxWidth: 520 }}>
-            <h3>Enter Change Number</h3>
-            <form onSubmit={submitChg}>
-              <div className="field"><input type="text" className="input" placeholder="CHG123456" value={chgNumber} onChange={(e) => { setChgNumber(e.target.value); setChgErr(""); }} autoFocus /></div>
-              {!!chgErr && <div className="sub" style={{ color: "var(--danger)", marginTop: 4 }}>{chgErr}</div>}
-              <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-                <button type="button" className="btn" onClick={() => setShowChg(false)} disabled={chgChecking}>Cancel</button>
-                <button type="submit" className="btn primary" disabled={!chgIsValid || chgChecking}>{chgChecking ? "Validating…" : "Validate"}</button>
+        <div className="modal show" role="dialog" aria-modal="true" style={{ zIndex: 9999 }}>
+          <div className="box chg-modal-box" style={{ maxWidth: 480, padding: 0, overflow: 'hidden', border: '1px solid var(--border)', borderRadius: '8px' }}>
+            
+            <div style={{ background: 'var(--panel-2)', padding: '20px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '14px' }}>
+               <div style={{ width: 44, height: 44, background: '#eff6ff', color: '#3b82f6', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+               </div>
+               <div>
+                 <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--text)', fontWeight: 600 }}>ITSM Validation</h3>
+                 <div style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '4px' }}>Enter ServiceNow Change Request Number</div>
+               </div>
+            </div>
+            
+            <form onSubmit={submitChg} style={{ padding: '24px' }}>
+              <div className="field m-0">
+                <label className="label" style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--text)' }}>Change Number (CHG) <span className="req text-danger">*</span></label>
+                <div className="inputwrap" style={{ position: 'relative' }}>
+                  <input 
+                    type="text" 
+                    className={`control ${chgErr ? 'border-danger' : ''}`} 
+                    placeholder="e.g. CHG0012345" 
+                    value={chgNumber} 
+                    onChange={(e) => { setChgNumber(e.target.value.toUpperCase()); setChgErr(""); }} 
+                    autoFocus 
+                    disabled={chgChecking}
+                    style={{ height: '46px', fontSize: '15px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', paddingLeft: '16px' }}
+                  />
+                  {chgChecking && (
+                    <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
+                       <svg className="spinner" viewBox="0 0 50 50" style={{ width: 20, height: 20, stroke: 'var(--primary)' }}><circle cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle></svg>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {!!chgErr && (
+                <div className="fade-in" style={{ marginTop: '16px', padding: '12px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                   <span style={{ color: '#b91c1c', fontSize: '13px', fontWeight: 500, lineHeight: 1.4 }}>{chgErr}</span>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: '12px', marginTop: '32px' }}>
+                <button type="button" className="btn outline" onClick={() => setShowChg(false)} disabled={chgChecking}>Cancel</button>
+                <button type="submit" className="btn pri min-w-140" disabled={!chgIsValid || chgChecking}>
+                    {chgChecking ? "Validating..." : "Validate Ticket"}
+                </button>
               </div>
             </form>
           </div>
@@ -611,82 +668,6 @@ export default function PilotDecisionEngine({
         <div className="modal show" role="dialog" aria-modal="true">
           <div className="box" style={{ maxWidth: 800, width: '90%' }}>
             <h3 style={{color: 'var(--primary)', marginBottom: 20}}>Confirm Action</h3>
-            
-            {prediction && (
-                <div style={{
-                    background: prediction.error ? '#fef2f2' : (prediction.probability > 80 ? '#ecfdf5' : '#fffbeb'),
-                    border: `1px solid ${prediction.error ? '#f87171' : (prediction.probability > 80 ? '#6ee7b7' : '#fcd34d')}`,
-                    borderRadius: 8, padding: 16, marginBottom: 16
-                }}>
-                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
-                        <strong style={{fontSize: 16, color: prediction.error ? '#dc2626' : (prediction.probability > 80 ? '#065f46' : '#92400e')}}>
-                            {prediction.error ? "AI Service Error" : `Predicted Success Rate: ${prediction.probability}%`}
-                        </strong>
-                        <span style={{fontSize:24}}>{prediction.error ? '⚠️' : (prediction.probability > 80 ? '🤖✅' : '🤖⚠️')}</span>
-                    </div>
-                </div>
-            )}
-
-            {prediction && !prediction.error && prediction.details && prediction.details.length > 0 && (
-                <>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 16, overflow: 'hidden', overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
-                          <thead style={{ background: '#f9fafb' }}>
-                              <tr>
-                                  <th style={{ padding: '10px 12px', textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>Action Name</th>
-                                  <th style={{ padding: '10px 12px', textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>Target Computer</th>
-                                  <th style={{ padding: '10px 12px', textAlign: 'left', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>Outcome</th>
-                                  <th style={{ padding: '10px 12px', textAlign: 'right', color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>Success Rate</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {currentItems.map((row, idx) => (
-                                  <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                                      <td style={{ padding: '10px 12px', color: '#111827', fontWeight: 500 }}>{row.action}</td>
-                                      <td style={{ padding: '10px 12px', color: '#374151' }}>{row.computer}</td>
-                                      <td style={{ padding: '10px 12px' }}>
-                                          <span style={{ 
-                                              background: row.rate > 80 ? '#dcfce7' : '#fee2e2', 
-                                              color: row.rate > 80 ? '#166534' : '#991b1b',
-                                              padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 
-                                          }}>
-                                              {row.outcome}
-                                          </span>
-                                      </td>
-                                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: row.rate > 80 ? '#059669' : '#d97706' }}>
-                                          {row.rate}%
-                                      </td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
-                  </div>
-
-                  {totalPages > 1 && (
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-                      <button 
-                        className="btn" 
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        disabled={currentPage === 1}
-                        style={{ padding: '4px 12px', fontSize: '13px' }}
-                      >
-                        Previous
-                      </button>
-                      <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                        Page {currentPage} of {totalPages}
-                      </span>
-                      <button 
-                        className="btn" 
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={currentPage === totalPages}
-                        style={{ padding: '4px 12px', fontSize: '13px' }}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  )}
-                </>
-            )}
 
             {baselineWarning && (
               <div className="banner error" style={{ marginBottom: 16 }}>

@@ -94,6 +94,17 @@ export default function KpiDetails({ context, activeTab }) {
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const showService = userRole !== "Linux";
 
+  // 🚀 FIXED: Auto-load filter from Donut Chart click
+  useEffect(() => {
+    const pending = sessionStorage.getItem("kpi_pending_filter");
+    if (pending) {
+        try {
+            setFilters(JSON.parse(pending));
+        } catch(e) {}
+        sessionStorage.removeItem("kpi_pending_filter");
+    }
+  }, []);
+
   const [cols, setCols] = useState([]);
   useEffect(() => {
       if (type === 'success') {
@@ -130,12 +141,16 @@ export default function KpiDetails({ context, activeTab }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
+  // 🚀 FIXED: Robust classification matching the Donut chart
   function classify(raw) {
     const s = String(raw || "").trim();
     if (!s) return "Not Reported";
     const L = s.toLowerCase();
     if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
     if (/^completed$/i.test(s)) return "Completed";
+    if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
+    if (/fail|error|download failed/i.test(L)) return "Failed";
+    if (/wait|pending/i.test(L)) return "Waiting";
     return s;
   }
 
@@ -161,9 +176,8 @@ export default function KpiDetails({ context, activeTab }) {
                   for (const r of res.rows) {
                       if (r.server && !map.has(r.server)) { map.set(r.server, r); }
                   }
-                  fetchedData = Array.from(map.values()).filter((r) => { 
-                      const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; 
-                  });
+                  // 🚀 FIXED: Allow ALL statuses to load (removed .filter(r => s === 'Fixed'))
+                  fetchedData = Array.from(map.values());
               }
           } else if (type === 'health') {
               const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
@@ -195,11 +209,18 @@ export default function KpiDetails({ context, activeTab }) {
         if (!c.value) continue;
         validConds++; let condition = true;
         let field = "";
+        const search = String(c.value).toLowerCase();
         
         if (c.column === 'issues' && Array.isArray(item.issues)) {
             field = item.issues.join(", ").toLowerCase();
         } else if (c.column === 'pendingRestart') {
             field = String(item.pendingRestart ?? item.pending ?? item.restart ?? "").toLowerCase();
+        } else if (c.column === 'status' && type === 'success') {
+            // 🚀 FIXED: Ensure status search checks the dynamic classified status
+            field = classify(item.status).toLowerCase();
+            if (c.operator === "contains" && !field.includes(search)) {
+                 field = String(item.status || "").toLowerCase();
+            }
         } else {
             field = String(item[c.column] || "").toLowerCase();
         }
@@ -227,6 +248,9 @@ export default function KpiDetails({ context, activeTab }) {
         } else if (sortConfig.key === 'pendingRestart') {
             aVal = String(a.pendingRestart ?? a.pending ?? a.restart ?? "");
             bVal = String(b.pendingRestart ?? b.pending ?? b.restart ?? "");
+        } else if (sortConfig.key === 'status' && type === 'success') {
+            aVal = classify(a.status);
+            bVal = classify(b.status);
         }
 
         aVal = String(aVal).toLowerCase();
@@ -260,7 +284,7 @@ export default function KpiDetails({ context, activeTab }) {
     performExport(dataToExport, cols, exportFormat, `${type}_kpi_report`, (r, cId) => {
         if (cId === 'issues') return Array.isArray(r.issues) ? r.issues.join(", ") : "";
         if (cId === 'pendingRestart') return String(r.pendingRestart ?? r.pending ?? r.restart ?? "");
-        if (type === 'success' && cId === 'status') return "Success";
+        if (type === 'success' && cId === 'status') return classify(r.status); // 🚀 FIXED: Dynamic Export Label
         return r[cId] || "N/A";
     });
   };
@@ -385,7 +409,8 @@ export default function KpiDetails({ context, activeTab }) {
   }
 
   const getTitle = () => {
-      if (type === 'success') return "Deployment Success Details";
+      // 🚀 FIXED: Better Title name
+      if (type === 'success') return "Action Deployment Details"; 
       if (type === 'health') return "Critical Health Failures";
       if (type === 'reboot') return "Pending Reboots";
       return "KPI Details";
@@ -399,6 +424,7 @@ export default function KpiDetails({ context, activeTab }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{getTitle()}</h2>
                <span className="pill gray">{groupName ? `Target Group: ${groupName}` : "Scope: Full Infrastructure"}</span>
+               {actionId && <span className="pill soft">Action ID: {actionId}</span>}
             </div>
             <div className="text-13 muted-text" style={{ marginTop: '4px' }}>
                Updated: {lastUpdated || "—"}
@@ -512,7 +538,7 @@ export default function KpiDetails({ context, activeTab }) {
 
             <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
                 {loading ? (
-                    <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading KPI details...</div>
+                    <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading details...</div>
                 ) : paginatedData.length === 0 ? (
                     <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No data found.</div>
                 ) : (
@@ -559,7 +585,17 @@ export default function KpiDetails({ context, activeTab }) {
                                         {cols.map(c => {
                                             if (!c.show) return null;
                                             let val = row[c.id];
-                                            if (type === 'success' && c.id === 'status') return <td key={c.id}><span className="pill green">Success</span></td>;
+                                            
+                                            // 🚀 FIXED: Dynamic Status Colors in Row
+                                            if (type === 'success' && c.id === 'status') {
+                                                const s = classify(row.status);
+                                                const isSuccess = s === 'Fixed' || s === 'Completed'; 
+                                                const isFail = s === 'Failed' || s === 'error' || s === 'Download Failed'; 
+                                                const isRunning = s === 'Running' || s === 'Evaluating'; 
+                                                const cls = isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber';
+                                                return <td key={c.id}><span className={cls}>{s}</span></td>;
+                                            }
+
                                             if (c.id === 'issues') return <td key={c.id}>{(row.issues || []).map((issue, idx) => (<span key={idx} className="pill red mr-10 text-11">{issue}</span>))}</td>;
                                             if (c.id === 'serviceStatus' && type === 'health') { const isWindows = String(row.os || "").toLowerCase().includes("win"); return <td key={c.id}>{isWindows ? (row.serviceStatus || "N/A") : "—"}</td>; }
                                             if (c.id === 'pendingRestart') return <td key={c.id}>{String(row.pendingRestart ?? row.pending ?? row.restart ?? "N/A")}</td>;

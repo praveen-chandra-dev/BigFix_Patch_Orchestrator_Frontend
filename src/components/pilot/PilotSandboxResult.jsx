@@ -21,7 +21,6 @@ const fmtTime = (s) => {
 const escapeHtml = (str) =>
   String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-// Updated Buckets based on BigFix definitions
 const BUCKETS = [
   "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
   "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login", 
@@ -225,11 +224,20 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   const [donutFilter, setDonutFilter] = useState(null);
   const refreshAbortRef = useRef(null);
 
+  // 🚀 Tracks if we should stop polling
+  const [isActionStopped, setIsActionStopped] = useState(false);
+
   useEffect(() => {
-    if (actionId != null && actionId !== "") setLockedId(String(actionId));
+    if (actionId != null && actionId !== "") {
+        setLockedId(String(actionId));
+        setIsActionStopped(false); // Reset stop state for new ID
+    }
   }, [actionId]);
 
   const refresh = useCallback(async (abortSignal) => {
+    // 🚀 Prevent fetching if action is already stopped
+    if (isActionStopped) return;
+
     setLoading(true);
     setErr("");
     try {
@@ -273,8 +281,13 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       try {
         const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
         const s = String(statusRes?.state || "").toLowerCase();
-        if (s === 'open' || s === 'running') setStatusBanner({ msg: "Action is running", type: 'running' });
-        else if (s === 'expired' || s === 'stopped') setStatusBanner({ msg: "Action completed", type: 'completed' });
+        if (s === 'open' || s === 'running') {
+            setStatusBanner({ msg: "Action is running", type: 'running' });
+        }
+        else if (s === 'expired' || s === 'stopped') {
+            setStatusBanner({ msg: "Action Stopped", type: 'completed' });
+            setIsActionStopped(true); // 🚀 ACTION IS DONE, FREEZE UI POLLING
+        }
         else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
       } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
     } catch (e) {
@@ -282,22 +295,29 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     } finally {
       if (!abortSignal || !abortSignal.aborted) setLoading(false);
     }
-  }, [lockedId]);
+  }, [lockedId, isActionStopped]); // Added isActionStopped to dependencies
 
   useEffect(() => {
+    // 🚀 Prevent API fetch and polling if action is already stopped
+    if (isActionStopped) return;
+
     refreshAbortRef.current?.abort();
     const ab = new AbortController();
     refreshAbortRef.current = ab;
+    
     refresh(ab.signal);
-    const interval = setInterval(() => { if (!loading) refresh(ab.signal); }, 30000);
+
+    const interval = setInterval(() => { 
+        if (!loading && !isActionStopped) refresh(ab.signal); 
+    }, 15000); 
+
     return () => { ab.abort(); clearInterval(interval); };
-  }, [lockedId, refresh]);
+  }, [lockedId, refresh, loading, isActionStopped]);
 
   const handleContainerClick = (e, statusFilter = null) => {
     e.stopPropagation();
     if (onViewDetails) {
       if (statusFilter) {
-          // Send robust array payload and cache it in sessionStorage just in case parent drops it during routing
           const payload = [{ logic: "Single", conds: [{ column: "status", operator: "contains", value: statusFilter }] }];
           sessionStorage.setItem("kpi_pending_filter", JSON.stringify(payload));
           onViewDetails(lockedId, payload);
@@ -345,7 +365,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       <section className="card reveal" data-reveal>
         <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
-          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "" : ""}
+          {/* 🚀 Refresh button is disabled when stopped */}
+          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading || isActionStopped}>{loading ? "" : ""}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>          
           </button>
         </div>
@@ -440,16 +461,10 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
     { value: "status", label: "Status" }
   ];
 
-  // Initialize perfectly matching the calendar's filter parameters
   useEffect(() => {
     if (initialStatus && open) {
-        setFilters([{
-            logic: "Single",
-            conds: [{ column: "status", operator: "contains", value: initialStatus }]
-        }]);
-    } else if (open) {
-        setFilters([]);
-    }
+        setFilters([{ logic: "Single", conds: [{ column: "status", operator: "contains", value: initialStatus }] }]);
+    } else if (open) setFilters([]);
   }, [open, initialStatus]);
 
   useEffect(() => setPage(1), [filters, pageSize]);
@@ -478,10 +493,7 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
         if (c.column === "status") {
             const shortStatus = classify(row.status);
             field = shortStatus.toLowerCase();
-            
-            if (c.operator === "contains" && !field.includes(search)) {
-                field = String(row.status || "").toLowerCase();
-            }
+            if (c.operator === "contains" && !field.includes(search)) field = String(row.status || "").toLowerCase();
         } else {
             field = String(row[c.column] || "").toLowerCase();
         }
@@ -492,10 +504,7 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
         
         blockMatch = blockMatch && condition;
       }
-      if (validConds > 0) {
-        validBlocks++;
-        globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
-      }
+      if (validConds > 0) { validBlocks++; globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch); }
     }
     return validBlocks === 0 ? true : globalMatch;
   };

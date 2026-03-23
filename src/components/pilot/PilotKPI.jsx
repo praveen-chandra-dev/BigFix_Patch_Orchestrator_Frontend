@@ -1,6 +1,6 @@
 // frontend/src/components/pilot/PilotKPI.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useEnvironment } from "../Environment.jsx"; // <-- 1. Import useEnvironment
+import { useEnvironment } from "../Environment.jsx"; 
 
 const API_BASE = window.env.VITE_API_BASE;
 
@@ -272,6 +272,8 @@ function DonutChart({ donut, center, hoverKey, setHoverKey, onClickMap }) {
       else if (lowerKey === 'reboot' && onClickMap.reboot) onClickMap.reboot();
   };
 
+  const getVal = (key) => donut.find(d => d.key === key)?.val || 0;
+
   return (
     <div className="chart">
       <svg viewBox="0 0 120 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pilot distribution">
@@ -312,7 +314,7 @@ function DonutChart({ donut, center, hoverKey, setHoverKey, onClickMap }) {
           {[{ key: "Success", fill: "var(--success)", y: 7 }, { key: "Reboot", fill: "var(--warn)", y: 18 }, { key: "Health", fill: "var(--danger)", y: 30 }].map((l) => (
             <g key={l.key} transform={`translate(6,${l.y})`} onClick={(e) => handleSliceClick(e, l.key)} onMouseEnter={() => setHoverKey(l.key)} onMouseLeave={() => setHoverKey(null)} className="cursor-pointer" style={{ opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
               <circle cx="4" cy="4" r="3" fill={l.fill} />
-              <text x="12" y="6">{l.key}</text>
+              <text x="12" y="6">{l.key} ({getVal(l.key)})</text> 
             </g>
           ))}
         </g>
@@ -338,9 +340,6 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
 }
 
 export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiClick }) {
-  // <-- 2. Bind to global environment state so the KPI reacts instantly to the dropdown -->
-  const { env } = useEnvironment(); 
-  
   const mode = /production/i.test(title) ? "production" : "pilot";
   
   const getPinnedActionId = useCallback(() => {
@@ -353,11 +352,16 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }, [lastActions, mode]);
 
-  // <-- 3. Pull directly from env context instead of stale lastActions -->
+  // 🚀 FIXED: Always query the PREVIOUS stage's target group to check its health!
   const scopeGroup = useMemo(() => {
-    if (mode === "production") return env.prodGroup;
-    return env.pilotGroup;
-  }, [env.prodGroup, env.pilotGroup, mode]);
+    try {
+      const la = lastActions || {};
+      if (mode === "production") return la?.PILOT?.group ?? la?.SANDBOX?.group ?? null;
+      return la?.SANDBOX?.group ?? null;
+    } catch {
+      return null;
+    }
+  }, [lastActions, mode]);
 
   const [kpi, setKpi] = useState({ rebootPending: 0, critHealthFails: 0, successRate: 0, successCount: 0, totalCount: 0 });
   const [totalComputers, setTotalComputers] = useState(0);
@@ -385,6 +389,12 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const isEUC = userRole === "EUC";
 
+  const [isActionStopped, setIsActionStopped] = useState(false);
+
+  useEffect(() => {
+    setIsActionStopped(false); 
+  }, [getPinnedActionId()]);
+
   function classify(raw) {
     const s = String(raw || "").trim();
     if (!s) return "Not Reported";
@@ -393,32 +403,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     if (/^completed$/i.test(s)) return "Completed";
     return s;
   }
-
-   useEffect(() => {
-    function onSandbox(e) {
-      const { success = 0, total = 0 } = e.detail || {};
-      const rate = total > 0 ? Math.round((Number(success) / Number(total)) * 100) : 0;
-      setKpi((p) => ({ ...p, successRate: rate, successCount: Number(success) || 0, totalCount: Number(total) || 0 }));
-    }
-    function onHealth(e) {
-      const { count = 0 } = e.detail || {};
-      setKpi((p) => ({ ...p, critHealthFails: Number(count || 0) }));
-    }
-    function onTotals(e) {
-      const { totalComputers: tc = 0 } = e.detail || {};
-      setTotalComputers(Number(tc) || 0);
-    }
-
-    window.addEventListener("pilot:sandboxResultsUpdated", onSandbox);
-    window.addEventListener("pilot:criticalHealthUpdated", onHealth);
-    window.addEventListener("pilot:totalsUpdated", onTotals);
-
-    return () => {
-      window.removeEventListener("pilot:sandboxResultsUpdated", onSandbox);
-      window.removeEventListener("pilot:criticalHealthUpdated", onHealth);
-      window.removeEventListener("pilot:totalsUpdated", onTotals);
-    };
-  }, []);
 
   const rootRef = useRef(null);
   useInView(rootRef);
@@ -447,26 +431,18 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   const [hoverKey, setHoverKey] = useState(null);
   const center = useMemo(() => {
-    const R = kpi.rebootPending || 0;
-    const H = kpi.critHealthFails || 0;
-    const S_action = kpi.successCount || 0;
-    const T_action = kpi.totalCount || 0;
-    const O_action = Math.max(0, T_action - S_action);
-    const T_donut = S_action + R + H + O_action;
-    const asPct = (val, total) => clamp(Math.round((val / (total > 0 ? total : 1)) * 100), 0, 100);
+    let lbl = "Success";
+    let pt = kpi.totalCount > 0 ? Math.round((kpi.successCount / kpi.totalCount) * 100) : 0;
+    
+    if (hoverKey) {
+      lbl = hoverKey;
+      const targetData = donut.find(d => d.key === hoverKey);
+      pt = targetData ? targetData.pct : 0;
+    }
 
-    const pctFor = (key) => {
-      switch (key) {
-        case "Success": return asPct(S_action, T_donut);
-        case "Reboot": return asPct(R, T_donut);
-        case "Health": return asPct(H + O_action, T_donut);
-        default: return asPct(S_action, T_donut);
-      }
-    };
-    const key = hoverKey || "Success";
-    if (key === "Success") return { pct: kpi.successRate || 0, label: "success" };
-    return { pct: pctFor(key), label: key.toLowerCase() };
-  }, [hoverKey, kpi.successRate, kpi.rebootPending, kpi.critHealthFails, kpi.successCount, kpi.totalCount]);
+    const shortLabel = lbl.length > 10 ? lbl.substring(0, 8) + '..' : lbl;
+    return { pct: pt, label: shortLabel, fullLabel: lbl };
+  }, [hoverKey, donut, kpi.successCount, kpi.totalCount]);
 
   const handleKpiClick = (type) => {
       if (onKpiClick) {
@@ -576,41 +552,18 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }
 
+  // 🚀 FIXED: Polling Logic. Health & Reboot run ALWAYS. Action results stop when done.
   useEffect(() => {
     let timer; const ab = new AbortController();
     async function tick() {
       try {
-        let actionId = getPinnedActionId();
         const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
 
-        if (actionId) {
-          const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
-          let uniqueRows = [];
-          if (Array.isArray(res?.rows)) {
-              const map = new Map();
-              for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-              uniqueRows = Array.from(map.values());
-          }
-          const success = uniqueRows.length > 0 
-              ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-              : Number(res?.success ?? 0);
-          
-          const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
-          const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-          
-          setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
-          const payload = { actionId, success, total, rows: uniqueRows };
-          window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: payload }));
-        } else {
-          setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
-          window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: { actionId: null, success: 0, total: 0, rows: [] } }));
-        }
-
+        // 1. 🚀 ALWAYS FETCH HEALTH METRICS
         const ch = await getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal);
         const healthPayload = { count: Number(ch?.count || 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
         setKpi((p) => ({ ...p, critHealthFails: healthPayload.count }));
-        window.dispatchEvent(new CustomEvent("pilot:criticalHealthUpdated", { detail: healthPayload }));
-
+        
         try {
           const rp = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal);
           const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
@@ -619,21 +572,42 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
           setRebootRows(rpRows);
         } catch (e) {}
 
-        try {
-          const tot = await getJson(`${API_BASE}/api/infra/total-computers${groupQuery}`, ab.signal);
-          if (typeof tot?.total === "number") {
-            setTotalComputers(Number(tot.total) || 0);
-            window.dispatchEvent(new CustomEvent("pilot:totalsUpdated", { detail: { totalComputers: Number(tot.total) || 0 } }));
-          }
-        } catch {}
-        window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
+        // 2. 🚀 ONLY FETCH ACTION STATUS IF NOT STOPPED
+        if (!isActionStopped) {
+            let actionId = getPinnedActionId();
+            if (actionId) {
+                const statusRes = await getJson(`${API_BASE}/api/actions/${actionId}/status`, ab.signal).catch(()=>({}));
+                const st = String(statusRes?.state || "").toLowerCase();
+                const isDone = st === 'stopped' || st === 'expired';
+
+                const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
+                let uniqueRows = [];
+                if (Array.isArray(res?.rows)) {
+                    const map = new Map();
+                    for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+                    uniqueRows = Array.from(map.values());
+                }
+                const success = uniqueRows.length > 0 
+                    ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+                    : Number(res?.success ?? 0);
+                
+                const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
+                const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+                
+                setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
+
+                if (isDone) setIsActionStopped(true); // Stop Action polling, but Health/Reboot will continue
+            } else {
+                setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
+            }
+        }
       } catch (err) {
         if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
       }
     }
-    tick(); timer = setInterval(tick, 10000);
+    tick(); timer = setInterval(tick, 15000); 
     return () => { clearInterval(timer); ab.abort(); };
-  }, [mode, getPinnedActionId, scopeGroup]);
+  }, [mode, getPinnedActionId, scopeGroup, isActionStopped]);
 
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
@@ -642,7 +616,13 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
         <div className="flex-1 min-w-220">
           <div className="kpis kpi-row-wrap">
             {!isEUC && (
-              <MetricTile label="Success Rate" value={`${kpi.successRate}%`} tone={toneForSuccess(kpi.successRate)} onClick={() => handleKpiClick('success')} />
+              // 🚀 FIXED: Value now concatenates percentage and (successCount/totalCount)
+              <MetricTile 
+                 label="Success Rate" 
+                 value={kpi.totalCount > 0 ? `${kpi.successRate}% (${kpi.successCount}/${kpi.totalCount})` : `${kpi.successRate}%`} 
+                 tone={toneForSuccess(kpi.successRate)} 
+                 onClick={() => handleKpiClick('success')} 
+              />
             )}
             <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => handleKpiClick('health')} />
             <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => handleKpiClick('reboot')} />
