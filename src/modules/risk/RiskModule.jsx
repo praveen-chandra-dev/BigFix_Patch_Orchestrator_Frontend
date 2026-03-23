@@ -55,7 +55,6 @@ export default function RiskModule({
 
   const loadBaselines = useCallback(async () => {
     try {
-      // 🚀 Explicitly calling the pure BigFix list for editor
       const res = await api.get("/baselines/list");
       const raw = res.data;
       const normalized = Array.isArray(raw)
@@ -71,17 +70,14 @@ export default function RiskModule({
     }
   }, []);
 
-  // 🚀 FIXED: Global Refresh triggers backend Prism sync AND reloads component data
   const handleRefresh = useCallback(async () => {
     try {
-        // Send a ping to both endpoints with refresh=true to wake up caches
         await Promise.all([
            api.get("/baselines/list?refresh=true").catch(()=>null),
            api.get("/baselines?refresh=true").catch(()=>null)
         ]);
     } catch(e) {}
     
-    // Now trigger React children to remount and re-fetch
     setRefreshTrigger((prev) => prev + 1);
     await loadBaselines();
     await loadPatches();
@@ -319,18 +315,19 @@ export default function RiskModule({
 
           <div style={{ display: activeTab === "baseline" ? "flex" : "none", flex: 1, flexDirection: "column", minHeight: 0 }}>
              <BaselineTab
-                refreshTrigger={refreshTrigger} // 🚀 Ensure BaselineTab unmounts/remounts cleanly
+                refreshTrigger={refreshTrigger} 
                 baselines={baselines}
                 pendingPatches={pendingPatches}
                 clearPendingPatches={() => setPendingPatches([])}
                 setEditingBaseline={setEditingBaseline}
                 onGoToPatches={() => setRiskTab("patches")}
+                parentFilters={filters}         // 🚀 FIXED: Passing Filters!
+                parentLogic={globalLogic}       // 🚀 FIXED: Passing Logic!
               />
           </div>
 
           {activeTab === "dashboard" && (
              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                {/* 🚀 FIXED: Dashboard forces remount on refresh */}
                 <DashboardTab
                   key={`dash-${refreshTrigger}`} 
                   baselines={baselines}

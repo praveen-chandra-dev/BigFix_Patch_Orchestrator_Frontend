@@ -61,7 +61,15 @@ const RiskDropdown = ({ options, value, onChange, width = "100%", disabled = fal
   );
 };
 
-export default function BaselineTab({ pendingPatches = [], clearPendingPatches, setEditingBaseline, onGoToPatches, refreshTrigger }) {
+export default function BaselineTab({ 
+  pendingPatches = [], 
+  clearPendingPatches, 
+  setEditingBaseline, 
+  onGoToPatches, 
+  refreshTrigger,
+  parentFilters = [], 
+  parentLogic = "AND" 
+}) {
   const [patches, setPatches] = useState([]);
   const [baselineName, setBaselineName] = useState("");
   const [description, setDescription] = useState("");
@@ -114,7 +122,6 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
         name: b.name || "Unnamed Baseline",
         siteType: String(b.siteType || "").toLowerCase(),
         siteName: b.siteName,
-        status: "READY",
       }));
       setBaselineList(formatted);
     } catch (e) {
@@ -123,7 +130,6 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
     }
   };
 
-  // 🚀 FIXED: List & Sites refresh via Global Trigger
   useEffect(() => {
     refreshList();
   }, [refreshTrigger]);
@@ -382,6 +388,72 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
     }
   };
 
+  /* 🚀 ADDED: Sorting and Filtering logic */
+  const [sortConfig, setSortConfig] = useState({ key: "name", direction: "asc" });
+
+  const handleSort = (key) => {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span style={{ opacity: 0.4, marginLeft: '4px', cursor: 'pointer' }}>↕</span>;
+    return <span style={{ marginLeft: '4px', cursor: 'pointer' }}>{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
+
+  const applyFilters = (baseline) => {
+    if (!parentFilters || !parentFilters.length) return true;
+    let globalMatch = parentLogic === "OR" ? false : true;
+    for (let b of parentFilters) {
+      let blockMatch = true;
+      let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase();
+
+        let field = "";
+        if (c.column === "baseline_name") {
+            field = String(baseline.name || "").toLowerCase();
+        }  else {
+            field = String(baseline.name || "").toLowerCase(); 
+        }
+
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+        
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) {
+        globalMatch = parentLogic === "OR" ? globalMatch || blockMatch : globalMatch && blockMatch;
+      }
+    }
+    return globalMatch;
+  };
+
+  const filteredBaselines = useMemo(() => {
+    return baselineList.filter(applyFilters);
+  }, [baselineList, parentFilters, parentLogic]);
+
+  const sortedBaselines = useMemo(() => {
+    let sortable = [...filteredBaselines];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aVal = String(a[sortConfig.key] || "").toLowerCase();
+        let bVal = String(b[sortConfig.key] || "").toLowerCase();
+        
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortable;
+  }, [filteredBaselines, sortConfig]);
+
   if (isMaster === null) return <div className="app-loading-content">Loading Permissions...</div>;
 
   return (
@@ -419,32 +491,44 @@ export default function BaselineTab({ pendingPatches = [], clearPendingPatches, 
           <table className="baseline-list-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--panel-2)' }}>
               <tr>
-                <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 500, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>NAME</th>
-                <th style={{ padding: '12px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 500, color: 'var(--muted)', borderBottom: '1px solid var(--border)', width: '80px' }}>STATUS</th>
+                <th 
+                  onClick={() => handleSort('name')} 
+                  style={{ cursor: 'pointer', padding: '12px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}
+                >
+                  NAME {getSortIcon('name')}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {baselineList.map((b) => (
-                <tr
-                  key={b.id}
-                  onClick={() => fetchBaselineDetails(b)}
-                  style={{
-                    cursor: 'pointer',
-                    borderBottom: '1px solid var(--border)',
-                    background: b.id === selectedBaselineId ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
-                    transition: 'background 0.15s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (b.id !== selectedBaselineId) e.currentTarget.style.background = 'var(--bg-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (b.id !== selectedBaselineId) e.currentTarget.style.background = 'transparent';
-                  }}
-                >
-                  <td style={{ padding: '14px 20px', wordBreak: 'break-word', fontWeight: 500, color: 'var(--primary)' }}>{b.name}</td>
-                  <td style={{ padding: '14px 20px' }}><span className="pill green text-10" style={{ background: '#e6f7e6', color: '#2e7d32', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 500 }}>READY</span></td>
+              {sortedBaselines.length === 0 ? (
+                <tr>
+                  <td colSpan="2" style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>
+                    No baselines found.
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                sortedBaselines.map((b) => (
+                  <tr
+                    key={b.id}
+                    onClick={() => fetchBaselineDetails(b)}
+                    style={{
+                      cursor: 'pointer',
+                      borderBottom: '1px solid var(--border)',
+                      background: b.id === selectedBaselineId ? 'rgba(var(--primary-rgb), 0.08)' : 'transparent',
+                      transition: 'background 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (b.id !== selectedBaselineId) e.currentTarget.style.background = 'var(--bg-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (b.id !== selectedBaselineId) e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <td style={{ padding: '14px 20px', wordBreak: 'break-word', fontWeight: 500, color: 'var(--primary)' }}>{b.name}</td>
+                    <td style={{ padding: '14px 20px' }}></td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

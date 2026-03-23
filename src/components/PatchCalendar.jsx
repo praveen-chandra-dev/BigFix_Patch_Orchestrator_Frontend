@@ -347,7 +347,7 @@ export default function PatchCalendar({ onClose, userRole }) {
                           <div className="cal-event-block">
                             <span className="cal-event-icon">⚙️</span>
                             <div className="cal-event-info">
-                              <span className="cal-event-title">Patch Deployment</span>
+                              <span className="cal-event-title">Patch Deployment </span>
                               <span className="cal-event-count">{dayEvents.length} Server{dayEvents.length > 1 ? 's' : ''}</span>
                             </div>
                           </div>

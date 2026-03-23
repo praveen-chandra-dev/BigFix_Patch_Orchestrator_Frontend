@@ -13,6 +13,7 @@ const LABELS = {
   SN_URL: "SERVICENOW URL", SN_USER: "SERVICENOW USERNAME", SN_PASSWORD: "SERVICENOW PASSWORD", SN_ALLOW_SELF_SIGNED: "SERVICENOW ALLOW SELF SIGNED",
   VCENTER_URL: "VCENTER URL", VCENTER_USER: "VCENTER USERNAME", VCENTER_PASSWORD: "VCENTER PASSWORD", VCENTER_ALLOW_SELF_SIGNED:"VCENTER ALLOW SELF SIGNED",
   LDAP_ENABLED: "ENABLE DIRECTORY SERVICES", LDAP_URL: "LDAP URL", LDAP_DOMAIN: "LDAP DOMAIN", LDAP_ALLOW_SELF_SIGNED: "LDAP ALLOW SELF SIGNED",
+  PRISM_BASE_URL: "PRISM URL", PRISM_USER: "PRISM USERNAME", PRISM_PASS: "PRISM PASSWORD",
   DEBUG_LOG: "DEBUG LEVEL",
 };
 
@@ -52,6 +53,9 @@ const TEMPLATE = [
   { key: "SN_USER", value: "", type: "string", secret: false, hint: "" },
   { key: "SN_PASSWORD", value: "", type: "string", secret: true, hint: "" },
   { key: "SN_ALLOW_SELF_SIGNED", value: "false", type: "boolean", secret: false, hint: "" },
+  { key: "PRISM_BASE_URL", value: "", type: "string", secret: false, hint: "http://prism-engine:8000" },
+  { key: "PRISM_USER", value: "", type: "string", secret: false, hint: "" },
+  { key: "PRISM_PASS", value: "", type: "string", secret: true, hint: "" },
   { key: "VCENTER_URL", value: "", type: "string", secret: false, hint: "https://vcenter.domain.com" },
   { key: "VCENTER_USER", value: "", type: "string", secret: false, hint: "user@vsphere.local" },
   { key: "VCENTER_PASSWORD", value: "", type: "string", secret: true, hint: "" },
@@ -166,11 +170,12 @@ export default function Management({ onClose }) {
       LDAP_: ["LDAP_ENABLED", "LDAP_URL", "LDAP_DOMAIN", "LDAP_ALLOW_SELF_SIGNED"],
       SMTP_: ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_PORT","SMTP_SECURE","SMTP_CC","SMTP_BCC","SMTP_ALLOW_SELF_SIGNED"],
       SN_: ["SN_URL","SN_USER","SN_PASSWORD","SN_ALLOW_SELF_SIGNED"],
+      PRISM_: ["PRISM_BASE_URL","PRISM_USER","PRISM_PASS"],
       VCENTER_:["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD", "VCENTER_ALLOW_SELF_SIGNED"],
       DEBUG_: ["DEBUG_LOG"]
     };
     const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
-    if (!isMO) return { BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SMTP: [], SN: [], VCENTER: [], DEBUG: [] };
+    if (!isMO) return { BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SMTP: [], SN: [], PRISM: [], VCENTER: [], DEBUG: [] };
     return {
       BIGFIX: pick("BIGFIX_"),
       SANDBOX: pick("SANDBOX_"),
@@ -179,6 +184,7 @@ export default function Management({ onClose }) {
       LDAP: pick("LDAP_"),
       SMTP: pick("SMTP_"),
       SN: pick("SN_"),
+      PRISM: pick("PRISM_"),
       VCENTER: pick("VCENTER_"),
       DEBUG: pick("DEBUG_")
     };
@@ -186,6 +192,7 @@ export default function Management({ onClose }) {
 
   const smtpTouched = useMemo(() => isMO ? ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_CC","SMTP_BCC"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isMO]);
   const vcenterTouched = useMemo(() => isMO ? ["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isMO]);
+  const prismTouched = useMemo(() => isMO ? ["PRISM_BASE_URL","PRISM_USER","PRISM_PASS"].some(k => (values[k] ?? "").toString().trim() !== "") : false, [values, isMO]);
   const ldapEnabled = useMemo(() => isMO ? String(values["LDAP_ENABLED"] ?? "false").toLowerCase() === "true" : false, [values, isMO]);
 
   const invalidMap = useMemo(() => {
@@ -199,10 +206,11 @@ export default function Management({ onClose }) {
     if (isMO) {
         if (smtpTouched) { m.SMTP_HOST = (values.SMTP_HOST ?? "").trim() === ""; m.SMTP_FROM = !isEmail((values.SMTP_FROM ?? "").trim()); m.SMTP_TO = !listValidEmails(values.SMTP_TO); }
         if (vcenterTouched) m.VCENTER_URL = (values.VCENTER_URL ?? "").trim() === "";
+        if (prismTouched) m.PRISM_BASE_URL = (values.PRISM_BASE_URL ?? "").trim() === "";
         if (ldapEnabled) { m.LDAP_URL = (values.LDAP_URL ?? "").trim() === ""; m.LDAP_DOMAIN = (values.LDAP_DOMAIN ?? "").trim() === ""; }
     }
     return m;
-  }, [values, smtpTouched, vcenterTouched, ldapEnabled, editingSection, isMO]);
+  }, [values, smtpTouched, vcenterTouched, prismTouched, ldapEnabled, editingSection, isMO]);
 
   const validationMap = useMemo(() => {
       const map = {
@@ -215,11 +223,12 @@ export default function Management({ onClose }) {
           map.LDAP = sections.LDAP.every(it => !invalidMap[it.key]);
           map.SMTP = sections.SMTP.every(it => !(smtpTouched ? invalidMap[it.key] : false));
           map.SN = true;
+          map.PRISM = sections.PRISM.every(it => !(prismTouched ? invalidMap[it.key] : false));
           map.VCENTER = sections.VCENTER.every(it => !(vcenterTouched ? invalidMap[it.key] : false));
           map.DEBUG = true;
       }
       return map;
-  }, [sections, invalidMap, smtpTouched, vcenterTouched, isMO]);
+  }, [sections, invalidMap, smtpTouched, prismTouched, vcenterTouched, isMO]);
 
   async function fetchAllSettings() {
     setMsg(""); setErr(""); setLoading(true);
@@ -316,6 +325,7 @@ export default function Management({ onClose }) {
               setMsg(data.message || "Credentials verified & saved to vault.");
               setPersonalCreds(prev => ({ ...prev, hasCreds: true }));
               setMyBfPassword("");
+              window.dispatchEvent(new CustomEvent('bf-creds-updated'));
           } else {
               setErr(data.error || "Verification failed. Check password.");
           }
@@ -461,7 +471,7 @@ export default function Management({ onClose }) {
                         </div>
                     </details>
 
-                    {/* Other sections remain unchanged */}
+                    {/* Directory Services */}
                     <details className="section overflow-visible" open>
                         <summary className="section-head">
                             <span className="title">Directory Services (LDAP)</span><span className="pill soft">Optional</span><div className="spacer" />
@@ -476,6 +486,8 @@ export default function Management({ onClose }) {
                             {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP' || (it.key !== 'LDAP_ENABLED' && !ldapEnabled)} />)}
                         </div>
                     </details>
+                    
+                    {/* SMTP */}
                     <details className="section overflow-visible" open>
                       <summary className="section-head">
                         <span className="title">SMTP / Email</span><span className="pill soft">Optional</span><div className="spacer" />
@@ -490,6 +502,8 @@ export default function Management({ onClose }) {
                         {sections.SMTP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={smtpTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'SMTP'} />)}
                       </div>
                     </details>
+                    
+                    {/* ServiceNow */}
                     <details className="section overflow-visible" open>
                       <summary className="section-head">
                         <span className="title">ServiceNow</span><span className="pill soft">Optional</span><div className="spacer" />
@@ -504,6 +518,24 @@ export default function Management({ onClose }) {
                         {sections.SN.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} disabled={editingSection !== 'SN'} />)}
                       </div>
                     </details>
+
+                    {/* PRISM RISK ENGINE */}
+                    <details className="section overflow-visible" open>
+                      <summary className="section-head">
+                        <span className="title">Prism Risk Engine</span><span className="pill soft">Optional</span><div className="spacer" />
+                        {editingSection === 'PRISM' ? (
+                          <div className="actions">
+                            <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                            <button className="btn primary" onClick={() => onSave('PRISM')} disabled={saving || !validationMap['PRISM']}>{saving?"Saving…":"Save"}</button>
+                          </div>
+                        ) : <button className="btn" onClick={() => setEditingSection('PRISM')} disabled={saving || editingSection !== null}>Edit</button>}
+                      </summary>
+                      <div className="grid">
+                        {sections.PRISM.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={prismTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'PRISM'} />)}
+                      </div>
+                    </details>
+
+                    {/* VCenter */}
                     <details className="section overflow-visible" open>
                       <summary className="section-head">
                         <span className="title">VCenter</span><span className="pill soft">Optional</span><div className="spacer" />
@@ -518,6 +550,8 @@ export default function Management({ onClose }) {
                         {sections.VCENTER.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={vcenterTouched ? invalidMap[it.key] : false} disabled={editingSection !== 'VCENTER'} />)}
                       </div>
                     </details>
+                    
+                    {/* Logging */}
                     <details className="section overflow-visible" open>
                       <summary className="section-head">
                         <span className="title">Logging</span><span className="pill soft">Optional</span><div className="spacer" />

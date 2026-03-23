@@ -283,6 +283,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
   const [isMO, setIsMO] = useState(false);
   const [activeRole, setActiveRole] = useState(sessionStorage.getItem('user_role') || '');
   const [showDropdown, setShowDropdown] = useState(false);
+  const [hasBfCreds, setHasBfCreds] = useState(true); // Tracks if personal credentials are set
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -313,6 +314,29 @@ export function Topbar({ onNavHistory, username, onLogout }) {
           }
         }
       });
+  }, []);
+
+  // Check for Personal Credentials and listen for events
+  useEffect(() => {
+    const checkCreds = () => {
+      const API = window.env?.VITE_API_BASE || "";
+      fetch(`${API}/api/auth/my-bigfix-creds`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok) {
+            setHasBfCreds(data.hasCreds);
+          }
+        }).catch(() => {});
+    };
+    
+    checkCreds();
+
+    const onCredsUpdated = () => {
+      setHasBfCreds(true);
+    };
+
+    window.addEventListener('bf-creds-updated', onCredsUpdated);
+    return () => window.removeEventListener('bf-creds-updated', onCredsUpdated);
   }, []);
 
   useEffect(() => {
@@ -360,7 +384,6 @@ export function Topbar({ onNavHistory, username, onLogout }) {
   return (
    <div className="topbar-main" style={{ position: 'relative', zIndex: 99999, justifyContent: 'space-between' }}>
 
-      {/* ✅ RESTORED ARROWS BLOCK */}
       <div style={{ display: 'flex', gap: '8px' }}>
           <button className="iconbtn" onClick={handleBack} title="Go Back">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
@@ -370,9 +393,18 @@ export function Topbar({ onNavHistory, username, onLogout }) {
           </button>
       </div>
 
+      {/* Warning Banner in Header */}
+      {!hasBfCreds && (
+         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', margin: '0 16px' }}>
+            <div style={{ background: '#fff3e0', color: '#e65100', padding: '6px 16px', borderRadius: '6px', fontSize: '10px', fontWeight: 600, border: '1px solid #ffcc80', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+               <span>Action Required: Missing BigFix Credentials. Please Update BigFix Credentials in Environment Settings.</span>
+            </div>
+         </div>
+      )}
+
       <div className="flex-row items-center gap-16">
 
-        {/* ✅ ENTERPRISE USER BLOCK FIX */}
         <div ref={dropdownRef} style={{ position: 'relative' }}>
           <div
             onClick={() => { if (hasMultipleRoles) setShowDropdown(!showDropdown); }}
@@ -430,7 +462,6 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                 )}
              </div>
 
-             {/* UPGRADED UX: Modern Role Dropdown Menu */}
              {showDropdown && (
                 <div style={{ 
                     position: 'absolute', 
