@@ -3,8 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const API = window.env.VITE_API_BASE;
 
-const REQUIRED_KEYS = new Set(["BIGFIX_BASE_URL", "BIGFIX_USER", "BIGFIX_PASS"]);
+const REQUIRED_KEYS = new Set(["BIGFIX_BASE_URL", "BIGFIX_USER", "BIGFIX_PASS", "SESSION_TIMEOUT"]);
 const LABELS = {
+  SESSION_TIMEOUT: "SESSION TIMEOUT (MINUTES)",
   BIGFIX_BASE_URL: "BIGFIX BASE URL", BIGFIX_USER: "BIGFIX API USERNAME", BIGFIX_PASS: "BIGFIX API PASSWORD", BIGFIX_ALLOW_SELF_SIGNED: "BIGFIX ALLOW SELF SIGNED",
   SANDBOX_BIGFIX_BASE_URL: "SANDBOX BIGFIX BASE URL", SANDBOX_BIGFIX_USER: "SANDBOX BIGFIX API USERNAME", SANDBOX_BIGFIX_PASS: "SANDBOX BIGFIX API PASSWORD", SANDBOX_BIGFIX_ALLOW_SELF_SIGNED: "SANDBOX BIGFIX ALLOW SELF SIGNED",
   PILOT_BIGFIX_BASE_URL: "PILOT BIGFIX BASE URL", PILOT_BIGFIX_USER: "PILOT BIGFIX API USERNAME", PILOT_BIGFIX_PASS: "PILOT BIGFIX API PASSWORD", PILOT_BIGFIX_ALLOW_SELF_SIGNED: "PILOT BIGFIX ALLOW SELF SIGNED",
@@ -18,6 +19,7 @@ const LABELS = {
 };
 
 const TEMPLATE = [
+  { key: "SESSION_TIMEOUT", value: "15", type: "number", secret: false, hint: "15", required: true },
   { key: "BIGFIX_BASE_URL", value: "", type: "string", secret: false, hint: "https://server:52311", required: true },
   { key: "BIGFIX_USER", value: "", type: "string", secret: false, hint: "e.g. bigfix", required: true },
   { key: "BIGFIX_PASS", value: "", type: "string", secret: true, hint: "", required: true },
@@ -131,7 +133,7 @@ function Field({ item, value, onChange, invalid, disabled = false }) {
         </div>
       ) : (
         <div className="inputwrap">
-          <input id={item.key} type={isSecret && !show ? "password" : item.type === "number" ? "number" : "text"} placeholder={item.hint || ""} value={val} onChange={(e) => onChange(item.key, e.target.value)} autoComplete="off" disabled={disabled} />
+          <input id={item.key} type={isSecret && !show ? "password" : item.type === "number" ? "number" : "text"} placeholder={item.hint || ""} value={val} onChange={(e) => onChange(item.key, e.target.value)} autoComplete="off" disabled={disabled} min={item.type === "number" ? "1" : undefined} />
           {isSecret && <button type="button" className="ghost tiny" onClick={() => setShow(s => !s)} disabled={disabled}>{show ? "Hide" : "Show"}</button>}
         </div>
       )}
@@ -151,10 +153,6 @@ export default function Management({ onClose }) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [savingPassword, setSavingPassword] = useState(false);
   const [myBfPassword, setMyBfPassword] = useState("");
   const [savingPersonal, setSavingPersonal] = useState(false);
   const [personalCreds, setPersonalCreds] = useState({ username: "Loading...", hasCreds: false });
@@ -163,6 +161,7 @@ export default function Management({ onClose }) {
 
   const sections = useMemo(() => {
     const ord = {
+      SECURITY_: ["SESSION_TIMEOUT"],
       BIGFIX_: ["BIGFIX_BASE_URL","BIGFIX_USER","BIGFIX_PASS","BIGFIX_ALLOW_SELF_SIGNED"],
       SANDBOX_: ["SANDBOX_BIGFIX_BASE_URL","SANDBOX_BIGFIX_USER","SANDBOX_BIGFIX_PASS","SANDBOX_BIGFIX_ALLOW_SELF_SIGNED"],
       PILOT_: ["PILOT_BIGFIX_BASE_URL","PILOT_BIGFIX_USER","PILOT_BIGFIX_PASS","PILOT_BIGFIX_ALLOW_SELF_SIGNED"],
@@ -174,9 +173,10 @@ export default function Management({ onClose }) {
       VCENTER_:["VCENTER_URL", "VCENTER_USER", "VCENTER_PASSWORD", "VCENTER_ALLOW_SELF_SIGNED"],
       DEBUG_: ["DEBUG_LOG"]
     };
-    const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
-    if (!isMO) return { BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SMTP: [], SN: [], PRISM: [], VCENTER: [], DEBUG: [] };
+    const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx) || ord[pfx].includes(i.key)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
+    if (!isMO) return { SECURITY: [], BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SMTP: [], SN: [], PRISM: [], VCENTER: [], DEBUG: [] };
     return {
+      SECURITY: pick("SECURITY_"),
       BIGFIX: pick("BIGFIX_"),
       SANDBOX: pick("SANDBOX_"),
       PILOT: pick("PILOT_"),
@@ -214,6 +214,7 @@ export default function Management({ onClose }) {
 
   const validationMap = useMemo(() => {
       const map = {
+        SECURITY: sections.SECURITY.every(it => !invalidMap[it.key]),
         BIGFIX: sections.BIGFIX.every(it => !invalidMap[it.key]),
         SANDBOX: sections.SANDBOX.every(it => !invalidMap[it.key]),
         PILOT: sections.PILOT.every(it => !invalidMap[it.key]),
@@ -279,7 +280,6 @@ export default function Management({ onClose }) {
 
   function onCancel() { setValues(originalValues); setEditingSection(null); setMsg(""); setErr(""); }
 
-  // Replicate root settings to stages via backend (saves automatically)
   const replicateAndSave = async () => {
     setSaving(true);
     try {
@@ -287,7 +287,6 @@ export default function Management({ onClose }) {
       const data = await res.json();
       if (data.ok) {
         setMsg(data.message);
-        // Reload settings to show updated values
         await fetchAllSettings();
       } else {
         setErr(data.error || "Replication failed");
@@ -297,22 +296,6 @@ export default function Management({ onClose }) {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleChangePassword = async (e) => {
-      e.preventDefault();
-      setErr(""); setMsg("");
-      if (newPassword !== confirmPassword) return setErr("New passwords do not match.");
-      setSavingPassword(true);
-      try {
-          const data = await fetchAuth('/api/auth/change-password', { currentPassword, newPassword });
-          if (data.ok) {
-              setMsg(data.message || "Password updated successfully.");
-              setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
-          } else {
-              setErr(data.error || "Failed to update password.");
-          }
-      } catch(e) { setErr(e.message); } finally { setSavingPassword(false); }
   };
 
   const handleVerifyBf = async (e) => {
@@ -352,25 +335,7 @@ export default function Management({ onClose }) {
                 <span className="title">My Account</span>
                 {!personalCreds.hasCreds && <span className="pill soft" style={{ backgroundColor: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>Action Required</span>}
               </div>
-              <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '40px', padding: '0 24px 24px' }}>
-                 <div>
-                    <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)' }}>Change Local Password</h3>
-                    <form onSubmit={handleChangePassword}>
-                        <div className="field">
-                            <span className="label">Current Password</span>
-                            <input type="password" placeholder="••••••••" className="control" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)} required />
-                        </div>
-                        <div className="field">
-                            <span className="label">New Password</span>
-                            <input type="password" placeholder="••••••••" className="control" value={newPassword} onChange={e=>setNewPassword(e.target.value)} required />
-                        </div>
-                        <div className="field" style={{ marginBottom: '20px' }}>
-                            <span className="label">Confirm New Password</span>
-                            <input type="password" placeholder="••••••••" className="control" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} required />
-                        </div>
-                        <button type="submit" className="btn pri small" disabled={savingPassword}>{savingPassword ? "Updating..." : "Update Password"}</button>
-                    </form>
-                 </div>
+              <div className="grid" style={{ gridTemplateColumns: '1fr', gap: '40px', padding: '0 24px 24px' }}>
                  <div>
                     <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         Personal BigFix Vault
@@ -401,6 +366,22 @@ export default function Management({ onClose }) {
             {/* Master Operator Settings */}
             {isMO && (
                 <>
+                    {/* Security */}
+                    <details className="section overflow-visible" open>
+                      <summary className="section-head">
+                        <span className="title">Security</span><span className="pill soft">Required</span><div className="spacer" />
+                        {editingSection === 'SECURITY' ? (
+                          <div className="actions">
+                            <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                            <button className="btn primary" onClick={() => onSave('SECURITY')} disabled={saving || !validationMap['SECURITY']}>{saving?"Saving…":"Save"}</button>
+                          </div>
+                        ) : <button className="btn" onClick={() => setEditingSection('SECURITY')} disabled={saving || editingSection !== null}>Edit</button>}
+                      </summary>
+                      <div className="grid">
+                        {sections.SECURITY.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'SECURITY'} />)}
+                      </div>
+                    </details>
+
                     {/* Global BigFix Settings */}
                     <details className="section overflow-visible" open>
                         <summary className="section-head">
@@ -483,7 +464,8 @@ export default function Management({ onClose }) {
                             ) : <button className="btn" onClick={() => setEditingSection('LDAP')} disabled={saving || editingSection !== null}>Edit</button>}
                         </summary>
                         <div className="grid">
-                            {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP' || (it.key !== 'LDAP_ENABLED' && !ldapEnabled)} />)}
+                            {/* 🚀 BUG FIX: Removed the buggy '|| !ldapEnabled' lock. Now inputs are immediately editable when you click Edit. */}
+                            {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP'} />)}
                         </div>
                     </details>
                     

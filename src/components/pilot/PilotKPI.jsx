@@ -268,8 +268,8 @@ function DonutChart({ donut, center, hoverKey, setHoverKey, onClickMap }) {
       e.stopPropagation();
       const lowerKey = String(key).toLowerCase();
       if (lowerKey === 'success' && onClickMap.success) onClickMap.success();
-      else if (lowerKey === 'health' && onClickMap.health) onClickMap.health();
-      else if (lowerKey === 'reboot' && onClickMap.reboot) onClickMap.reboot();
+      else if (lowerKey === 'health failures' && onClickMap.health) onClickMap.health();
+      else if (lowerKey === 'reboot pending' && onClickMap.reboot) onClickMap.reboot();
   };
 
   const getVal = (key) => donut.find(d => d.key === key)?.val || 0;
@@ -311,7 +311,7 @@ function DonutChart({ donut, center, hoverKey, setHoverKey, onClickMap }) {
           <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)" style={{ pointerEvents: 'none' }}>{center.label}</text>
         </g>
         <g transform="translate(64,10)" fontSize="6">
-          {[{ key: "Success", fill: "var(--success)", y: 7 }, { key: "Reboot", fill: "var(--warn)", y: 18 }, { key: "Health", fill: "var(--danger)", y: 30 }].map((l) => (
+          {[{ key: "Success", fill: "var(--success)", y: 7 }, { key: "Reboot Pending", fill: "var(--warn)", y: 18 }, { key: "Health Failures", fill: "var(--danger)", y: 30 }].map((l) => (
             <g key={l.key} transform={`translate(6,${l.y})`} onClick={(e) => handleSliceClick(e, l.key)} onMouseEnter={() => setHoverKey(l.key)} onMouseLeave={() => setHoverKey(null)} className="cursor-pointer" style={{ opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
               <circle cx="4" cy="4" r="3" fill={l.fill} />
               <text x="12" y="6">{l.key} ({getVal(l.key)})</text> 
@@ -352,7 +352,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }, [lastActions, mode]);
 
-  // 🚀 FIXED: Always query the PREVIOUS stage's target group to check its health!
   const scopeGroup = useMemo(() => {
     try {
       const la = lastActions || {};
@@ -363,8 +362,10 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }, [lastActions, mode]);
 
+  const [activeActionId, setActiveActionId] = useState(null);
+  const [isActionStopped, setIsActionStopped] = useState(false);
+
   const [kpi, setKpi] = useState({ rebootPending: 0, critHealthFails: 0, successRate: 0, successCount: 0, totalCount: 0 });
-  const [totalComputers, setTotalComputers] = useState(0);
   
   const [rebootRows, setRebootRows] = useState([]);
   const [openReboot, setOpenReboot] = useState(false);
@@ -389,10 +390,13 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const isEUC = userRole === "EUC";
 
-  const [isActionStopped, setIsActionStopped] = useState(false);
-
+  // Track the pinned ID from props
   useEffect(() => {
-    setIsActionStopped(false); 
+    const id = getPinnedActionId();
+    if (id) {
+       setActiveActionId(id);
+       setIsActionStopped(false); 
+    }
   }, [getPinnedActionId()]);
 
   function classify(raw) {
@@ -411,13 +415,11 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     const R = kpi.rebootPending || 0;
     const H = kpi.critHealthFails || 0;
     const S_action = kpi.successCount || 0;
-    const T_action = kpi.totalCount || 0;
-    const O_action = Math.max(0, T_action - S_action);
 
     const partsCombined = [
       { key: "Success", val: S_action, fill: "var(--success)" },
-      { key: "Reboot", val: R, fill: "var(--warn)" },
-      { key: "Health", val: H + O_action, fill: "var(--danger)" },
+      { key: "Reboot Pending", val: R, fill: "var(--warn)" },
+      { key: "Health Failures", val: H, fill: "var(--danger)" },
     ];
     const total = partsCombined.reduce((a, b) => a + b.val, 0) || 1;
     let acc = 0;
@@ -427,7 +429,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
       acc += p.val;
       return { ...p, start, end, pct: Math.round((p.val / total) * 100) };
     });
-  }, [kpi.rebootPending, kpi.critHealthFails, kpi.successCount, kpi.totalCount]);
+  }, [kpi.rebootPending, kpi.critHealthFails, kpi.successCount]);
 
   const [hoverKey, setHoverKey] = useState(null);
   const center = useMemo(() => {
@@ -446,7 +448,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   const handleKpiClick = (type) => {
       if (onKpiClick) {
-          onKpiClick({ type, group: scopeGroup, id: getPinnedActionId() });
+          onKpiClick({ type, group: scopeGroup, id: activeActionId });
       } else {
           if (type === 'success') openSuccessModal();
           else if (type === 'health') openHealthModal();
@@ -456,7 +458,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   async function openSuccessModal() {
     setOpenSuccess(true);
-    const id = getPinnedActionId();
+    const id = activeActionId;
     if (!id) { setSuccessRows([]); setSuccessLoading(false); return; }
     try {
       setSuccessLoading(true);
@@ -552,14 +554,12 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }
 
-  // 🚀 FIXED: Polling Logic. Health & Reboot run ALWAYS. Action results stop when done.
   useEffect(() => {
     let timer; const ab = new AbortController();
     async function tick() {
       try {
         const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
 
-        // 1. 🚀 ALWAYS FETCH HEALTH METRICS
         const ch = await getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal);
         const healthPayload = { count: Number(ch?.count || 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
         setKpi((p) => ({ ...p, critHealthFails: healthPayload.count }));
@@ -572,34 +572,44 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
           setRebootRows(rpRows);
         } catch (e) {}
 
-        // 2. 🚀 ONLY FETCH ACTION STATUS IF NOT STOPPED
-        if (!isActionStopped) {
-            let actionId = getPinnedActionId();
-            if (actionId) {
-                const statusRes = await getJson(`${API_BASE}/api/actions/${actionId}/status`, ab.signal).catch(()=>({}));
-                const st = String(statusRes?.state || "").toLowerCase();
-                const isDone = st === 'stopped' || st === 'expired';
+        // 🚀 ALWAYS CHECK GLOBAL ACTION ID TO SYNC TABS ACROSS USERS
+        const last = await getJson(`${API_BASE}/api/actions/last`, ab.signal).catch(()=>null);
+        const globalLastId = last?.actionId ? String(last.actionId) : null;
+        
+        let idToUse = activeActionId;
+        if (globalLastId && globalLastId !== activeActionId) {
+            idToUse = globalLastId;
+            setActiveActionId(idToUse);
+            setIsActionStopped(false); // Unfreeze polling
+        }
 
-                const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
-                let uniqueRows = [];
-                if (Array.isArray(res?.rows)) {
-                    const map = new Map();
-                    for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-                    uniqueRows = Array.from(map.values());
-                }
-                const success = uniqueRows.length > 0 
-                    ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-                    : Number(res?.success ?? 0);
-                
-                const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
-                const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-                
-                setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
+        if (!idToUse) {
+            setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
+            return;
+        }
 
-                if (isDone) setIsActionStopped(true); // Stop Action polling, but Health/Reboot will continue
-            } else {
-                setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
+        if (!isActionStopped || idToUse !== activeActionId) {
+            const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
+            const st = String(statusRes?.state || "").toLowerCase();
+            const isDone = st === 'stopped' || st === 'expired';
+
+            const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
+            let uniqueRows = [];
+            if (Array.isArray(res?.rows)) {
+                const map = new Map();
+                for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+                uniqueRows = Array.from(map.values());
             }
+            const success = uniqueRows.length > 0 
+                ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+                : Number(res?.success ?? 0);
+            
+            const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
+            const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+            
+            setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
+
+            if (isDone) setIsActionStopped(true); 
         }
       } catch (err) {
         if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
@@ -607,7 +617,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
     tick(); timer = setInterval(tick, 15000); 
     return () => { clearInterval(timer); ab.abort(); };
-  }, [mode, getPinnedActionId, scopeGroup, isActionStopped]);
+  }, [mode, scopeGroup, activeActionId, isActionStopped]);
 
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
@@ -616,7 +626,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
         <div className="flex-1 min-w-220">
           <div className="kpis kpi-row-wrap">
             {!isEUC && (
-              // 🚀 FIXED: Value now concatenates percentage and (successCount/totalCount)
               <MetricTile 
                  label="Success Rate" 
                  value={kpi.totalCount > 0 ? `${kpi.successRate}% (${kpi.successCount}/${kpi.totalCount})` : `${kpi.successRate}%`} 

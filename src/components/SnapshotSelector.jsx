@@ -4,8 +4,9 @@ import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
+import { useToast } from "./common/CustomToast";
+import InlineSpinner from "./common/InlineSpinner";
 
-// --- SECURE IN-MEMORY VM CACHE ---
 const vmResolutionCache = new Map();
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
@@ -23,6 +24,8 @@ async function postJSON(url, body) {
 }
 
 export default function SnapshotManager({ onClose, groupName: initialGroup, onComplete, environment }) {
+  const { showToast } = useToast();
+
   const [activeTab, setActiveTab] = useState("TARGETS");
   const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
   const [items, setItems] = useState([]);
@@ -30,7 +33,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [selectedIds, setSelectedIds] = useState(new Set()); 
-  const [error, setError] = useState("");
+  
   const [processing, setProcessing] = useState(false);
   const [snapName, setSnapName] = useState(`Patching_${new Date().toISOString().slice(0, 10)}`);
   const [description, setDescription] = useState("Automated Patching Snapshot");
@@ -128,7 +131,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const fetchData = async () => {
     if (mode === "GROUP" && !selectedGroupId) return;
 
-    setIsFetching(true); setError("");
+    setIsFetching(true); 
     try {
       let rawItems = [];
       if (mode === "GROUP") {
@@ -146,7 +149,6 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
       const processedItems = rawItems.map(c => {
           const key = String(c.name || "").toLowerCase();
           if (vmResolutionCache.has(key)) {
-              // Load instantly from global cache
               const cached = vmResolutionCache.get(key);
               return { ...c, vcId: cached.vcId, vcStatus: cached.vcStatus };
           } else {
@@ -162,14 +164,17 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
       if (unresolved.length > 0) {
           resolveBatch(unresolved);
       }
-    } catch (e) { setError(e.message); } finally { setIsFetching(false); }
+    } catch (e) { 
+      showToast(e.message, "error"); 
+    } finally { 
+      setIsFetching(false); 
+    }
   };
 
   useEffect(() => { setItems([]); setSelectedIds(new Set()); setCurrentPage(1); }, [mode, selectedGroupId]);
   useEffect(() => { fetchData(); }, [mode, selectedGroupId]);
 
   const resolveBatch = async (unresolvedItems) => {
-      // Chunk the API requests to prevent "All Servers" from crashing the payload limit
       const CHUNK_SIZE = 200; 
       
       for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
@@ -187,12 +192,10 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                   const vcId = resultMap.get(key);
                   const status = vcId ? 'ready' : 'not_found';
                   
-                  // Save to secure memory cache
                   vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
                   chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
               });
               
-              // Safely update state for this specific chunk
               setItems(prev => prev.map(item => {
                   const key = String(item.name || "").toLowerCase();
                   if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
@@ -326,16 +329,24 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
 
   const handleExecute = async () => {
     if (selectedIds.size === 0) return;
-    setProcessing(true); setError(""); setActiveTab("EXECUTION");
+    setProcessing(true); 
+    setActiveTab("EXECUTION");
     const vmNames = {}; items.forEach(i => { if (i.vcId) vmNames[i.vcId] = i.name; });
     try {
       const res = await postJSON("/api/vcenter/snapshot", { vmIds: Array.from(selectedIds), snapshotName: snapName, description, includeMemory, quiesce, vmNames });
       if (!res.ok) throw new Error(res.error);
+      
+      showToast("Snapshot tasks started successfully", "success");
+      
       await refreshHistory(); 
       const successCount = res.results?.filter((r) => r.ok).length || 0;
       setProcessing(false);
       if (onComplete) onComplete({ successCount });
-    } catch (e) { setError(e.message); setProcessing(false); setActiveTab("SETTINGS"); }
+    } catch (e) { 
+      showToast(e.message, "error"); 
+      setProcessing(false); 
+      setActiveTab("SETTINGS"); 
+    }
   };
 
   const refreshHistory = async () => {
@@ -400,7 +411,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                     {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
                 </div>
                 <button className="iconbtn" onClick={activeTab === 'EXECUTION' ? refreshHistory : fetchData} disabled={processing || isFetching} title="Refresh Data">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                    {(activeTab === 'EXECUTION' ? processing : isFetching) ? <InlineSpinner size={16} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
                 </button>
               </>
             )}
@@ -563,10 +574,25 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
               </div>
             </div>
           </div>
-          {error && <div className="banner error">{error}</div>}
+          
           <div className="action-bar justify-between" style={{ borderTop: '1px solid var(--border)' }}>
              <button className="btn outline" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button>
-             <button className="btn pri min-w-140" onClick={handleExecute} disabled={processing || selectedIds.size === 0}>{processing ? "Starting..." : "Take Snapshot"}</button>
+             
+             {/* 🚀 Integrated InlineSpinner */}
+             <button 
+                className="btn pri min-w-140" 
+                onClick={handleExecute} 
+                disabled={processing || selectedIds.size === 0}
+             >
+               {processing ? (
+                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                    <InlineSpinner size={16} variant="light" />
+                    <span>Starting...</span>
+                 </div>
+               ) : (
+                 "Take Snapshot"
+               )}
+             </button>
           </div>
         </>
       )}
@@ -601,12 +627,12 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
                         &nbsp; Export
                     </button>
-                    {showExecExpDrop && (
+                    {showExpDrop && (
                         <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className={`btn small ${execExportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExecExportFormat(fmt); }}>{fmt}</button>
+                                 <button key={fmt} className={`btn small ${execExportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                                ))}
                             </div>
                             <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>

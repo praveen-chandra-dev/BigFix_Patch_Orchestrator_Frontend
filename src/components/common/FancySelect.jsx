@@ -95,7 +95,7 @@ export default function FancySelect({ label, options = [], value, onChange, disa
                     <div key={optVal} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={(e) => handleOptionClick(opt, e)} style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: isSelected ? 'var(--bg)' : 'transparent', color: isSelected ? 'var(--primary)' : 'var(--text)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center' }} onMouseOver={e => !isSelected && (e.currentTarget.style.background = 'var(--bg)')} onMouseOut={e => !isSelected && (e.currentTarget.style.background = 'transparent')}>
                       {multiSelect && <input type="checkbox" className="custom-checkbox mr-10 no-events" checked={isSelected} readOnly style={{ margin: '0 8px 0 0' }} />}
                       <span className="fx-label">{optLabel}</span>
-                      {!multiSelect && isSelected && <span style={{ marginLeft: 'auto' }}>✓</span>}
+                      {!multiSelect && isSelected && <span style={{ marginLeft: 'auto' }}></span>}
                     </div>
                   );
                 })

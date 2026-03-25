@@ -68,16 +68,16 @@ const DESCRIPTIONS = {
 };
 
 const COLOR = {
-  Fixed: "#10b981", Completed: "#10b981", 
+  Fixed: "#10b981", Completed: "#059669", 
   Failed: "#ef4444", error: "#b91c1c", "Download Failed": "#dc2626", 
-  Running: "#2563eb", Evaluating: "#06b6d4", Waiting: "#8b5cf6", 
-  "Pending Restart": "#f59e0b", "Pending Client Restart": "#f59e0b",
-  "Pending Message": "#f59e0b", "Pending Login": "#f59e0b", 
-  "Pending Downloads": "#f59e0b", "Pending Offer Acceptance": "#f59e0b", 
-  Cancelled: "#6b7280", Locked: "#6b7280", Constrained: "#6b7280",
-  Postponed: "#6b7280", "Invalid Signature": "#6b7280", "Offers Disabled": "#6b7280", 
-  "Disk Limited": "#fb7185", "Disk Free Limited": "#f97316", "Hash Mismatch": "#a855f7", 
-  "Transcoding Error": "#f97316", "Not Relevant": "#64748b", "Not Reported": "#94a3b8"
+  Running: "#2563eb", Evaluating: "#0ea5e9", Waiting: "#8b5cf6", 
+  "Pending Restart": "#f59e0b", "Pending Client Restart": "#d97706",
+  "Pending Message": "#ea580c", "Pending Login": "#f97316", 
+  "Pending Downloads": "#eab308", "Pending Offer Acceptance": "#fb923c", 
+  Cancelled: "#6b7280", Locked: "#4b5563", Constrained: "#71717a",
+  Postponed: "#a1a1aa", "Invalid Signature": "#52525b", "Offers Disabled": "#3f3f46", 
+  "Disk Limited": "#fb7185", "Disk Free Limited": "#c2410c", "Hash Mismatch": "#d946ef", 
+  "Transcoding Error": "#9a3412", "Not Relevant": "#94a3b8", "Not Reported": "#cbd5e1"
 };
 
 const EXTRA = ["#10b981", "#f97316", "#e11d48", "#84cc16", "#14b8a6", "#8b5cf6", "#f43f5e"];
@@ -224,7 +224,6 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   const [donutFilter, setDonutFilter] = useState(null);
   const refreshAbortRef = useRef(null);
 
-  // 🚀 Tracks if we should stop polling
   const [isActionStopped, setIsActionStopped] = useState(false);
 
   useEffect(() => {
@@ -235,25 +234,38 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   }, [actionId]);
 
   const refresh = useCallback(async (abortSignal) => {
-    // 🚀 Prevent fetching if action is already stopped
-    if (isActionStopped) return;
-
-    setLoading(true);
     setErr("");
     try {
       let idToUse = lockedId;
-      if (!idToUse) {
-        const last = await getJson(`${API_BASE}/api/actions/last`, abortSignal);
-        idToUse = last?.actionId ? String(last.actionId) : null;
-        if (!lockedId) setLockedId(idToUse);
+
+      // 🚀 ALWAYS poll for a newer action if we don't have a hardcoded actionId prop.
+      // This synchronizes users on other machines.
+      if (!actionId) {
+        const last = await getJson(`${API_BASE}/api/actions/last`, abortSignal).catch(()=>null);
+        const fetchedLastId = last?.actionId ? String(last.actionId) : null;
+        if (fetchedLastId && fetchedLastId !== lockedId) {
+          idToUse = fetchedLastId;
+          setLockedId(idToUse);
+          setIsActionStopped(false); // Unfreeze! A new action was found globally
+        }
       }
+
       if (!idToUse) {
         setSummary({ success: 0, total: 0 });
         setCounts(new Map());
         setStatusBanner(null);
+        setLoading(false);
         return;
       }
       
+      // 🚀 Only skip fetching results if THIS SPECIFIC action is already done.
+      // The block above still allowed us to detect if a *new* one arrived.
+      if (isActionStopped && idToUse === lockedId) {
+          setLoading(false);
+          return;
+      }
+
+      setLoading(true);
       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
       
       const allRows = Array.isArray(res?.rows) ? res.rows : [];
@@ -286,7 +298,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
         }
         else if (s === 'expired' || s === 'stopped') {
             setStatusBanner({ msg: "Action Stopped", type: 'completed' });
-            setIsActionStopped(true); // 🚀 ACTION IS DONE, FREEZE UI POLLING
+            setIsActionStopped(true); // Freeze heavy polling for this specific action
         }
         else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
       } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
@@ -295,12 +307,9 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     } finally {
       if (!abortSignal || !abortSignal.aborted) setLoading(false);
     }
-  }, [lockedId, isActionStopped]); // Added isActionStopped to dependencies
+  }, [lockedId, isActionStopped, actionId]); 
 
   useEffect(() => {
-    // 🚀 Prevent API fetch and polling if action is already stopped
-    if (isActionStopped) return;
-
     refreshAbortRef.current?.abort();
     const ab = new AbortController();
     refreshAbortRef.current = ab;
@@ -308,7 +317,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     refresh(ab.signal);
 
     const interval = setInterval(() => { 
-        if (!loading && !isActionStopped) refresh(ab.signal); 
+        if (!loading) refresh(ab.signal); 
     }, 15000); 
 
     return () => { ab.abort(); clearInterval(interval); };
@@ -365,8 +374,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       <section className="card reveal" data-reveal>
         <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
-          {/* 🚀 Refresh button is disabled when stopped */}
-          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading || isActionStopped}>{loading ? "" : ""}
+          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "" : ""}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>          
           </button>
         </div>

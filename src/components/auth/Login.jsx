@@ -6,7 +6,10 @@ const API_BASE = window.env.VITE_API_BASE;
 export default function Login({ onSuccess }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
+  
   const [isSetup, setIsSetup] = useState(false);
+  const [isResetMode, setIsResetMode] = useState(false); 
+  
   const [setupConfirm, setSetupConfirm] = useState("");
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
@@ -35,7 +38,6 @@ export default function Login({ onSuccess }) {
         const r = await fetch(`${API_BASE}/api/auth/signup`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            // Setup user is always the Super Admin
             body: JSON.stringify({ username: u.trim(), password: p, role: 'Admin' }), 
         });
         
@@ -47,6 +49,22 @@ export default function Login({ onSuccess }) {
 
         setInfo("Admin account created successfully! Please login.");
         setIsSetup(false); setP(""); setSetupConfirm(""); setBusy(false); 
+
+      } else if (isResetMode) {
+        if (p !== setupConfirm) throw new Error("Passwords do not match.");
+        const r = await fetch(`${API_BASE}/api/auth/reset-password`, {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ username: u.trim(), newPassword: p })
+        });
+        
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.message || "Reset failed. Please verify your username.");
+        
+        setInfo("Password successfully changed in Database! Please log in.");
+        setIsResetMode(false);
+        setP(""); setSetupConfirm("");
+        setBusy(false);
 
       } else {
         await performLogin();
@@ -73,16 +91,19 @@ export default function Login({ onSuccess }) {
     }
 
     if (!r.ok || !j.ok) {
-        throw new Error(j.message || (j.error === 'invalid' ? "Invalid username or password." : "Login failed. Please verify your credentials."));
+        if (j.error === 'invalid') {
+             throw new Error("Invalid username or password. If you forgot your password, use the 'Forgot Password' button below.");
+        }
+        throw new Error(j.message || "Login failed. Please verify your credentials.");
     }
       
-    // Default to 'User'. The actual RBAC is now handled dynamically by BigFix XML parsing in the Header.
     const userRole = j.role || "User";
-    
-    // UI Pointer (Not used for security, just for the frontend to know the user's name)
     sessionStorage.setItem("username", j.username);
     
-    onSuccess?.({ username: j.username, userId: j.userId, role: userRole });
+    // 🚀 FIX: Instantly save the role to sessionStorage so the Topbar NEVER flickers!
+    sessionStorage.setItem("user_role", userRole); 
+    
+    onSuccess?.({ username: j.username, userId: j.userId, role: userRole, timeoutMins: j.timeoutMins });
     setBusy(false);
   }
 
@@ -90,10 +111,11 @@ export default function Login({ onSuccess }) {
     <div className="login-outer">
       <div className="login-card">
         <h2 className="login-title">
-            {isSetup ? "Create Admin Account" : "Login"}
+            {isSetup ? "Create Admin Account" : isResetMode ? "Reset Password" : "Login"}
         </h2>
         
         {isSetup && <p className="intro-text">Welcome! Please create the first Administrator account.</p>}
+        {isResetMode && <p className="intro-text">Enter your username and a new password to update the database.</p>}
         
         <form onSubmit={handleAction}>
              <label>
@@ -108,20 +130,20 @@ export default function Login({ onSuccess }) {
              </label>
           
             <label>
-              <span>Password</span>
+              <span>{isResetMode ? "New Password" : "Password"}</span>
               <input
                 type="password"
                 value={p}
                 onChange={(e) => setP(e.target.value)}
-                placeholder="Enter password"
-                autoComplete={isSetup ? "new-password" : "current-password"}
+                placeholder={isResetMode ? "Enter new password" : "Enter password"}
+                autoComplete={isSetup || isResetMode ? "new-password" : "current-password"}
                 required
               />
             </label>
 
-          {isSetup && (
+          {(isSetup || isResetMode) && (
              <label>
-                <span>Confirm Password</span>
+                <span>Confirm {isResetMode ? "New Password" : "Password"}</span>
                 <input
                   type="password"
                   value={setupConfirm}
@@ -153,9 +175,31 @@ export default function Login({ onSuccess }) {
           
           {!!info && <div className="alert success">{info}</div>}
 
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Processing..." : (isSetup ? "Create Admin" : "Login")}
+          <button type="submit" className="btn-primary" disabled={busy} style={{ marginBottom: isResetMode || isSetup ? '0' : '12px' }}>
+            {busy ? "Processing..." : (isSetup ? "Create Admin" : isResetMode ? "Reset & Update Database" : "Login")}
           </button>
+
+          {!isSetup && !isResetMode && (
+             <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                <button 
+                  type="button" 
+                  onClick={() => { setIsResetMode(true); setErr(""); setInfo(""); setP(""); setSetupConfirm(""); }} 
+                  style={{ background: 'none', border: 'none', color: '#1976d2', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' }}>
+                  Forgot Password?
+                </button>
+             </div>
+          )}
+
+          {isResetMode && (
+             <div style={{ textAlign: 'center', marginTop: '15px' }}>
+                <button 
+                  type="button" 
+                  onClick={() => { setIsResetMode(false); setErr(""); setInfo(""); setP(""); setSetupConfirm(""); }} 
+                  style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '13px' }}>
+                  Cancel Reset / Back to Login
+                </button>
+             </div>
+          )}
         </form>
       </div>
     </div>

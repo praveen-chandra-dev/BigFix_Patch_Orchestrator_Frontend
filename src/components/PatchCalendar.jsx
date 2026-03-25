@@ -4,6 +4,8 @@ import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
+import { useToast } from "./common/CustomToast";
+import InlineSpinner from "./common/InlineSpinner";
 
 const DAYS_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -61,10 +63,12 @@ function evaluateCondition(f, operator, s, colId) {
 }
 
 export default function PatchCalendar({ onClose, userRole }) {
+  const { showToast } = useToast();
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  
   const [lastUpdated, setLastUpdated] = useState("");
   const [viewMode, setViewMode] = useState("CALENDAR"); 
   const [selectedDateFilter, setSelectedDateFilter] = useState(null); 
@@ -107,11 +111,15 @@ export default function PatchCalendar({ onClose, userRole }) {
 
   const fetchEvents = async () => {
     try {
-      setLoading(true); setError(null);
+      setLoading(true); 
       const res = await fetch(`${API_BASE}/api/calendar?role=${encodeURIComponent(userRole)}`);
       const data = await res.json();
       if (data.ok) { setEvents(data.events || []); setLastUpdated(new Date().toLocaleString()); }
-    } catch (err) { setError("Failed to fetch schedule data."); } finally { setLoading(false); }
+    } catch (err) { 
+      showToast("Failed to fetch schedule data.", "error"); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
@@ -126,7 +134,7 @@ export default function PatchCalendar({ onClose, userRole }) {
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
-    setError(null); const reader = new FileReader();
+    const reader = new FileReader();
     reader.onload = (evt) => parseCSV(evt.target.result); reader.readAsText(file); e.target.value = null; 
   };
 
@@ -143,17 +151,33 @@ export default function PatchCalendar({ onClose, userRole }) {
       if (!isNaN(monthRaw)) monthIndex = parseInt(monthRaw, 10) - 1;
       else monthIndex = MONTH_NAMES.findIndex(m => m.toLowerCase() === monthRaw.toLowerCase());
       if (!server || isNaN(day) || monthIndex === -1 || isNaN(yr) || !os) continue;
-      if (yr !== nowYear) { setError(`Error: Row ${i+1} has year ${yr}. Only current year (${nowYear}) is allowed.`); return; }
+      if (yr !== nowYear) { 
+        showToast(`Error: Row ${i+1} has year ${yr}. Only current year (${nowYear}) is allowed.`, "error"); 
+        return; 
+      }
       newEvents.push({ server, day, monthIndex, year: yr, time, os });
     }
-    if (newEvents.length === 0) { setError("No valid events found in CSV."); return; }
+    if (newEvents.length === 0) { 
+      showToast("No valid events found in CSV.", "error"); 
+      return; 
+    }
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/api/calendar`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: newEvents }) });
       const data = await res.json();
-      if (data.ok) { setEvents(newEvents); setLastUpdated(new Date().toLocaleString()); alert("Schedule uploaded successfully!"); } 
-      else { setError("Failed to save: " + (data.error || "Unknown error")); }
-    } catch (err) { setError("Network error saving schedule."); } finally { setLoading(false); }
+      if (data.ok) { 
+        setEvents(newEvents); 
+        setLastUpdated(new Date().toLocaleString()); 
+        showToast("Schedule uploaded successfully!", "success"); 
+      } 
+      else { 
+        showToast("Failed to save: " + (data.error || "Unknown error"), "error"); 
+      }
+    } catch (err) { 
+      showToast("Network error saving schedule.", "error"); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const applyFilters = (item) => {
@@ -259,8 +283,8 @@ export default function PatchCalendar({ onClose, userRole }) {
           {isAdmin && (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginRight: '12px' }}>
               <button className="btn outline sec small" style={{ height: '36px' }} onClick={downloadTemplate}>Template</button>
-              <label className="btn outline sec small" style={{ cursor: 'pointer', margin: 0, display: 'flex', alignItems: 'center', height: '36px' }}>
-                {loading ? "..." : "Upload CSV"}
+              <label className="btn outline sec small" style={{ cursor: loading ? 'not-allowed' : 'pointer', margin: 0, display: 'flex', alignItems: 'center', height: '36px', gap: '8px' }}>
+                {loading ? <><InlineSpinner size={14} variant="primary" /> Uploading...</> : "Upload CSV"}
                 <input type="file" accept=".csv" onChange={handleFileUpload} hidden disabled={loading} />
               </label>
               <div style={{ width: '1px', height: '24px', background: 'var(--border)', margin: '0 4px' }}></div>
@@ -274,8 +298,8 @@ export default function PatchCalendar({ onClose, userRole }) {
                 </button>
                 {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
               </div>
-              <button className="iconbtn" onClick={fetchEvents} title="Refresh Data">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              <button className="iconbtn" onClick={fetchEvents} title="Refresh Data" disabled={loading}>
+                  {loading ? <InlineSpinner size={16} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
               </button>
             </>
           )}
@@ -306,8 +330,6 @@ export default function PatchCalendar({ onClose, userRole }) {
             <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
           </div>
         )}
-        
-        {error && <div className="banner error" style={{ marginBottom: "16px" }}>{error}</div>}
 
         <div className="tabs sub" style={{ marginBottom: '20px' }}>
             <button className={`tab small ${viewMode === 'CALENDAR' ? 'active' : ''}`} onClick={() => setViewMode('CALENDAR')}>Calendar View</button>

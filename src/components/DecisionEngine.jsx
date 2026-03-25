@@ -1,6 +1,7 @@
 // frontend/src/components/DecisionEngine.jsx
 import { useState } from "react";
-import { useEnvironment } from "./Environment.jsx"; 
+import { useEnvironment } from "./Environment.jsx";
+import InlineSpinner from "./common/InlineSpinner";
 
 export default function DecisionEngine({
   apiBase = window.env.VITE_API_BASE,
@@ -9,24 +10,27 @@ export default function DecisionEngine({
   autoMail = false,
   onDone = () => {},
   disabled = false,
-  username, 
+  username,
 }) {
   const { env } = useEnvironment();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  
+
   const [checkingBaseline, setCheckingBaseline] = useState(false);
   const [baselineWarning, setBaselineWarning] = useState(null);
 
   async function checkBaselineStatus() {
     if (!baseline) return null;
     try {
-      const resp = await fetch(`${apiBase.replace(/\/+$/, "")}/api/baseline/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baselineName: baseline })
-      });
+      const resp = await fetch(
+        `${apiBase.replace(/\/+$/, "")}/api/baseline/validate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baselineName: baseline }),
+        },
+      );
       if (resp.ok) {
         const j = await resp.json();
         if (j.modified) return j.warning;
@@ -39,7 +43,7 @@ export default function DecisionEngine({
 
   async function executeTrigger() {
     if (disabled || busy) return;
-    
+
     setShowConfirmModal(false);
     setBusy(true);
     setStatus("");
@@ -51,26 +55,41 @@ export default function DecisionEngine({
         groupName: group,
         autoMail: !!autoMail,
         triggeredBy: username,
-        patchWindow: { days: env.patchWindowDays || 0, hours: env.patchWindowHours || 0, minutes: env.patchWindowMinutes || 0 }
+        patchWindow: {
+          days: env.patchWindowDays || 0,
+          hours: env.patchWindowHours || 0,
+          minutes: env.patchWindowMinutes || 0,
+        },
       };
 
-      const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       const text = await resp.text();
       let data;
-      try { data = JSON.parse(text); } catch { data = { ok: false, raw: text }; }
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { ok: false, raw: text };
+      }
 
       if (!resp.ok || data.ok === false) {
-        const msg = data?.error || data?.message || `HTTP ${resp.status}${text ? `: ${text.slice(0, 300)}` : ""}`;
+        const msg =
+          data?.error ||
+          data?.message ||
+          `HTTP ${resp.status}${text ? `: ${text.slice(0, 300)}` : ""}`;
         setStatus(`Failed to trigger sandbox: ${msg}`);
         onDone({ ok: false, error: msg });
         return;
       }
 
       let successMsg = "Sandbox trigger sent successfully.";
-      if (data.preMailError) successMsg += `\n(Email failed: ${data.preMailError})`;
+      if (data.preMailError)
+        successMsg += `\n(Email failed: ${data.preMailError})`;
       setStatus(successMsg);
-      onDone({ ok: true, ...data }); 
-
+      onDone({ ok: true, ...data });
     } catch (err) {
       const msg = (err && err.message) || String(err);
       setStatus(`Failed to trigger sandbox: ${msg}`);
@@ -102,20 +121,42 @@ export default function DecisionEngine({
             className="btn outline small"
             onClick={handleTriggerClick}
             disabled={isDisabled || checkingBaseline}
-            title={disabled ? "Sandbox completed - view only mode" : isDisabled ? "Select a baseline and group first" : "Trigger Sandbox"}
+            title={
+              disabled
+                ? "Sandbox completed - view only mode"
+                : isDisabled
+                  ? "Select a baseline and group first"
+                  : "Trigger Sandbox"
+            }
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
-            {busy ? "Triggering…" : checkingBaseline ? "Checking..." : "Trigger Sandbox"}
+            {busy ? (
+              <>
+                <InlineSpinner size={14} variant="dark" />
+                <span>Triggering...</span>
+              </>
+            ) : checkingBaseline ? (
+              <>
+                <InlineSpinner size={14} variant="dark" />
+                <span>Checking...</span>
+              </>
+            ) : (
+              "Trigger Sandbox"
+            )}
           </button>
         </div>
 
         <div className="sub de-sub-top">
-          {disabled && <span className="pill blue de-view-only-pill">View Only</span>}
+          {disabled && (
+            <span className="pill blue de-view-only-pill">View Only</span>
+          )}
         </div>
 
         {status && <div className="de-status-msg">{status}</div>}
 
         <div className="sub de-sub-bottom">
-          Sandbox → Pilot → Production. Trigger Pilot only in Pilot stage. Promote after Evaluate.
+          Sandbox → Pilot → Production. Trigger Pilot only in Pilot stage.
+          Promote after Evaluate.
         </div>
       </section>
 
@@ -130,14 +171,40 @@ export default function DecisionEngine({
               </div>
             )}
             <div className="sub de-confirm-info">
-              You are about to trigger the baseline:<br />
-              <strong>{baseline || "N/A"}</strong><br /><br />
-              This action will target the group:<br />
+              You are about to trigger the baseline:
+              <br />
+              <strong>{baseline || "N/A"}</strong>
+              <br />
+              <br />
+              This action will target the group:
+              <br />
               <strong>{group || "N/A"}</strong>
             </div>
             <div className="row de-modal-footer">
-              <button type="button" className="btn" onClick={() => setShowConfirmModal(false)} disabled={busy}>Cancel</button>
-              <button type="button" className="btn pri" onClick={executeTrigger} disabled={busy}>{busy ? "Triggering..." : "Confirm & Trigger"}</button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowConfirmModal(false)}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn pri"
+                onClick={executeTrigger}
+                disabled={busy}
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                {busy ? (
+                  <>
+                    <InlineSpinner size={14} variant="light" />
+                    <span>Triggering...</span>
+                  </>
+                ) : (
+                  "Confirm & Trigger"
+                )}
+              </button>
             </div>
           </div>
         </div>

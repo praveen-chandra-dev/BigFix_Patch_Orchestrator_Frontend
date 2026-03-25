@@ -1,11 +1,20 @@
 // frontend/src/components/Environment.jsx
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import FancySelect from "./common/FancySelect";
+import InlineSpinner from "./common/InlineSpinner";
 
 const EnvironmentContext = createContext(null);
 export function useEnvironment() {
   const ctx = useContext(EnvironmentContext);
-  if (!ctx) throw new Error("useEnvironment must be used inside <EnvironmentProvider>");
+  if (!ctx)
+    throw new Error("useEnvironment must be used inside <EnvironmentProvider>");
   return ctx;
 }
 export function EnvironmentProvider({ children }) {
@@ -33,8 +42,8 @@ const API_BASE = window.env?.VITE_API_BASE || "http://localhost:5174";
 function getHeaders() {
   return {
     "Content-Type": "application/json",
-    "Accept": "application/json",
-    "x-user-role": sessionStorage.getItem("user_role") || "Admin"
+    Accept: "application/json",
+    "x-user-role": sessionStorage.getItem("user_role") || "Admin",
   };
 }
 
@@ -44,7 +53,7 @@ export default function Environment() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [baselines, setBaselines] = useState([]);
-  const [groups, setGroups] = useState([]); 
+  const [groups, setGroups] = useState([]);
   const abortRef = useRef(null);
 
   async function loadOptions() {
@@ -52,56 +61,61 @@ export default function Environment() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      setLoading(true); setErr("");
+      setLoading(true);
+      setErr("");
 
-      const groupPromise = fetch(`${API_BASE}/api/groups/list`, { 
-          headers: getHeaders(), 
-          signal: controller.signal 
-      }).then(r => r.json());
+      const groupPromise = fetch(`${API_BASE}/api/groups/list`, {
+        headers: getHeaders(),
+        signal: controller.signal,
+      }).then((r) => r.json());
 
       const baselinePromise = fetch(`${API_BASE}/api/baselines/list`, {
-          headers: getHeaders(),
-          signal: controller.signal
-      }).then(r => r.json());
+        headers: getHeaders(),
+        signal: controller.signal,
+      }).then((r) => r.json());
 
-      const configPromise = fetch(`${API_BASE}/api/config`, { 
-          headers: getHeaders(), 
-          signal: controller.signal 
-      }).then(r => r.json()).catch(() => ({}));
+      const configPromise = fetch(`${API_BASE}/api/config`, {
+        headers: getHeaders(),
+        signal: controller.signal,
+      })
+        .then((r) => r.json())
+        .catch(() => ({}));
 
       const [bRes, gRes, cConfig] = await Promise.all([
         baselinePromise,
         groupPromise,
-        configPromise
+        configPromise,
       ]);
 
-      const bNames = (bRes.baselines || []).map(b => b.name).sort();
-      const gNames = (gRes.groups || []).map(g => g.name).sort();
+      const bNames = (bRes.baselines || []).map((b) => b.name).sort();
+      const gNames = (gRes.groups || []).map((g) => g.name).sort();
 
       setBaselines(bNames);
       setGroups(gNames);
 
       setEnv((f) => {
-          let defaultBaseline = f.baseline;
-          if (!defaultBaseline || !bNames.includes(defaultBaseline)) {
-              defaultBaseline = cConfig.lastSandboxBaseline;
-          }
-          const currentBaselineValid = defaultBaseline && bNames.includes(defaultBaseline);
-          
-          let defaultGroup = f.sbxGroup;
-          if (!defaultGroup || !gNames.includes(defaultGroup)) {
-              defaultGroup = cConfig.lastSandboxGroup;
-          }
-          const currentGroupValid = defaultGroup && gNames.includes(defaultGroup);
-          
-          return {
-              ...f,
-              baseline: currentBaselineValid ? defaultBaseline : "",
-              sbxGroup: currentGroupValid ? defaultGroup : "",
-          };
+        let defaultBaseline = f.baseline;
+        if (!defaultBaseline || !bNames.includes(defaultBaseline)) {
+          defaultBaseline = cConfig.lastSandboxBaseline;
+        }
+        const currentBaselineValid =
+          defaultBaseline && bNames.includes(defaultBaseline);
+
+        let defaultGroup = f.sbxGroup;
+        if (!defaultGroup || !gNames.includes(defaultGroup)) {
+          defaultGroup = cConfig.lastSandboxGroup;
+        }
+        const currentGroupValid = defaultGroup && gNames.includes(defaultGroup);
+
+        return {
+          ...f,
+          baseline: currentBaselineValid ? defaultBaseline : "",
+          sbxGroup: currentGroupValid ? defaultGroup : "",
+        };
       });
     } catch (e) {
-      if (e.name !== "AbortError") setErr(`Failed to load options: ${e.message}`);
+      if (e.name !== "AbortError")
+        setErr(`Failed to load options: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -110,22 +124,24 @@ export default function Environment() {
   useEffect(() => {
     loadOptions();
     return () => abortRef.current?.abort();
-  }, []); 
+  }, []);
 
   const handleNumChange = (k) => (e) => {
-      const val = e.target.value;
-      if (val === "") setEnv(f => ({ ...f, [k]: "" }));
-      else setEnv(f => ({ ...f, [k]: Number(val) }));
+    const val = e.target.value;
+    if (val === "") setEnv((f) => ({ ...f, [k]: "" }));
+    else setEnv((f) => ({ ...f, [k]: Number(val) }));
   };
 
-  const handleBlur = (k, min = 0, max = 999) => () => {
-      setEnv(f => {
-          let num = Number(f[k]);
-          if (!Number.isFinite(num) || f[k] === "") num = min;
-          num = Math.min(max, Math.max(min, num));
-          return { ...f, [k]: num };
+  const handleBlur =
+    (k, min = 0, max = 999) =>
+    () => {
+      setEnv((f) => {
+        let num = Number(f[k]);
+        if (!Number.isFinite(num) || f[k] === "") num = min;
+        num = Math.min(max, Math.max(min, num));
+        return { ...f, [k]: num };
       });
-  };
+    };
 
   const selectsDisabled = loading || (!baselines.length && !groups.length);
 
@@ -133,9 +149,32 @@ export default function Environment() {
     <section className="card reveal" id="card-env" data-reveal>
       <div className="env-header-row">
         <h2>Environment &amp; Baseline</h2>
-        <button type="button" onClick={loadOptions} disabled={loading} className="btn outline small" title="Reload">
-          {loading ? "Loading…" : ""}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        <button
+          type="button"
+          onClick={loadOptions}
+          disabled={loading}
+          className="btn outline small"
+          title="Reload"
+          style={{ display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          {loading ? (
+            <>
+              <InlineSpinner size={14} variant="dark" />
+              <span>Loading...</span>
+            </>
+          ) : (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              width="16"
+              height="16"
+            >
+              <path d="M23 4v6h-6"></path>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+          )}
         </button>
       </div>
 
@@ -143,24 +182,26 @@ export default function Environment() {
       {err && <div className="env-error-msg">{err}</div>}
 
       <div className="env-inputs-row" style={{ opacity: loading ? 0.6 : 1 }}>
-        <FancySelect 
-           label="Baseline"
-           options={baselines.map(b => ({value: b, label: b}))} 
-           value={env.baseline} 
-           onChange={val => setEnv(f => ({...f, baseline: val}))} 
-           disabled={selectsDisabled || !baselines.length}
-           placeholder={!baselines.length ? "— loading… —" : "— select baseline —"}
-           searchable={true}
+        <FancySelect
+          label="Baseline"
+          options={baselines.map((b) => ({ value: b, label: b }))}
+          value={env.baseline}
+          onChange={(val) => setEnv((f) => ({ ...f, baseline: val }))}
+          disabled={selectsDisabled || !baselines.length}
+          placeholder={
+            !baselines.length ? "— loading… —" : "— select baseline —"
+          }
+          searchable={true}
         />
 
-        <FancySelect 
-           label="Sandbox Group"
-           options={groups.map(g => ({value: g, label: g}))} 
-           value={env.sbxGroup} 
-           onChange={val => setEnv(f => ({...f, sbxGroup: val}))} 
-           disabled={selectsDisabled || !groups.length}
-           placeholder={!groups.length ? "— loading… —" : "— select group —"}
-           searchable={true}
+        <FancySelect
+          label="Sandbox Group"
+          options={groups.map((g) => ({ value: g, label: g }))}
+          value={env.sbxGroup}
+          onChange={(val) => setEnv((f) => ({ ...f, sbxGroup: val }))}
+          disabled={selectsDisabled || !groups.length}
+          placeholder={!groups.length ? "— loading… —" : "— select group —"}
+          searchable={true}
         />
 
         <div className="field">
@@ -181,7 +222,8 @@ export default function Environment() {
               type="number"
               className="control env-patch-input"
               title="Hours"
-              min="0" max="23"
+              min="0"
+              max="23"
               value={env.patchWindowHours ?? 0}
               onChange={handleNumChange("patchWindowHours")}
               onBlur={handleBlur("patchWindowHours", 0, 23)}
@@ -191,7 +233,8 @@ export default function Environment() {
               type="number"
               className="control env-patch-input"
               title="Minutes"
-              min="0" max="59"
+              min="0"
+              max="59"
               value={env.patchWindowMinutes ?? 0}
               onChange={handleNumChange("patchWindowMinutes")}
               onBlur={handleBlur("patchWindowMinutes", 0, 59)}

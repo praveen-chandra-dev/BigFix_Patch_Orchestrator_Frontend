@@ -12,6 +12,39 @@ const getScoreColorClass = (score) => {
   return "score-low";
 };
 
+const getDerivedSeverity = (patch) => {
+  const score = Number(patch.final_score || 0);
+  const cveCount = Number(patch.cve_count || 0);
+  const sevRaw = String(patch.severity || patch.source_severity || "")
+    .toUpperCase()
+    .trim();
+
+  let derivedSeverity = "UNSPECIFIED";
+
+  // RULE 1: No CVEs → use original severity
+  if (cveCount === 0) {
+    if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)) {
+      derivedSeverity = sevRaw;
+    }
+  }
+  // RULE 2: Score overrides
+  else if (score > 0) {
+    if (score >= 90) derivedSeverity = "CRITICAL";
+    else if (score >= 75) derivedSeverity = "HIGH";
+    else if (score >= 60) derivedSeverity = "IMPORTANT";
+    else if (score >= 40) derivedSeverity = "MODERATE";
+    else derivedSeverity = "LOW";
+  }
+  // RULE 3: fallback
+  else if (
+    ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
+  ) {
+    derivedSeverity = sevRaw;
+  }
+
+  return derivedSeverity;
+};
+
 export default function PatchDashboard({
   patches = [],
   cves = [],
@@ -27,7 +60,7 @@ export default function PatchDashboard({
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
-  const [exportFormat, setExportFormat] = useState('CSV');
+  const [exportFormat, setExportFormat] = useState("CSV");
   const colRef = useRef(null);
   const expRef = useRef(null);
 
@@ -44,9 +77,13 @@ export default function PatchDashboard({
   const [baselinePatchMap, setBaselinePatchMap] = useState(() => {
     // Initialize from passed baselines if they already have patch_ids
     const map = {};
-    baselines.forEach(b => {
+    baselines.forEach((b) => {
       const name = (b.baseline_name || b.name || "").toLowerCase();
-      const patchIds = (b.patch_ids || []).map(id => String(id).replace(/^BIGFIX-/i, "").trim());
+      const patchIds = (b.patch_ids || []).map((id) =>
+        String(id)
+          .replace(/^BIGFIX-/i, "")
+          .trim(),
+      );
       if (patchIds.length) map[name] = new Set(patchIds);
     });
     return map;
@@ -70,14 +107,20 @@ export default function PatchDashboard({
     const fetchBaselines = async () => {
       try {
         const res = await api.get("/baselines/list");
-        const raw = Array.isArray(res.data?.baselines) ? res.data.baselines : [];
+        const raw = Array.isArray(res.data?.baselines)
+          ? res.data.baselines
+          : [];
         const newMap = { ...baselinePatchMap };
         for (const b of raw) {
           const name = (b.baseline_name || b.name || "").toLowerCase();
-          const patchIds = (b.patches || []).map(p => {
-            const id = typeof p === 'object' ? p.patch_id : p;
-            return String(id).replace(/^BIGFIX-/i, "").trim();
-          }).filter(Boolean);
+          const patchIds = (b.patches || [])
+            .map((p) => {
+              const id = typeof p === "object" ? p.patch_id : p;
+              return String(id)
+                .replace(/^BIGFIX-/i, "")
+                .trim();
+            })
+            .filter(Boolean);
           newMap[name] = new Set(patchIds);
         }
         setBaselinePatchMap(newMap);
@@ -118,17 +161,7 @@ export default function PatchDashboard({
       const devices = patch.applicable_computers || [];
       const score = Number(patch.final_score || 0);
 
-      const sevRaw = String(patch.severity || patch.source_severity || "").toUpperCase().trim();
-      let finalSev = "UNSPECIFIED";
-      if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW", "UNSPECIFIED"].includes(sevRaw)) {
-          finalSev = sevRaw;
-      } else if (score > 0) {
-          if (score >= 90) finalSev = "CRITICAL";
-          else if (score >= 75) finalSev = "HIGH";
-          else if (score >= 60) finalSev = "IMPORTANT";
-          else if (score >= 40) finalSev = "MODERATE";
-          else finalSev = "LOW";
-      }
+      const finalSev = getDerivedSeverity(patch);
 
       return {
         patch_id: patch.patch_id ? patch.patch_id.replace(/^BIGFIX-/i, "") : "",
@@ -292,7 +325,10 @@ export default function PatchDashboard({
     return sortable;
   }, [filteredPatches, sortConfig]);
 
-  const paginatedPatches = sortedPatches.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+  const paginatedPatches = sortedPatches.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage,
+  );
 
   const handleSort = (key) =>
     setSortConfig((prev) => ({
@@ -301,30 +337,53 @@ export default function PatchDashboard({
     }));
 
   const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
-    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+    if (sortConfig.key !== key)
+      return <span className="muted-text ml-6">↕</span>;
+    return (
+      <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>
+    );
   };
 
   const handleExport = (scope) => {
     setShowExpDrop(false);
     let dataToExport = [];
-    if (scope === 'page') dataToExport = paginatedPatches;
-    else if (scope === 'filtered') dataToExport = sortedPatches;
+    if (scope === "page") dataToExport = paginatedPatches;
+    else if (scope === "filtered") dataToExport = sortedPatches;
     else dataToExport = patchExposure;
 
-    performExport(dataToExport, cols, exportFormat, "patch_exposure", (p, c) => {
-      if (c === "cve_count") return p.cves.join(",");
-      if (c === "device_count") return p.devices.join(",");
-      return p[c];
-    });
+    performExport(
+      dataToExport,
+      cols,
+      exportFormat,
+      "patch_exposure",
+      (p, c) => {
+        if (c === "cve_count") return p.cves.join(",");
+        if (c === "device_count") return p.devices.join(",");
+        return p[c];
+      },
+    );
   };
 
   const handleCveRedirect = (cve) => {
-    navigate("cve", [{ conds: [{ column: "cve_id", operator: "=", value: cve }] }], "AND");
+    navigate(
+      "cve",
+      [{ conds: [{ column: "cve_id", operator: "=", value: cve }] }],
+      "AND",
+    );
   };
 
   const handleDeviceRedirect = (device) => {
-    navigate("computer", [{ conds: [{ column: "device_name", operator: "contains", value: device }] }], "AND");
+    navigate(
+      "computer",
+      [
+        {
+          conds: [
+            { column: "device_name", operator: "contains", value: device },
+          ],
+        },
+      ],
+      "AND",
+    );
   };
 
   return (
@@ -433,7 +492,7 @@ export default function PatchDashboard({
                     color: "var(--muted)",
                     textTransform: "uppercase",
                     marginBottom: "12px",
-                    letterSpacing: '0.05em'
+                    letterSpacing: "0.05em",
                   }}
                 >
                   Format
@@ -449,9 +508,12 @@ export default function PatchDashboard({
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
                     <button
                       key={fmt}
-                      className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`}
+                      className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
                       style={{ fontSize: "11px", height: "32px", padding: 0 }}
-                      onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExportFormat(fmt);
+                      }}
                     >
                       {fmt}
                     </button>
@@ -471,18 +533,21 @@ export default function PatchDashboard({
                     color: "var(--muted)",
                     textTransform: "uppercase",
                     marginBottom: "12px",
-                    letterSpacing: '0.05em'
+                    letterSpacing: "0.05em",
                   }}
                 >
                   Scope
                 </div>
-                <button className="item" onClick={() => handleExport('page')}>
+                <button className="item" onClick={() => handleExport("page")}>
                   Current Page
                 </button>
-                <button className="item" onClick={() => handleExport('filtered')}>
+                <button
+                  className="item"
+                  onClick={() => handleExport("filtered")}
+                >
                   Filtered Data
                 </button>
-                <button className="item" onClick={() => handleExport('all')}>
+                <button className="item" onClick={() => handleExport("all")}>
                   All Data
                 </button>
               </div>
@@ -670,7 +735,14 @@ export default function PatchDashboard({
         </table>
       </div>
 
-      <Paginator total={sortedPatches.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
+      <Paginator
+        total={sortedPatches.length}
+        rpp={rowsPerPage}
+        setRpp={setRowsPerPage}
+        page={currentPage}
+        setPage={setCurrentPage}
+        edgeToEdge={true}
+      />
     </div>
   );
 }

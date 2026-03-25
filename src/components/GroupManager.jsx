@@ -4,6 +4,9 @@ import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
+import InlineSpinner from "./common/InlineSpinner";
+// 🚀 1. Import useToast
+import { useToast } from "./common/CustomToast";
 
 const API = window.env.VITE_API_BASE;
 
@@ -28,11 +31,14 @@ async function postJSON(endpoint, body) {
 export default function GroupManager({ onClose }) {
   const isMO = sessionStorage.getItem("isMO") === "true";
   
+  // 🚀 2. Initialize useToast
+  const { showToast } = useToast();
+  
   const [groupType, setGroupType] = useState("Automatic");
   const [groupName, setGroupName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
+
+  // Note: error and successMsg states have been removed!
 
   const [properties, setProperties] = useState([]);
   const [selectedProperty, setSelectedProperty] = useState("");
@@ -85,16 +91,15 @@ export default function GroupManager({ onClose }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  useEffect(() => { setError(""); setSuccessMsg(""); }, []);
-  const clearMessages = () => { if (error) setError(""); if (successMsg) setSuccessMsg(""); };
-
   useEffect(() => {
-    clearMessages();
     setLastUpdated(new Date().toLocaleString());
     if (groupType === "Automatic" || groupType === "ServerBased") {
       if (properties.length === 0) {
         setLoadingProps(true);
-        getJSON("/api/groups/metadata/properties").then(data => setProperties(data.properties?.map(p => ({value: p, label: p})) || [])).catch(e => setError(e.message)).finally(() => setLoadingProps(false));
+        getJSON("/api/groups/metadata/properties")
+          .then(data => setProperties(data.properties?.map(p => ({value: p, label: p})) || []))
+          .catch(e => showToast(e.message, "error")) // 🚀 3. Replaced setError with showToast
+          .finally(() => setLoadingProps(false));
       }
       if (customSites.length === 0) {
         setLoadingSites(true);
@@ -116,7 +121,11 @@ export default function GroupManager({ onClose }) {
         setAllComputers(data.computers || []);
         setLastUpdated(new Date().toLocaleString());
       }
-    } catch (e) { setError(e.message); } finally { setFetchingComp(false); }
+    } catch (e) { 
+      showToast(e.message, "error"); // 🚀 Replaced setError
+    } finally { 
+      setFetchingComp(false); 
+    }
   };
 
   useEffect(() => {
@@ -173,17 +182,19 @@ export default function GroupManager({ onClose }) {
   const paginatedComputers = sortedComputers.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   const addCondition = () => {
-    clearMessages(); setError("");
-    if (!selectedProperty || !valueInput.trim()) { setError("Please select a property and enter a value."); return; }
+    if (!selectedProperty || !valueInput.trim()) { 
+      showToast("Please select a property and enter a value.", "error"); // 🚀 Replaced setError
+      return; 
+    }
     setConditions([...conditions, { id: Date.now(), property: selectedProperty, operator: selectedOperator, value: valueInput }]);
     setValueInput(""); 
   };
 
-  const removeCondition = (id) => { clearMessages(); setConditions(conditions.filter(c => c.id !== id)); };
+  const removeCondition = (id) => { setConditions(conditions.filter(c => c.id !== id)); };
 
-  const toggleComputer = (id) => { clearMessages(); const next = new Set(selectedCompIds); if (next.has(id)) next.delete(id); else next.add(id); setSelectedCompIds(next); };
+  const toggleComputer = (id) => { const next = new Set(selectedCompIds); if (next.has(id)) next.delete(id); else next.add(id); setSelectedCompIds(next); };
 
-  const toggleAllVisible = () => { clearMessages(); const next = new Set(selectedCompIds); const allVisibleIds = paginatedComputers.map(c => c.id); const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); if (allSelected) allVisibleIds.forEach(id => next.delete(id)); else allVisibleIds.forEach(id => next.add(id)); setSelectedCompIds(next); };
+  const toggleAllVisible = () => { const next = new Set(selectedCompIds); const allVisibleIds = paginatedComputers.map(c => c.id); const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); if (allSelected) allVisibleIds.forEach(id => next.delete(id)); else allVisibleIds.forEach(id => next.add(id)); setSelectedCompIds(next); };
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   const getSortIcon = (key) => {
@@ -192,25 +203,40 @@ export default function GroupManager({ onClose }) {
   };
 
   const handleCreate = async () => {
-    setError(""); setSuccessMsg("");
-    if (!groupName.trim()) { setError("Group Name is required."); return; }
+    if (!groupName.trim()) { 
+      showToast("Group Name is required.", "error"); // 🚀 Replaced setError
+      return; 
+    }
     const payload = { name: groupName, type: groupType };
 
     if (groupType === "Automatic" || groupType === "ServerBased") {
-      if (conditions.length === 0) { setError("Please add at least one condition."); return; }
-      if (!selectedTargetSite) { setError("Please select a target site."); return; }
+      if (conditions.length === 0) { 
+        showToast("Please add at least one condition.", "error"); // 🚀 Replaced setError
+        return; 
+      }
+      if (!selectedTargetSite) { 
+        showToast("Please select a target site.", "error"); // 🚀 Replaced setError
+        return; 
+      }
       payload.targetSite = selectedTargetSite; payload.conditions = conditions;
     } else {
-      if (selectedCompIds.size === 0) { setError("Please select at least one computer."); return; }
+      if (selectedCompIds.size === 0) { 
+        showToast("Please select at least one computer.", "error"); // 🚀 Replaced setError
+        return; 
+      }
       payload.computerIds = Array.from(selectedCompIds);
     }
 
     setCreating(true);
     try {
       await postJSON("/api/groups/create", payload);
-      setSuccessMsg(`${groupType} Group "${groupName}" created successfully!`);
+      showToast(`${groupType} Group "${groupName}" created successfully!`, "success"); // 🚀 Replaced setSuccessMsg
       setGroupName(""); setConditions([]); setSelectedCompIds(new Set()); setCurrentPage(1);
-    } catch (e) { setError(e.message); } finally { setCreating(false); }
+    } catch (e) { 
+      showToast(e.message, "error"); // 🚀 Replaced setError
+    } finally { 
+      setCreating(false); 
+    }
   };
 
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
@@ -266,7 +292,7 @@ export default function GroupManager({ onClose }) {
           <div className="field">
             <span className="label">Group Name</span>
             <div className="inputwrap">
-              <input type="text" className="control" placeholder="e.g., Windows 10 Patch Group" value={groupName} onChange={(e) => { setGroupName(e.target.value); clearMessages(); }} disabled={creating} />
+              <input type="text" className="control" placeholder="e.g., Windows 10 Patch Group" value={groupName} onChange={(e) => { setGroupName(e.target.value); }} disabled={creating} />
             </div>
           </div>
         </div>
@@ -416,15 +442,24 @@ export default function GroupManager({ onClose }) {
         </div>
       )}
 
-      <div className="p-0-20-10">
-        {error && <div className="banner error">{error}</div>}
-        {successMsg && <div className="banner success"><svg className="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><span>{successMsg}</span></div>}
-      </div>
+      {/* 🚀 5. Old banner UI section removed here */}
 
       <div className="action-bar" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="spacer"></div>
-        <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating || !groupName || ((groupType==='Automatic' || groupType === 'ServerBased') && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}>
-          {creating ? "Creating..." : "Create Group"}
+        {/* Added InlineSpinner integration from previous prompt */}
+        <button 
+          className="btn pri min-w-140" 
+          onClick={handleCreate} 
+          disabled={creating || !groupName || ((groupType==='Automatic' || groupType === 'ServerBased') && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}
+        >
+          {creating ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <InlineSpinner size={16} variant="light" />
+              <span>Creating...</span>
+            </div>
+          ) : (
+            "Create Group"
+          )}
         </button>
       </div>
 

@@ -283,7 +283,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
   const [isMO, setIsMO] = useState(false);
   const [activeRole, setActiveRole] = useState(sessionStorage.getItem('user_role') || '');
   const [showDropdown, setShowDropdown] = useState(false);
-  const [hasBfCreds, setHasBfCreds] = useState(true); // Tracks if personal credentials are set
+  const [hasBfCreds, setHasBfCreds] = useState(true); 
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -291,32 +291,51 @@ export function Topbar({ onNavHistory, username, onLogout }) {
       .then(r => r.json())
       .then(data => {
         if (data.ok) {
-          setIsMO(data.isMO);
-          sessionStorage.setItem('isMO', data.isMO ? 'true' : 'false');
-          setRoles(data.roles || []);
+          let currentSessionRole = sessionStorage.getItem('user_role');
           
-          if (data.isMO) {
-            setActiveRole('Master Operator');
-            sessionStorage.setItem('user_role', 'Admin');
-            window.dispatchEvent(new CustomEvent('role:changed', { detail: 'Admin' }));
-          } else if (data.roles && data.roles.length > 0) {
-            const current = sessionStorage.getItem('user_role');
-            if (!data.roles.includes(current)) {
-              setActiveRole(data.roles[0]);
-              sessionStorage.setItem('user_role', data.roles[0]);
-              window.dispatchEvent(new CustomEvent('role:changed', { detail: data.roles[0] }));
-            } else {
-              setActiveRole(current);
-            }
-          } else {
-             setActiveRole('No Role Assigned');
-             sessionStorage.setItem('user_role', 'No Role Assigned');
+          // Fallbacks for invalid local storage values
+          if (!currentSessionRole || currentSessionRole === 'null' || currentSessionRole === 'undefined') {
+              currentSessionRole = '';
           }
+
+          const userIsAdmin = currentSessionRole === 'Admin';
+          
+          setIsMO(userIsAdmin);
+          sessionStorage.setItem('isMO', userIsAdmin ? 'true' : 'false');
+          
+          const fetchedRoles = Array.isArray(data.roles) ? data.roles.map(r => r.trim()) : [];
+          setRoles(fetchedRoles);
+          
+          // 🚀 FULLY FIXED: Auto-selection logic without infinite reloads
+          if (!userIsAdmin) {
+              if (fetchedRoles.length > 0) {
+                  const isCurrentInvalid = !currentSessionRole || 
+                                           currentSessionRole === 'No Role Assigned' || 
+                                           !fetchedRoles.includes(currentSessionRole.trim());
+                                           
+                  if (isCurrentInvalid) {
+                      currentSessionRole = fetchedRoles[0];
+                      sessionStorage.setItem('user_role', currentSessionRole);
+                      
+                      // Silently sync the cookie to the backend
+                      fetch(`/api/auth/team-state?role=${encodeURIComponent(currentSessionRole)}`, {
+                          method: 'GET',
+                          headers: { "Content-Type": "application/json", "x-user-role": currentSessionRole }
+                      }).catch(() => {});
+                  }
+              } else {
+                  currentSessionRole = 'No Role Assigned';
+                  sessionStorage.setItem('user_role', currentSessionRole);
+              }
+          }
+
+          // Instantly update the React State so the UI paints properly (NO window.reload needed here!)
+          setActiveRole(currentSessionRole || 'No Role Assigned');
+          window.dispatchEvent(new CustomEvent('role:changed', { detail: currentSessionRole || 'No Role Assigned' }));
         }
       });
   }, []);
 
-  // Check for Personal Credentials and listen for events
   useEffect(() => {
     const checkCreds = () => {
       const API = window.env?.VITE_API_BASE || "";
@@ -353,7 +372,16 @@ export function Topbar({ onNavHistory, username, onLogout }) {
     setActiveRole(newRole);
     sessionStorage.setItem('user_role', newRole);
     setShowDropdown(false);
-    window.location.reload();
+    
+    // Only here, when the user MANUALLY clicks a new role, do we force a reload to clear the app's state.
+    fetch(`/api/auth/team-state?role=${encodeURIComponent(newRole)}`, {
+        method: 'GET',
+        headers: { "Content-Type": "application/json", "x-user-role": newRole }
+    }).then(() => {
+        window.location.reload(); 
+    }).catch(() => {
+        window.location.reload(); 
+    });
   };
 
   const handleBack = () => {
@@ -393,7 +421,6 @@ export function Topbar({ onNavHistory, username, onLogout }) {
           </button>
       </div>
 
-      {/* Warning Banner in Header */}
       {!hasBfCreds && (
          <div style={{ flex: 1, display: 'flex', justifyContent: 'center', margin: '0 16px' }}>
             <div style={{ background: '#fff3e0', color: '#e65100', padding: '6px 16px', borderRadius: '6px', fontSize: '10px', fontWeight: 600, border: '1px solid #ffcc80', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>

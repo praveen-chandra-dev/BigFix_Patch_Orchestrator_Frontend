@@ -38,6 +38,54 @@ async function postJSON(url, body) {
   return j;
 }
 
+// 🚀 FIXED: Imported the exact buckets used in PilotSandboxResult
+const BUCKETS = [
+  "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
+  "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login", 
+  "Pending Offer Acceptance", "Failed", "error", "Download Failed", "Cancelled", 
+  "Locked", "Constrained", "Postponed", "Invalid Signature", "Offers Disabled", 
+  "Disk Limited", "Disk Free Limited", "Hash Mismatch", "Transcoding Error", 
+  "Not Relevant", "Not Reported"
+];
+
+// 🚀 FIXED: Replaced lazy classify function with the comprehensive one
+function classify(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "Not Reported";
+  const L = s.toLowerCase();
+  
+  const exactBucket = BUCKETS.find(b => b.toLowerCase() === L);
+  if (exactBucket) return exactBucket;
+
+  if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
+  if (/^completed$/i.test(s)) return "Completed";
+  if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
+  if (/^not reported$/i.test(s)) return "Not Reported";
+  
+  if (/waiting for restart/i.test(L) || /pending restart/i.test(L)) return "Pending Restart";
+  if (/pending downloads/i.test(L) || /waiting for downloads/i.test(L)) return "Pending Downloads";
+  if (/pending message/i.test(L) || /waiting for user to respond/i.test(L)) return "Pending Message";
+  if (/pending login/i.test(L) || /waiting for user to log in/i.test(L)) return "Pending Login";
+  if (/pending offer/i.test(L) || /waiting for user to accept/i.test(L)) return "Pending Offer Acceptance";
+  if (/pending client restart/i.test(L) || /waiting for client restart/i.test(L)) return "Pending Client Restart";
+
+  if (/constrained/i.test(L) || /constraint/i.test(L)) return "Constrained";
+  if (/postponed/i.test(L)) return "Postponed";
+  if (/invalid signature/i.test(L)) return "Invalid Signature";
+  if (/not relevant/i.test(L)) return "Not Relevant";
+  if (/offers disabled/i.test(L)) return "Offers Disabled";
+  if (/disk limited/i.test(L)) return "Disk Limited";
+  if (/disk free limited/i.test(L)) return "Disk Free Limited";
+  if (/hash mismatch/i.test(L)) return "Hash Mismatch";
+  if (/transcoding error/i.test(L) || /failed transcoding/i.test(L)) return "Transcoding Error";
+  if (/unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i.test(L)) return "error";
+
+  if (/fail|error/i.test(L)) return "Failed";
+  if (/wait|pending/i.test(L)) return "Waiting";
+  
+  return s; 
+}
+
 function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = false }) {
   if (!open) return null;
   return (
@@ -94,7 +142,6 @@ export default function KpiDetails({ context, activeTab }) {
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const showService = userRole !== "Linux";
 
-  // 🚀 FIXED: Auto-load filter from Donut Chart click
   useEffect(() => {
     const pending = sessionStorage.getItem("kpi_pending_filter");
     if (pending) {
@@ -141,19 +188,6 @@ export default function KpiDetails({ context, activeTab }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  // 🚀 FIXED: Robust classification matching the Donut chart
-  function classify(raw) {
-    const s = String(raw || "").trim();
-    if (!s) return "Not Reported";
-    const L = s.toLowerCase();
-    if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
-    if (/^completed$/i.test(s)) return "Completed";
-    if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
-    if (/fail|error|download failed/i.test(L)) return "Failed";
-    if (/wait|pending/i.test(L)) return "Waiting";
-    return s;
-  }
-
   const fetchData = async () => {
       setLoading(true); 
       setError(""); 
@@ -176,7 +210,6 @@ export default function KpiDetails({ context, activeTab }) {
                   for (const r of res.rows) {
                       if (r.server && !map.has(r.server)) { map.set(r.server, r); }
                   }
-                  // 🚀 FIXED: Allow ALL statuses to load (removed .filter(r => s === 'Fixed'))
                   fetchedData = Array.from(map.values());
               }
           } else if (type === 'health') {
@@ -216,7 +249,6 @@ export default function KpiDetails({ context, activeTab }) {
         } else if (c.column === 'pendingRestart') {
             field = String(item.pendingRestart ?? item.pending ?? item.restart ?? "").toLowerCase();
         } else if (c.column === 'status' && type === 'success') {
-            // 🚀 FIXED: Ensure status search checks the dynamic classified status
             field = classify(item.status).toLowerCase();
             if (c.operator === "contains" && !field.includes(search)) {
                  field = String(item.status || "").toLowerCase();
@@ -284,7 +316,7 @@ export default function KpiDetails({ context, activeTab }) {
     performExport(dataToExport, cols, exportFormat, `${type}_kpi_report`, (r, cId) => {
         if (cId === 'issues') return Array.isArray(r.issues) ? r.issues.join(", ") : "";
         if (cId === 'pendingRestart') return String(r.pendingRestart ?? r.pending ?? r.restart ?? "");
-        if (type === 'success' && cId === 'status') return classify(r.status); // 🚀 FIXED: Dynamic Export Label
+        if (type === 'success' && cId === 'status') return classify(r.status);
         return r[cId] || "N/A";
     });
   };
@@ -409,7 +441,6 @@ export default function KpiDetails({ context, activeTab }) {
   }
 
   const getTitle = () => {
-      // 🚀 FIXED: Better Title name
       if (type === 'success') return "Action Deployment Details"; 
       if (type === 'health') return "Critical Health Failures";
       if (type === 'reboot') return "Pending Reboots";
@@ -586,7 +617,6 @@ export default function KpiDetails({ context, activeTab }) {
                                             if (!c.show) return null;
                                             let val = row[c.id];
                                             
-                                            // 🚀 FIXED: Dynamic Status Colors in Row
                                             if (type === 'success' && c.id === 'status') {
                                                 const s = classify(row.status);
                                                 const isSuccess = s === 'Fixed' || s === 'Completed'; 

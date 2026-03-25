@@ -11,10 +11,44 @@ const SEVERITY_COLORS = {
   CRITICAL: "#dc2626",
   HIGH: "#ea580c",
   IMPORTANT: "#d97706",
-  MODERATE: "#facc15", 
+  MODERATE: "#facc15",
+  MEDIUM: "#facc15",
   LOW: "#3b82f6",
   UNSPECIFIED: "#9ca3af",
   UNKNOWN: "#9ca3af",
+};
+
+const getDerivedSeverity = (patch) => {
+  const score = Number(patch.final_score || 0);
+  const cveCount = Number(patch.cve_count || 0);
+  const sevRaw = String(patch.severity || patch.source_severity || "")
+    .toUpperCase()
+    .trim();
+
+  let derivedSeverity = "UNSPECIFIED";
+
+  // RULE 1: No CVEs → use original severity
+  if (cveCount === 0) {
+    if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)) {
+      derivedSeverity = sevRaw;
+    }
+  }
+  // RULE 2: Score overrides
+  else if (score > 0) {
+    if (score >= 90) derivedSeverity = "CRITICAL";
+    else if (score >= 75) derivedSeverity = "HIGH";
+    else if (score >= 60) derivedSeverity = "IMPORTANT";
+    else if (score >= 40) derivedSeverity = "MODERATE";
+    else derivedSeverity = "LOW";
+  }
+  // RULE 3: fallback
+  else if (
+    ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
+  ) {
+    derivedSeverity = sevRaw;
+  }
+
+  return derivedSeverity;
 };
 
 const renderSmartLabel = ({
@@ -153,30 +187,16 @@ export default function DashboardOverview({ navigate }) {
       IMPORTANT: 0,
       MODERATE: 0,
       LOW: 0,
-      UNSPECIFIED: 0
+      UNSPECIFIED: 0,
     };
 
     patches.forEach((p) => {
-      const sevRaw = String(p.severity || p.source_severity || "").toUpperCase().trim();
-      let finalSev = "UNSPECIFIED";
-      
-      // Trust the API string completely first
-      if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW", "UNSPECIFIED"].includes(sevRaw)) {
-          finalSev = sevRaw;
-      } else {
-          // Only fallback to calculating via score if the text field is garbage
-          const score = Number(p.final_score || 0);
-          if (score >= 90) finalSev = "CRITICAL";
-          else if (score >= 75) finalSev = "HIGH";
-          else if (score >= 60) finalSev = "IMPORTANT";
-          else if (score >= 40) finalSev = "MODERATE";
-          else if (score > 0) finalSev = "LOW";
-      }
+      const finalSev = getDerivedSeverity(p);
 
       if (distribution[finalSev] !== undefined) {
-          distribution[finalSev]++;
+        distribution[finalSev]++;
       } else {
-          distribution[finalSev] = 1;
+        distribution[finalSev] = 1;
       }
     });
 

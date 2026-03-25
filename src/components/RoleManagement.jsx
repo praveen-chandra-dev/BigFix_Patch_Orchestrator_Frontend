@@ -2,6 +2,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
+import { useToast } from "./common/CustomToast";
+import InlineSpinner from "./common/InlineSpinner";
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
@@ -15,13 +17,7 @@ const CustomModal = ({ open, title, message, onConfirm, onCancel, confirmText = 
                 <div className="flex-row justify-end gap-8 mt-20">
                     {!hideCancel && <button type="button" className="btn outline" onClick={onCancel} disabled={busy}>{cancelText}</button>}
                     <button type="button" className="btn pri flex-row items-center gap-8" onClick={onConfirm} disabled={busy}>
-                        {busy && (
-                           <svg viewBox="0 0 50 50" style={{ width: 16, height: 16, stroke: '#fff', animation: 'spin 1s linear infinite' }}>
-                             <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
-                             <circle cx="25" cy="25" r="20" fill="none" strokeWidth="5" strokeDasharray="31.4 31.4" strokeLinecap="round"></circle>
-                           </svg>
-                        )}
-                        {busy ? "Processing..." : confirmText}
+                        {busy ? <InlineSpinner size={16} variant="light" /> : confirmText}
                     </button>
                 </div>
             </div>
@@ -30,6 +26,8 @@ const CustomModal = ({ open, title, message, onConfirm, onCancel, confirmText = 
 };
 
 export default function RoleManagement({ onClose, role, username }) {
+  const { showToast } = useToast();
+
   const apiFetch = async (endpoint, options = {}) => {
       const headers = { "Content-Type": "application/json", "x-user-role": role || "Admin", "x-active-user": username || "" };
       const res = await fetch(`${API}${endpoint}`, { ...options, headers });
@@ -96,8 +94,6 @@ export default function RoleManagement({ onClose, role, username }) {
   const [selOpRpp, setSelOpRpp] = useState(10);
 
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [rolePage, setRolePage] = useState(1);
   const [roleRpp, setRoleRpp] = useState(10);
   const [roleSort, setRoleSort] = useState({ key: null, direction: 'asc' });
@@ -128,7 +124,7 @@ export default function RoleManagement({ onClose, role, username }) {
       try {
           const res = await apiFetch("/api/roles");
           setRoles(res.roles || []);
-      } catch (e) { setError(e.message); } finally { setLoading(false); }
+      } catch (e) { showToast(e.message, "error"); } finally { setLoading(false); }
   }
 
   async function loadCreateData() {
@@ -142,7 +138,7 @@ export default function RoleManagement({ onClose, role, username }) {
           ]);
           setTotalComps(cRes.total || 0); setProperties(pRes.properties || []);
           setAvailableSites(sRes.sites || []); setPatchSetuUsers(uRes.users || []); setPatchSetuGroups(gRes.groups || []);
-      } catch (e) { setError("Failed to load dependency data: " + e.message); }
+      } catch (e) { showToast("Failed to load dependency data: " + e.message, "error"); }
   }
 
   const handleOpenCreate = () => {
@@ -162,7 +158,7 @@ export default function RoleManagement({ onClose, role, username }) {
               if (d.perms) setPerms(p => ({ ...p, ...d.perms }));
               setSelectedComputers(d.computers || []); setSelectedSites(d.sites || []); setSelectedOperators(d.operators || []);
           }
-      } catch (e) { setError("Failed to load role details: " + e.message); } finally { setLoading(false); }
+      } catch (e) { showToast("Failed to load role details: " + e.message, "error"); } finally { setLoading(false); }
   };
 
   const handleCancel = () => { setView("LIST"); setEditingRoleId(null); setSaving(false); };
@@ -213,7 +209,7 @@ export default function RoleManagement({ onClose, role, username }) {
   };
 
   const executeSave = async () => {
-      setSaving(true); setError(""); setSuccess("");
+      setSaving(true);
       try {
           if (activeTab === 'DETAILS') {
               if (!editingRoleId) {
@@ -228,13 +224,13 @@ export default function RoleManagement({ onClose, role, username }) {
           else if (activeTab === 'SITES') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
           else if (activeTab === 'OPERATORS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
           
-          setSuccess("Role updated successfully! Redirecting...");
-          setTimeout(() => { handleCancel(); loadRoles(); setSuccess(""); setSaving(false); }, 1200);
-      } catch (e) { setError(e.message); setSaving(false); } finally { setModalConfig({ open: false }); }
+          showToast("Role updated successfully! Redirecting...", "success");
+          setTimeout(() => { handleCancel(); loadRoles(); setSaving(false); }, 1200);
+      } catch (e) { showToast(e.message, "error"); setSaving(false); } finally { setModalConfig({ open: false }); }
   };
 
   const handleSaveInit = () => {
-      if (activeTab === 'DETAILS' && !name) { setError("Role Name is required."); return; }
+      if (activeTab === 'DETAILS' && !name) { showToast("Role Name is required.", "error"); return; }
       if (activeTab === 'OPERATORS') {
           const hasMissingOps = selectedOperators.some(op => operatorWarnings[op] === false);
           if (hasMissingOps) {
@@ -246,14 +242,16 @@ export default function RoleManagement({ onClose, role, username }) {
   };
 
   const renderDetails = () => {
-      const SelectRow = ({ label, value, onChange, options, menuPlacement = 'bottom' }) => (
+      const SelectRow = ({ label, value, onChange, options, menuPlacement = 'bottom', disabled = false }) => (
           <div className="field flex-row items-center m-0" style={{ gap: '16px', marginBottom: '12px' }}>
               <label className="label m-0" style={{ width: '280px', fontWeight: 500 }}>{label}</label>
-              <FancySelect options={options} value={value} onChange={onChange} width="220px" menuPlacement={menuPlacement} />
+              <FancySelect options={options} value={value} onChange={onChange} width="220px" menuPlacement={menuPlacement} disabled={disabled} />
           </div>
       );
       const privOpts = [{value:"1", label:"Yes"}, {value:"0", label:"No"}];
       const boolOpts = [{value:"true", label:"Yes"}, {value:"false", label:"No"}];
+      
+      const isMaster = perms.masterOperator === "1";
 
       return (
           <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingBottom: '40px' }}>
@@ -274,32 +272,32 @@ export default function RoleManagement({ onClose, role, username }) {
               <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Permissions</span></div>
                   <div style={{ padding: '20px' }}>
-                      <SelectRow label="Master Operator" value={perms.masterOperator} onChange={v=>handlePermChange('masterOperator', v)} options={privOpts} />
-                      <SelectRow label="Show Other Operators' Actions" value={perms.showOtherActions} onChange={v=>handlePermChange('showOtherActions', v)} options={privOpts} />
-                      <SelectRow label="Stop Other Operators' Actions" value={perms.stopOtherActions} onChange={v=>handlePermChange('stopOtherActions', v)} options={privOpts} />
-                      <SelectRow label="Can Create Actions" value={perms.canCreateActions} onChange={v=>handlePermChange('canCreateActions', v)} options={privOpts} />
-                      <SelectRow label="Can Lock" value={perms.canLock} onChange={v=>handlePermChange('canLock', v)} options={privOpts} />
-                      <SelectRow label="Can Send Refresh to Multiple Computers" value={perms.canSendRefresh} onChange={v=>handlePermChange('canSendRefresh', v)} options={privOpts} />
-                      <SelectRow label="Can Submit Queries" value={perms.canSubmitQueries} onChange={v=>handlePermChange('canSubmitQueries', v)} options={privOpts} />
-                      <SelectRow label="Custom Content" value={perms.customContent} onChange={v=>handlePermChange('customContent', v)} options={privOpts} />
-                      <SelectRow label="Unmanaged Assets" value={perms.unmanagedAssets} onChange={v=>handlePermChange('unmanagedAssets', v)} options={[{value:"ShowAll", label:"Show All"}, {value:"ShowNone", label:"Show None"}]} />
+                      <SelectRow label="Master Operator" value={perms.masterOperator} onChange={v=>handlePermChange('masterOperator', v)} options={privOpts} disabled={saving} />
+                      <SelectRow label="Show Other Operators' Actions" value={perms.showOtherActions} onChange={v=>handlePermChange('showOtherActions', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Stop Other Operators' Actions" value={perms.stopOtherActions} onChange={v=>handlePermChange('stopOtherActions', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Can Create Actions" value={perms.canCreateActions} onChange={v=>handlePermChange('canCreateActions', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Can Lock" value={perms.canLock} onChange={v=>handlePermChange('canLock', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Can Send Refresh to Multiple Computers" value={perms.canSendRefresh} onChange={v=>handlePermChange('canSendRefresh', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Can Submit Queries" value={perms.canSubmitQueries} onChange={v=>handlePermChange('canSubmitQueries', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Custom Content" value={perms.customContent} onChange={v=>handlePermChange('customContent', v)} options={privOpts} disabled={saving || isMaster} />
+                      <SelectRow label="Unmanaged Assets" value={perms.unmanagedAssets} onChange={v=>handlePermChange('unmanagedAssets', v)} options={[{value:"ShowAll", label:"Show All"}, {value:"ShowNone", label:"Show None"}]} disabled={saving || isMaster} />
                   </div>
               </div>
 
               <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Restart and Shutdown [?]</span></div>
                   <div style={{ padding: '20px' }}>
-                      <SelectRow label="Post-Action Behavior" value={perms.postActionBehavior} onChange={v=>handlePermChange('postActionBehavior', v)} options={[{value:"AllowRestartOnly", label:"Allow Restart Only"}, {value:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {value:"None", label:"None"}]} />
-                      <SelectRow label="Action Script Commands" value={perms.actionScriptCommands} onChange={v=>handlePermChange('actionScriptCommands', v)} options={[{value:"AllowRestartOnly", label:"Allow Restart Only"}, {value:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {value:"None", label:"None"}]} />
+                      <SelectRow label="Post-Action Behavior" value={perms.postActionBehavior} onChange={v=>handlePermChange('postActionBehavior', v)} options={[{value:"AllowRestartOnly", label:"Allow Restart Only"}, {value:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {value:"None", label:"None"}]} disabled={saving || isMaster} />
+                      <SelectRow label="Action Script Commands" value={perms.actionScriptCommands} onChange={v=>handlePermChange('actionScriptCommands', v)} options={[{value:"AllowRestartOnly", label:"Allow Restart Only"}, {value:"AllowRestartAndShutdown", label:"Allow Restart and Shutdown"}, {value:"None", label:"None"}]} disabled={saving || isMaster} />
                   </div>
               </div>
 
               <div className="section" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'visible' }}>
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Interface Login Privileges</span></div>
                   <div style={{ padding: '20px' }}>
-                      <SelectRow label="Can use Console" value={perms.useConsole} onChange={v=>handlePermChange('useConsole', v)} options={boolOpts} menuPlacement="top" />
-                      <SelectRow label="Can use WebUI" value={perms.useWebUI} onChange={v=>handlePermChange('useWebUI', v)} options={boolOpts} menuPlacement="top" />
-                      <SelectRow label="Can use REST API" value={perms.useRESTAPI} onChange={v=>handlePermChange('useRESTAPI', v)} options={boolOpts} menuPlacement="top" />
+                      <SelectRow label="Can use Console" value={perms.useConsole} onChange={v=>handlePermChange('useConsole', v)} options={boolOpts} menuPlacement="top" disabled={saving || isMaster} />
+                      <SelectRow label="Can use WebUI" value={perms.useWebUI} onChange={v=>handlePermChange('useWebUI', v)} options={boolOpts} menuPlacement="top" disabled={saving || isMaster} />
+                      <SelectRow label="Can use REST API" value={perms.useRESTAPI} onChange={v=>handlePermChange('useRESTAPI', v)} options={boolOpts} menuPlacement="top" disabled={saving || isMaster} />
                   </div>
               </div>
           </div>
@@ -659,19 +657,17 @@ export default function RoleManagement({ onClose, role, username }) {
                 <div className="right flex-row gap-12 items-center">
                    <button onClick={handleCancel} className="btn outline sec">Cancel</button>
                    <button onClick={handleSaveInit} disabled={saving} className="btn pri min-w-140 flex-row items-center justify-center gap-8">
-                       {saving && (
-                          <svg viewBox="0 0 50 50" style={{ width: 16, height: 16, stroke: '#fff', animation: 'spin 1s linear infinite' }}>
-                            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
-                            <circle cx="25" cy="25" r="20" fill="none" strokeWidth="5" strokeDasharray="31.4 31.4" strokeLinecap="round"></circle>
-                          </svg>
+                       {saving ? (
+                          <>
+                             <InlineSpinner size={16} variant="light" />
+                             <span>Saving...</span>
+                          </>
+                       ) : (
+                          activeTab === 'DETAILS' ? (editingRoleId ? "Save Details" : "Create Role") : `Save ${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}`
                        )}
-                       {saving ? "Saving..." : activeTab === 'DETAILS' ? (editingRoleId ? "Save Details" : "Create Role") : `Save ${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}`}
                    </button>
                 </div>
             </div>
-            
-            {error && <div className="banner error m-20 mb-0">{error}</div>}
-            {success && <div className="banner success m-20 mb-0">{success}</div>}
             
             <div style={{ }}>
                 {activeTab === 'DETAILS' && renderDetails()}
@@ -706,8 +702,8 @@ export default function RoleManagement({ onClose, role, username }) {
             <h2 className="m-0">BigFix Role Management</h2>
         </div>
         <div className="right flex-row gap-12 items-center">
-            <button className="iconbtn" onClick={loadRoles} title="Refresh Roles">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            <button className="iconbtn" onClick={loadRoles} title="Refresh Roles" disabled={loading}>
+                {loading ? <InlineSpinner size={16} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
             </button>
             <button onClick={handleOpenCreate} className="btn pri">+ Create Role</button>
         </div>
@@ -716,8 +712,8 @@ export default function RoleManagement({ onClose, role, username }) {
       <div style={{ padding: '20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
         {loading ? (
             <div className="sub flex-row items-center justify-center gap-8" style={{ padding: '40px' }}>
-                <svg className="spinner" viewBox="0 0 50 50" style={{ width: 24, height: 24, stroke: 'var(--primary)' }}><circle cx="25" cy="25" r="20" fill="none" strokeWidth="5"></circle></svg>
-                Loading roles...
+                <InlineSpinner size={24} variant="primary" />
+                <span>Loading roles...</span>
             </div>
         ) : (
             <div className="section" style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: 0 }}>
@@ -727,21 +723,17 @@ export default function RoleManagement({ onClose, role, username }) {
                         <thead className="kpi-th-sticky">
                             <tr>
                                 <th className="cursor-pointer w-10p" onClick={() => handleRoleSort('BigFixRoleID')}>Role ID {getRoleSortIcon('BigFixRoleID')}</th>
-                                <th className="cursor-pointer w-25p" onClick={() => handleRoleSort('Name')}>BigFix Role Name {getRoleSortIcon('Name')}</th>
-                                <th className="cursor-pointer w-30p" onClick={() => handleRoleSort('Description')}>Description {getRoleSortIcon('Description')}</th>
-                                <th className="cursor-pointer w-15p" onClick={() => handleRoleSort('CreatedBy')}>Creator {getRoleSortIcon('CreatedBy')}</th>
-                                <th className="cursor-pointer w-15p" onClick={() => handleRoleSort('CreatedAt')}>Created At {getRoleSortIcon('CreatedAt')}</th>
+                                <th className="cursor-pointer w-45p" onClick={() => handleRoleSort('Name')}>BigFix Role Name {getRoleSortIcon('Name')}</th>
+                                <th className="cursor-pointer w-40p" onClick={() => handleRoleSort('Description')}>Description {getRoleSortIcon('Description')}</th>
                                 <th className="text-center w-5p">Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {paginatedRoles.length === 0 ? (<tr><td colSpan={6} className="text-center text-muted">No roles found.</td></tr>) : paginatedRoles.map(r => (
+                            {paginatedRoles.length === 0 ? (<tr><td colSpan={4} className="text-center text-muted">No roles found.</td></tr>) : paginatedRoles.map(r => (
                                 <tr key={r.RoleID} onClick={() => handleEditRole(r)} className="cursor-pointer">
                                     <td className="muted-text font-mono">{r.BigFixRoleID || 'Pending'}</td>
                                     <td className="fw-600" style={{ color: 'var(--primary)' }}>{r.Name}</td>
                                     <td>{r.Description || "—"}</td>
-                                    <td>{r.CreatedBy}</td>
-                                    <td>{new Date(r.CreatedAt).toLocaleDateString()}</td>
                                     <td className="text-center"><button className="btn outline small" onClick={(e) => { e.stopPropagation(); handleEditRole(r); }}>Edit</button></td>
                                 </tr>
                             ))}

@@ -9,7 +9,6 @@ import Login from "./components/auth/Login.jsx";
 
 // Import new Sidebar/Topbar
 import { Sidebar, Topbar } from "./components/Header.jsx";
-// Import the new hook for DB state
 import { useTeamState } from "./hooks/useTeamState.js";
 
 const PilotEnvironment = lazy(() => import("./components/pilot/PilotEnvironment.jsx"));
@@ -35,7 +34,6 @@ async function postJSON(url, body) { const r = await fetch(url, { method: "POST"
 function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate }) {
   const { env, setEnv } = useEnvironment();
   
-  // REPLACE OLD LOCAL STORAGE / DIRECT FETCH WITH DB HOOK
   const { state: teamState, saveState: updateTeamState, loading: stateLoading } = useTeamState();
 
   const apiBase = useMemo(() => API, []);
@@ -46,7 +44,6 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
     }).catch(console.error);
   }, [apiBase, setEnv]);
 
-  // Extract fields from shared DB state
   const s = teamState || {};
   const currentStage = s.currentStage || Stage.CONFIG;
   const completedStages = s.completedStages || [];
@@ -56,7 +53,6 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
   const pilotTriggered = !!s.pilotTriggered;
   const lastActions = s.lastActions || {};
 
-  // Sync unlocks from DB to local env state
   useEffect(() => {
     if (s.pilotUnlocked !== undefined || s.productionUnlocked !== undefined) {
       setEnv(p => ({ 
@@ -251,7 +247,6 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
       {currentStage === Stage.HISTORY && <DeploymentHistory />}
       {currentStage === Stage.CONFIG && <Configuration onSaved={handleConfigSaved} />}
 
-      {/* HARDCODED OS/EUC CHECKS COMPLETELY REMOVED! */}
       {currentStage === Stage.SANDBOX && env.enableSandbox && (
         <div className="stage-cards-row">
           <Environment />
@@ -346,6 +341,9 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [flowState, setFlowState] = useState({ current: 'CONFIG', completed: [], accessible: ['CONFIG'] });
 
+  // 🚀 Enterprise Modal State
+  const [timeoutModal, setTimeoutModal] = useState(false);
+
   const handleNavigate = (route, context = null) => {
     setKpiContext(context);
     if (context && route === 'kpi-details') {
@@ -367,16 +365,62 @@ export default function App() {
     }
   };
   
+  // Normal, intentional manual logout
   const handleLogout = async () => { 
     try { await postJSON(`${API}/api/auth/logout`, {}); } catch {} 
     setSession(null); sessionStorage.clear(); localStorage.clear();
     window.location.href = '/'; 
   };
 
+  // 🚀 INACTIVITY TIMEOUT LISTENER 
+  useEffect(() => {
+    if (!session) return; 
+
+    let timeoutId;
+    const TIMEOUT_MINS = session.timeoutMins || 15;
+    const TIMEOUT_MS = TIMEOUT_MINS * 60 * 1000;
+
+    const resetTimer = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+            // Destroy backend session silently
+            postJSON(`${API}/api/auth/logout`, {}).catch(()=>{});
+            
+            // Render the Enterprise Modal instead of a browser alert
+            setTimeoutModal(true);
+        }, TIMEOUT_MS);
+    };
+
+    let lastCall = Date.now();
+    const handleActivity = () => {
+        const now = Date.now();
+        // Throttle updates to max 1 per second
+        if (now - lastCall > 1000) {
+            lastCall = now;
+            resetTimer();
+        }
+    };
+
+    const events = ['mousemove', 'keydown', 'mousedown', 'scroll', 'touchstart'];
+    events.forEach(event => window.addEventListener(event, handleActivity));
+
+    resetTimer(); 
+
+    return () => {
+        clearTimeout(timeoutId);
+        events.forEach(event => window.removeEventListener(event, handleActivity));
+    };
+  }, [session]);
+
+  // 🚀 STATUS CHECK LISTENER 
   useEffect(() => {
     setAuthLoading(true);
     getJSON(`${API}/api/auth/status`).then(d => {
-       if(d.ok && d.authed && sessionStorage.getItem('BPS_SESSION_ACTIVE')) setSession(d.userData);
+       if(d.ok && d.authed && sessionStorage.getItem('BPS_SESSION_ACTIVE')) {
+           // Safeguard: Ensure user_role is always kept locally on page refresh to stop flickering
+           sessionStorage.setItem("user_role", d.userData.role); 
+           setSession({ ...d.userData, timeoutMins: d.timeoutMins });
+       }
        else { setSession(null); sessionStorage.removeItem('BPS_SESSION_ACTIVE'); }
     }).finally(() => setAuthLoading(false));
   }, []);
@@ -429,7 +473,6 @@ export default function App() {
                     />
                 </Suspense>
             ) :
-             //activeMenu === 'baseline' ? <Suspense fallback={null}><BaselineManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'group' ? <Suspense fallback={null}><GroupManager onClose={()=>handleNavigate('orchestration')}/></Suspense> :
              activeMenu === 'snapshot' ? <Suspense fallback={null}><SnapshotManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
              activeMenu === 'clone' ? <Suspense fallback={null}><CloneManager onClose={()=>handleNavigate('orchestration')} groupName="All Computers"/></Suspense> :
@@ -443,6 +486,36 @@ export default function App() {
           </div>
         </div>
       </div>
+      
+      {/* 🚀 ENTERPRISE TIMEOUT OVERLAY MODAL */}
+      {timeoutModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 9999999, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
+            <div style={{ backgroundColor: 'var(--panel)', padding: '32px', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.2)', maxWidth: '420px', width: '90%', textAlign: 'center', border: '1px solid var(--border)' }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: '#fff3e0', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+                    {/* Secure Lock Icon */}
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#f57c00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                </div>
+                <h2 style={{ margin: '0 0 12px 0', fontSize: '20px', fontWeight: 600, color: 'var(--text)' }}>Session Expired</h2>
+                <p style={{ margin: '0 0 28px 0', color: 'var(--muted)', fontSize: '14px', lineHeight: '1.6' }}>
+                    For your security, you have been automatically logged out due to inactivity. Please log back in to continue where you left off.
+                </p>
+                <button 
+                    className="btn primary" 
+                    style={{ width: '100%', padding: '12px', fontSize: '15px', fontWeight: 500, borderRadius: '8px' }} 
+                    onClick={() => {
+                        sessionStorage.clear();
+                        localStorage.clear();
+                        window.location.href = '/';
+                    }}
+                >
+                    Log Back In
+                </button>
+            </div>
+        </div>
+      )}
     </EnvironmentProvider>
   );
 }
