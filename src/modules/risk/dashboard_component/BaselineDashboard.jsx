@@ -29,6 +29,7 @@ export default function BaselineDashboard({
     { id: "baseline_name", label: "Baseline", show: true },
     { id: "patch_count", label: "Patches", show: true },
     { id: "cve_count", label: "CVEs", show: true },
+    { id: "computer_count", label: "Applicable Computers", show: true },
   ]);
 
   useEffect(() => {
@@ -90,10 +91,56 @@ export default function BaselineDashboard({
     return map;
   }, [cves]);
 
-  const baselineExposure = useMemo(() => {
+  // const baselineExposure = useMemo(() => {
+  //   return baselines.map((b) => {
+  //     // FIX: Robust Patch ID Extraction
+  //     // If backend sends an array of objects, array of strings, or a stringified JSON
+  //     let rawPatches = [];
+  //     if (Array.isArray(b.patches)) {
+  //         rawPatches = b.patches;
+  //     } else if (typeof b.patches === 'string') {
+  //         try {
+  //             rawPatches = JSON.parse(b.patches);
+  //             if (!Array.isArray(rawPatches)) rawPatches = [];
+  //         } catch(e) {
+  //             rawPatches = [];
+  //         }
+  //     }
+
+  //     // Ensure we just have simple string IDs like "260865901" without prefixes
+  //     const patchIds = rawPatches.map(p => {
+  //         let id = "";
+  //         if (typeof p === 'object' && p !== null) id = String(p.patch_id || p.id || "");
+  //         else id = String(p);
+  //         return id.replace(/^BIGFIX-/i, "").trim();
+  //     }).filter(Boolean);
+      
+  //     const cveSet = new Set();
+  //     patchIds.forEach((cleanId) => {
+  //       // Match both plain ID and BIGFIX- prefixed ID from CVE cache
+  //       const cvesForPatch = patchCveMap[cleanId] || patchCveMap[`BIGFIX-${cleanId}`] || [];
+  //       cvesForPatch.forEach((c) => cveSet.add(c));
+  //     });
+      
+  //     return {
+  //       baseline_name: b.baseline_name || b.name || "Unknown Baseline",
+  //       patch_count: patchIds.length,
+  //       cve_count: cveSet.size,
+  //       patches: patchIds,
+  //       cves: Array.from(cveSet),
+  //     };
+  //   });
+  // }, [baselines, patchCveMap]);
+
+    const baselineExposure = useMemo(() => {
+    // Create a quick lookup map of Patch ID -> Applicable Computers
+    const patchCompMap = {};
+    patches.forEach(p => {
+       const id = String(p.patch_id).replace(/^BIGFIX-/i, "").trim();
+       patchCompMap[id] = p.applicable_computers || [];
+    });
+
     return baselines.map((b) => {
-      // FIX: Robust Patch ID Extraction
-      // If backend sends an array of objects, array of strings, or a stringified JSON
       let rawPatches = [];
       if (Array.isArray(b.patches)) {
           rawPatches = b.patches;
@@ -106,7 +153,6 @@ export default function BaselineDashboard({
           }
       }
 
-      // Ensure we just have simple string IDs like "260865901" without prefixes
       const patchIds = rawPatches.map(p => {
           let id = "";
           if (typeof p === 'object' && p !== null) id = String(p.patch_id || p.id || "");
@@ -115,21 +161,29 @@ export default function BaselineDashboard({
       }).filter(Boolean);
       
       const cveSet = new Set();
+      const compSet = new Set(); 
+      
       patchIds.forEach((cleanId) => {
-        // Match both plain ID and BIGFIX- prefixed ID from CVE cache
         const cvesForPatch = patchCveMap[cleanId] || patchCveMap[`BIGFIX-${cleanId}`] || [];
         cvesForPatch.forEach((c) => cveSet.add(c));
+        
+        // Add computers applicable to this patch (used for export data mapping)
+        const compsForPatch = patchCompMap[cleanId] || [];
+        compsForPatch.forEach((c) => compSet.add(c));
       });
       
       return {
         baseline_name: b.baseline_name || b.name || "Unknown Baseline",
         patch_count: patchIds.length,
         cve_count: cveSet.size,
+        // 🚀 FIX: Use the exact 100% accurate native count from BigFix!
+        computer_count: b.computer_count !== undefined ? b.computer_count : compSet.size, 
         patches: patchIds,
         cves: Array.from(cveSet),
+        computers: Array.from(compSet), 
       };
     });
-  }, [baselines, patchCveMap]);
+  }, [baselines, patchCveMap, patches]);
 
   const applyFilters = (baseline) => {
     if (!parentFilters.length) return true;
@@ -210,6 +264,7 @@ export default function BaselineDashboard({
     performExport(dataToExport, cols, exportFormat, "baseline_exposure", (b, c) => {
       if (c === "patch_count") return b.patches.join(", ");
       if (c === "cve_count") return b.cves.join(", ");
+      if (c === "computer_count") return b.computers.join(", ");
       return b[c];
     });
   };
@@ -293,6 +348,13 @@ export default function BaselineDashboard({
                   CVEs{getSortIcon("cve_count")}
                 </th>
               )}
+
+              {/* 🚀 ADD THIS HEADER: */}
+              {cols.find((c) => c.id === "computer_count")?.show && (
+                <th className="cursor-pointer" style={{ textAlign: "center", width: colWidth }} onClick={() => handleSort("computer_count")}>
+                  Applicable Computers{getSortIcon("computer_count")}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -319,6 +381,14 @@ export default function BaselineDashboard({
                     <td style={{ textAlign: "center", wordBreak: "break-word" }}>
                       <span className="cell-link" onClick={() => navigate("cve", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}>
                         {b.cve_count}
+                      </span>
+                    </td>
+                  )}
+                  {/* 🚀 ADD THIS CELL: */}
+                  {cols.find((c) => c.id === "computer_count")?.show && (
+                    <td style={{ textAlign: "center", wordBreak: "break-word" }}>
+                      <span className="cell-link" onClick={() => navigate("computer", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}>
+                        {b.computer_count}
                       </span>
                     </td>
                   )}

@@ -1,7 +1,7 @@
 // src/components/pilot/PilotSandboxResult.jsx
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import FilterDrawer from "../FilterDrawer";
-
+import InlineSpinner from "../common/InlineSpinner";
 const API_BASE = window.env.VITE_API_BASE;
 
 /* ------------------------------- helpers ------------------------------- */
@@ -233,7 +233,81 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     }
   }, [actionId]);
 
-  const refresh = useCallback(async (abortSignal) => {
+// const refresh = useCallback(async (abortSignal, isManual = false) => {    setErr("");
+//     try {
+//       let idToUse = lockedId;
+
+//       // 🚀 ALWAYS poll for a newer action if we don't have a hardcoded actionId prop.
+//       // This synchronizes users on other machines.
+//       if (!actionId) {
+//         const last = await getJson(`${API_BASE}/api/actions/last`, abortSignal).catch(()=>null);
+//         const fetchedLastId = last?.actionId ? String(last.actionId) : null;
+//         if (fetchedLastId && fetchedLastId !== lockedId) {
+//           idToUse = fetchedLastId;
+//           setLockedId(idToUse);
+//           setIsActionStopped(false); // Unfreeze! A new action was found globally
+//         }
+//       }
+
+//       if (!idToUse) {
+//         setSummary({ success: 0, total: 0 });
+//         setCounts(new Map());
+//         setStatusBanner(null);
+//         setLoading(false);
+//         return;
+//       }
+      
+//       // 🚀 Only skip fetching results if THIS SPECIFIC action is already done.
+//       // The block above still allowed us to detect if a *new* one arrived.
+//      if (isActionStopped && idToUse === lockedId && !isManual) {
+//           setLoading(false);
+//           return;
+//       }
+//       setLoading(true);
+//       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
+      
+//       const allRows = Array.isArray(res?.rows) ? res.rows : [];
+//       setRows(allRows);
+
+//       let uRows = [];
+//       const map = new Map();
+//       for (const r of allRows) {
+//           if (r.server && !map.has(r.server)) {
+//               map.set(r.server, r);
+//           }
+//       }
+//       uRows = Array.from(map.values());
+//       setUniqueRows(uRows);
+
+//       const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
+//       const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
+//       const success = uRows.length > 0 
+//           ? uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+//           : Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
+      
+//       setCounts(cm);
+//       setSummary({ success, total });
+      
+//       try {
+//         const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
+//         const s = String(statusRes?.state || "").toLowerCase();
+//         if (s === 'open' || s === 'running') {
+//             setStatusBanner({ msg: "Action is open", type: 'running' });
+//         }
+//         else if (s === 'expired' || s === 'stopped') {
+//             setStatusBanner({ msg: "Action Stopped", type: 'completed' });
+//             setIsActionStopped(true); // Freeze heavy polling for this specific action
+//         }
+//         else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
+//       } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
+//     } catch (e) {
+//       if (e.name !== "AbortError") setErr(e.message);
+//     } finally {
+//       if (!abortSignal || !abortSignal.aborted) setLoading(false);
+//     }
+//   }, [lockedId, isActionStopped, actionId]); 
+
+const refresh = useCallback(async (abortSignal, isManual = false) => {
     setErr("");
     try {
       let idToUse = lockedId;
@@ -260,11 +334,10 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       
       // 🚀 Only skip fetching results if THIS SPECIFIC action is already done.
       // The block above still allowed us to detect if a *new* one arrived.
-      if (isActionStopped && idToUse === lockedId) {
+      if (isActionStopped && idToUse === lockedId && !isManual) {
           setLoading(false);
           return;
       }
-
       setLoading(true);
       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
       
@@ -290,24 +363,37 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       setCounts(cm);
       setSummary({ success, total });
       
-      try {
-        const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
-        const s = String(statusRes?.state || "").toLowerCase();
-        if (s === 'open' || s === 'running') {
-            setStatusBanner({ msg: "Action is running", type: 'running' });
-        }
-        else if (s === 'expired' || s === 'stopped') {
-            setStatusBanner({ msg: "Action Stopped", type: 'completed' });
-            setIsActionStopped(true); // Freeze heavy polling for this specific action
-        }
-        else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
-      } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
+      // 🚀 FIX 1: If we already know the action is stopped, SKIP the status API!
+      // Manual refreshes will only update the results counts above, saving network traffic.
+      if (!isActionStopped || idToUse !== lockedId) {
+        try {
+          const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
+          const s = String(statusRes?.state || "").toLowerCase();
+          if (s === 'open' || s === 'running') {
+              setStatusBanner({ msg: "Action is open", type: 'running' });
+          }
+          else if (s === 'expired' || s === 'stopped') {
+              setStatusBanner({ msg: "Action Stopped", type: 'completed' });
+              
+              // 🚀 FIX 2: The Final Sync to guarantee a 100% match with the email CSV
+              if (!isActionStopped) {
+                  setIsActionStopped(true); // Freeze the 5-minute auto-poller
+                  
+                  // Wait 8 seconds for BigFix to settle, then pull ONE final time
+                  setTimeout(() => {
+                      refresh(null, true);
+                  }, 8000); 
+              }
+          }
+          else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
+        } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
+      }
     } catch (e) {
       if (e.name !== "AbortError") setErr(e.message);
     } finally {
       if (!abortSignal || !abortSignal.aborted) setLoading(false);
     }
-  }, [lockedId, isActionStopped, actionId]); 
+  }, [lockedId, isActionStopped, actionId]);
 
   useEffect(() => {
     refreshAbortRef.current?.abort();
@@ -316,13 +402,22 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     
     refresh(ab.signal);
 
+   if (isActionStopped) {
+        return () => ab.abort();
+    }
+
+    // 3. Otherwise, set up the strict 5-minute (300,000ms) interval
     const interval = setInterval(() => { 
-        if (!loading) refresh(ab.signal); 
-    }, 15000); 
+        refresh(ab.signal); 
+    }, 300000); 
 
-    return () => { ab.abort(); clearInterval(interval); };
-  }, [lockedId, refresh, loading, isActionStopped]);
-
+    return () => { 
+        ab.abort(); 
+        clearInterval(interval); 
+    };
+    
+    // 🚀 FIX: Removed 'loading' and 'isActionStopped' to stop the infinite loop!
+  }, [lockedId, refresh]);
   const handleContainerClick = (e, statusFilter = null) => {
     e.stopPropagation();
     if (onViewDetails) {
@@ -372,10 +467,25 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   return (
     <>
       <section className="card reveal" data-reveal>
-        <div className="flex-row items-center justify-between mb-16">
+       <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
-          <button className="btn outline small" onClick={() => refresh(null)} disabled={loading}>{loading ? "" : ""}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>          
+          <button 
+            className="btn outline small" 
+            onClick={() => refresh(null, true)} 
+            title="Refresh Data"
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            {loading ? (
+              <>
+                <InlineSpinner size={14} variant="dark" />
+                <span>Loading...</span>
+              </>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                <path d="M23 4v6h-6"></path>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+            )}
           </button>
         </div>
         {err ? <div className="sub error">{err}</div> : !lockedId ? <div className="sub">No data</div> : (
@@ -390,7 +500,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
             
             {statusBanner && (<div className={`status-banner ${statusBanner.type}`}>{statusBanner.type === 'running' && <span className="pulse-dot"></span>}{statusBanner.msg}</div>)}
             
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px'}}>
               
               <div style={{ width: '160px', height: '200px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
                 <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={(e) => handleContainerClick(e, null)} style={{ cursor: 'pointer', width: '100%', height: '100%' }}>
@@ -437,7 +547,9 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                 ))}
               </div>
 
-            </div>
+            </div> 
+          
+
           </>
         )}
       </section>

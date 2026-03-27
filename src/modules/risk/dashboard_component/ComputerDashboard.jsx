@@ -22,6 +22,8 @@ export default function ComputerDashboard({
   const colRef = useRef(null);
   const expRef = useRef(null);
 
+const [baselines, setBaselines] = useState([]);
+
   const [cols, setCols] = useState([
     { id: "device_name", label: "Device Name", show: true },
     { id: "patch_count", label: "Missing Patches", show: true },
@@ -39,8 +41,13 @@ export default function ComputerDashboard({
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  useEffect(() => {
-    onDataLoaded?.();
+ useEffect(() => {
+    api.get("/baselines").then(res => {
+      const data = Array.isArray(res.data) ? res.data : res.data?.data || [];
+      setBaselines(data);
+    }).catch(err => console.error(err)).finally(() => {
+      onDataLoaded?.();
+    });
   }, []);
 
   const patchCveMap = useMemo(() => {
@@ -106,7 +113,40 @@ export default function ComputerDashboard({
           condition = (device.cves || []).some((x) =>
             x.toLowerCase().includes(search),
           );
+        } else if (c.column === "baseline_name") {
+          // Find the baseline being filtered
+          const matchedBls = baselines.filter(x => {
+             const name = String(x.baseline_name || x.name || "").toLowerCase();
+             if (c.operator === "=") return name === search;
+             if (c.operator === "contains") return name.includes(search);
+             return false;
+          });
+
+          if (c.operator === "!=") {
+             const exactMatch = baselines.filter(x => String(x.baseline_name || x.name || "").toLowerCase() === search);
+             const allBlPatches = new Set();
+             exactMatch.forEach(mb => {
+                let rP = Array.isArray(mb.patches) ? mb.patches : [];
+                if (typeof mb.patches === 'string') { try { rP = JSON.parse(mb.patches); } catch(e){} }
+                rP.forEach(p => allBlPatches.add(String(p.patch_id || p.id || p).replace(/^BIGFIX-/i, "").trim()));
+             });
+             condition = !Array.from(allBlPatches).some(pid => device.patches.includes(pid));
+          } else {
+              if (matchedBls.length > 0) {
+                  const allBlPatches = new Set();
+                  matchedBls.forEach(mb => {
+                      let rP = Array.isArray(mb.patches) ? mb.patches : [];
+                      if (typeof mb.patches === 'string') { try { rP = JSON.parse(mb.patches); } catch(e){} }
+                      rP.forEach(p => allBlPatches.add(String(p.patch_id || p.id || p).replace(/^BIGFIX-/i, "").trim()));
+                  });
+                  // A device is applicable if it is missing AT LEAST ONE patch from the baseline
+                  condition = Array.from(allBlPatches).some(pid => device.patches.includes(pid));
+              } else {
+                  condition = false; // Baseline not found
+              }
+          }
         }
+          
         blockMatch = blockMatch && condition;
       }
       if (validConds > 0)

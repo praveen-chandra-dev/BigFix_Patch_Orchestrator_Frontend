@@ -27,7 +27,8 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState("TARGETS");
-  const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
+  // const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
+  const [mode, setMode] = useState("COMPUTER"); 
   const [items, setItems] = useState([]);
   const [isFetching, setIsFetching] = useState(false);
   const [groups, setGroups] = useState([]);
@@ -446,8 +447,9 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
       {activeTab === "TARGETS" && (
         <>
           <div className="tabs sub">
-            <button className={`tab small ${mode === "GROUP" ? "active" : ""}`} onClick={() => setMode("GROUP")} disabled={processing}>By Groups</button>
             <button className={`tab small ${mode === "COMPUTER" ? "active" : ""}`} onClick={() => setMode("COMPUTER")} disabled={processing}>By Computers</button>
+
+            <button className={`tab small ${mode === "GROUP" ? "active" : ""}`} onClick={() => setMode("GROUP")} disabled={processing}>By Groups</button>
           </div>
 
           {mode === "GROUP" && (

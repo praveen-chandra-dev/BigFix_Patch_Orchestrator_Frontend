@@ -61,11 +61,20 @@ export default function PilotEnvironment({ mode = "pilot" }) {
         configPromise,
       ]);
 
+      // const bNames = (bRes.baselines || []).map((b) => b.name).sort();
+      // const gNames = (gRes.groups || []).map((g) => g.name).sort();
+
+      // setBaselines(bNames);
+      // setGroups(gNames);
+
       const bNames = (bRes.baselines || []).map((b) => b.name).sort();
       const gNames = (gRes.groups || []).map((g) => g.name).sort();
+      
+      // 🚀 Keep the full objects so we can read the count
+      const groupObjects = (gRes.groups || []).sort((a, b) => a.name.localeCompare(b.name));
 
       setBaselines(bNames);
-      setGroups(gNames);
+      setGroups(groupObjects);
 
       setEnv((f) => {
         let safeBaseline = f.baseline;
@@ -209,9 +218,9 @@ export default function PilotEnvironment({ mode = "pilot" }) {
           searchable={true}
         />
 
-        <FancySelect
+       <FancySelect
           label={inProduction ? "Production Group" : "Pilot Group"}
-          options={groups.map((g) => ({ value: g, label: g }))}
+          options={groups.map((g) => ({ value: g.name, label: `${g.name} [${g.count ?? 0}]` }))}
           value={inProduction ? env.prodGroup : env.pilotGroup}
           onChange={(val) =>
             setEnv((f) => ({

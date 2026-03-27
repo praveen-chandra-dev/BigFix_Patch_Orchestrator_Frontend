@@ -33,6 +33,8 @@ export default function GroupManager({ onClose }) {
   
   // 🚀 2. Initialize useToast
   const { showToast } = useToast();
+  // ADD THESE LINES:
+  const [activeTab, setActiveTab] = useState('CREATE');
   
   const [groupType, setGroupType] = useState("Automatic");
   const [groupName, setGroupName] = useState("");
@@ -70,6 +72,128 @@ export default function GroupManager({ onClose }) {
   const colRef = useRef(null);
   const expRef = useRef(null);
 
+  // --- MANAGE GROUPS STATES ---
+  const [manageGroups, setManageGroups] = useState([]);
+  const [fetchingManage, setFetchingManage] = useState(false);
+  const [managePage, setManagePage] = useState(1);
+  const [manageRpp, setManageRpp] = useState(10);
+  const [manageDrawerOpen, setManageDrawerOpen] = useState(false);
+  const [manageGlobalLogic, setManageGlobalLogic] = useState("AND");
+  const [manageFilters, setManageFilters] = useState([]);
+  const [manageSort, setManageSort] = useState({ key: 'site', direction: 'asc' });
+  const [manageShowCol, setManageShowCol] = useState(false);
+  const [manageShowExp, setManageShowExp] = useState(false);
+  const manageColRef = useRef(null);
+  const manageExpRef = useRef(null);
+
+  const [manageCols, setManageCols] = useState([
+    { id: 'id', label: 'ID', show: true },
+    { id: 'name', label: 'Name', show: true },
+    { id: 'type', label: 'Type', show: true },
+    { id: 'site', label: 'Site', show: true },
+    { id: 'count', label: 'Member Computer Count', show: true }
+  ]);
+
+  const managePropertyOptions = useMemo(() => [
+    { value: "name", label: "Name" },
+    { value: "type", label: "Type" },
+    { value: "site", label: "Site" },
+    { value: "id", label: "ID" },
+    { value: "count", label: "Member Count" }
+  ], []);
+
+  
+
+  // Change your fetchManageGroups function to look like this:
+  const fetchManageGroups = async (forceRefresh = false) => {
+    setFetchingManage(true);
+    try {
+      // Append the refresh flag to the URL
+      const data = await getJSON(`/api/groups/manage?refresh=${forceRefresh}`);
+      if (data.ok) setManageGroups(data.groups || []);
+    } catch (e) { showToast(e.message, "error"); } 
+    finally { setFetchingManage(false); }
+  };
+
+  useEffect(() => {
+    // Normal tab loading uses the cache
+    if (activeTab === 'MANAGE') fetchManageGroups(false);
+  }, [activeTab]);
+
+  // Click outside listener for Manage dropdowns
+  useEffect(() => {
+    const handleOutsideManage = (e) => {
+      if (manageColRef.current && !manageColRef.current.contains(e.target)) setManageShowCol(false);
+      if (manageExpRef.current && !manageExpRef.current.contains(e.target)) setManageShowExp(false);
+    };
+    document.addEventListener("mousedown", handleOutsideManage);
+    return () => document.removeEventListener("mousedown", handleOutsideManage);
+  }, []);
+
+const applyManageFilters = (group) => {
+    if (!manageFilters.length) return true;
+    let globalMatch = manageGlobalLogic === "OR" ? false : true;
+    for (let b of manageFilters) {
+      let blockMatch = true; let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++; let condition = true;
+        const search = String(c.value).toLowerCase();
+        const field = String(group[c.column] || "").toLowerCase();
+
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+        else if (c.operator === ">") condition = Number(field) > Number(search);
+        else if (c.operator === "<") condition = Number(field) < Number(search);
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) globalMatch = manageGlobalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+    }
+    return globalMatch;
+  };
+
+  const filteredManageGroups = useMemo(() => manageGroups.filter(applyManageFilters), [manageGroups, manageFilters, manageGlobalLogic]);
+  const activeManageFilterCount = manageFilters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+
+  const sortedManageGroups = useMemo(() => {
+    let items = [...filteredManageGroups];
+    if (manageSort.key) {
+      items.sort((a, b) => {
+        let aVal = a[manageSort.key] || "";
+        let bVal = b[manageSort.key] || "";
+        if (manageSort.key === 'count' || manageSort.key === 'id') {
+           return manageSort.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
+        }
+        aVal = String(aVal).toLowerCase();
+        bVal = String(bVal).toLowerCase();
+        if (aVal < bVal) return manageSort.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return manageSort.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return items;
+  }, [filteredManageGroups, manageSort]);
+
+  const paginatedManageGroups = sortedManageGroups.slice((managePage - 1) * manageRpp, managePage * manageRpp);
+
+  const handleManageSort = (key) => setManageSort(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getManageSortIcon = (key) => manageSort.key === key ? <span className="ml-6">{manageSort.direction === "asc" ? "↑" : "↓"}</span> : <span className="muted-text ml-6">↕</span>;
+
+  const handleManageExport = (scope) => { 
+    setManageShowExp(false); 
+    let dataToExport = [];
+    if (scope === 'page') dataToExport = paginatedManageGroups;
+    else if (scope === 'filtered') dataToExport = sortedManageGroups;
+    else dataToExport = manageGroups;
+    performExport(dataToExport, manageCols, exportFormat, "manage_groups_export");
+  };
+
+  
+
+
+  
+
   const [cols, setCols] = useState([
     { id: 'name', label: 'Computer Name', show: true },
     { id: 'os', label: 'Operating System', show: true },
@@ -81,6 +205,16 @@ export default function GroupManager({ onClose }) {
     { value: "os", label: "Operating System" },
     { value: "ips", label: "IP Address" }
   ], []);
+
+  useEffect(() => {
+    const handleNav = (e) => setActiveTab(e.detail);
+    window.addEventListener('nav:group', handleNav);
+    
+    // Sync the sidebar whenever the component loads or tab changes
+    window.dispatchEvent(new CustomEvent('sync:group_tab', { detail: activeTab }));
+    
+    return () => window.removeEventListener('nav:group', handleNav);
+  }, [activeTab]);
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -254,6 +388,156 @@ export default function GroupManager({ onClose }) {
     });
   };
 
+  {/* Update the onClick handler for the refresh button */}
+  <button className="iconbtn" onClick={() => fetchManageGroups(true)} title="Refresh Data">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+  </button>
+
+ if (activeTab === 'MANAGE') {
+    return (
+      <div className="mgmt">
+        <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Manage Groups</h2>
+              <div className="sub mt-4 text-13 muted-text">View and edit existing groups</div>
+          </div>
+          <div className="right flex-row gap-12 items-center">
+             <div style={{ position: 'relative' }}>
+                 <button className="iconbtn" onClick={() => setManageDrawerOpen(true)} title="Filter Data">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                 </button>
+                 {activeManageFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeManageFilterCount}</span>}
+             </div>
+             <button className="iconbtn" onClick={fetchManageGroups} title="Refresh Data">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+             </button>
+          </div>
+        </div>
+        
+        <div className="section overflow-visible" style={{ marginTop: '20px' }}>
+          
+          {/* Active Filter Banner */}
+          {activeManageFilterCount > 0 && (
+              <div className="p-0-20-20" style={{ paddingTop: '20px' }}>
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {manageFilters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{manageGlobalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{managePropertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn outline" onClick={() => setManageFilters([])}>Clear Filters</button>
+                  </div>
+              </div>
+          )}
+
+          <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: activeManageFilterCount > 0 ? 0 : '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="title">Group Directory</span>
+              <span className="pill soft">Total: {filteredManageGroups.length}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="dropdown" ref={manageColRef}>
+                    <button className="btn outline sec small" onClick={() => { setManageShowCol(!manageShowCol); setManageShowExp(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        &nbsp; Columns
+                    </button>
+                    {manageShowCol && (
+                        <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {manageCols.map((col, i) => (
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                            const next = [...manageCols]; next[i].show = e.target.checked; setManageCols(next);
+                                        }} />
+                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div className="dropdown" ref={manageExpRef}>
+                    <button className="btn outline small" onClick={() => { setManageShowExp(!manageShowExp); setManageShowCol(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                        &nbsp; Export
+                    </button>
+                    {manageShowExp && (
+                        <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                 <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                               ))}
+                            </div>
+                            <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                            <button className="item" onClick={() => handleManageExport('page')}>Current Page</button>
+                            <button className="item" onClick={() => handleManageExport('filtered')}>Filtered Data</button>
+                            <button className="item" onClick={() => handleManageExport('all')}>All Data</button>
+                        </div>
+                    )}
+                </div>
+            </div>
+          </div>
+          
+          <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
+            {fetchingManage ? (
+               <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading groups...</div>
+            ) : paginatedManageGroups.length === 0 ? (
+               <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No groups found matching your criteria.</div>
+            ) : (
+              <table>
+                <thead className="kpi-th-sticky">
+                  <tr>
+                    {manageCols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('id')}>ID{getManageSortIcon('id')}</th>}
+                    {manageCols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('name')}>Name{getManageSortIcon('name')}</th>}
+                    {manageCols.find(c=>c.id==='type')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('type')}>Type{getManageSortIcon('type')}</th>}
+                    {manageCols.find(c=>c.id==='site')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('site')}>Site{getManageSortIcon('site')}</th>}
+                    {manageCols.find(c=>c.id==='count')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('count')}>Member Computer Count{getManageSortIcon('count')}</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedManageGroups.map((g) => (
+                    <tr key={g.id}>
+                      {manageCols.find(c=>c.id==='id')?.show && <td>{g.id}</td>}
+                      {manageCols.find(c=>c.id==='name')?.show && <td><strong>{g.name}</strong></td>}
+                      {manageCols.find(c=>c.id==='type')?.show && <td><span className="rowchip">{g.type}</span></td>}
+                      {manageCols.find(c=>c.id==='site')?.show && <td className="muted-text">{g.site}</td>}
+                      {manageCols.find(c=>c.id==='count')?.show && <td>{g.count}</td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <Paginator total={sortedManageGroups.length} rpp={manageRpp} setRpp={setManageRpp} page={managePage} setPage={setManagePage} edgeToEdge={false} />
+        </div>
+        
+        <FilterDrawer 
+          isOpen={manageDrawerOpen} 
+          onClose={() => setManageDrawerOpen(false)} 
+          filters={manageFilters} 
+          setFilters={setManageFilters} 
+          globalLogic={manageGlobalLogic} 
+          setGlobalLogic={setManageGlobalLogic} 
+          propertyOptions={managePropertyOptions} 
+        />
+      </div>
+    );
+  }
   return (
     <div className="mgmt">
       <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

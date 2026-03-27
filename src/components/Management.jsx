@@ -305,7 +305,7 @@ export default function Management({ onClose }) {
       try {
           const data = await fetchAuth('/api/auth/my-bigfix-creds', { bfPassword: myBfPassword });
           if (data.ok) {
-              setMsg(data.message || "Credentials verified & saved to vault.");
+              setMsg(data.message || "Credentials verified.");
               setPersonalCreds(prev => ({ ...prev, hasCreds: true }));
               setMyBfPassword("");
               window.dispatchEvent(new CustomEvent('bf-creds-updated'));
@@ -338,11 +338,11 @@ export default function Management({ onClose }) {
               <div className="grid" style={{ gridTemplateColumns: '1fr', gap: '40px', padding: '0 24px 24px' }}>
                  <div>
                     <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        Personal BigFix Vault
+                        Personal BigFix Credential
                         {personalCreds.hasCreds && <span className="pill succ" style={{ fontSize: '11px', padding: '2px 6px' }}>Verified</span>}
                         {!personalCreds.hasCreds && <span className="pill err" style={{ fontSize: '11px', padding: '2px 6px', backgroundColor: '#ff9800', color: 'white', border: 'none' }}>Missing/Invalid</span>}
                     </h3>
-                    <p className="text-13 muted-text" style={{ marginBottom: '20px' }}>Store your personal BigFix password in the secure vault to allow Patch Setu to seamlessly perform orchestration actions on your behalf.</p>
+                    <p className="text-13 muted-text" style={{ marginBottom: '20px' }}>Store your personal BigFix password in the securely to allow Patch Setu to seamlessly perform orchestration actions on your behalf.</p>
                     {!personalCreds.hasCreds && (
                         <div style={{ padding: '12px', backgroundColor: '#fff3e0', border: '1px solid #ffcc80', borderRadius: '6px', color: '#e65100', fontSize: '12px', marginBottom: '20px' }}>
                            ⚠️ BigFix rejected the stored credentials or you have not configured them yet. Provide your active BigFix password to continue using the app.
@@ -357,7 +357,7 @@ export default function Management({ onClose }) {
                             <span className="label">BigFix Password</span>
                             <input type="password" placeholder={personalCreds.hasCreds ? "•••••••• (Saved Securely)" : "Enter BigFix Password"} className="control" value={myBfPassword} onChange={e=>setMyBfPassword(e.target.value)} required />
                         </div>
-                        <button type="submit" className="btn outline small" disabled={savingPersonal}>{savingPersonal ? "Verifying with BigFix..." : "Verify & Save to Vault"}</button>
+                        <button type="submit" className="btn outline small" disabled={savingPersonal}>{savingPersonal ? "Verifying with BigFix..." : "Verify"}</button>
                     </form>
                  </div>
               </div>

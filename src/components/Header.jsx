@@ -63,11 +63,12 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
   const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
   const [localRoleTab, setLocalRoleTab] = useState('LIST');
 
+  const [localGroupTab, setLocalGroupTab] = useState('CREATE');
   useEffect(() => {
     if (!isRestoring) {
-        navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab });
+        navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab, localGroupTab });
     }
-  }, [activeMenu, flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab]);
+  }, [activeMenu, flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab, localGroupTab]);
 
   useEffect(() => {
     const handleRestore = (e) => {
@@ -82,6 +83,9 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
         if (state.localSnapTab !== localSnapTab) window.dispatchEvent(new CustomEvent('nav:snapshot', { detail: state.localSnapTab }));
         if (state.localCloneTab !== localCloneTab) window.dispatchEvent(new CustomEvent('nav:clone', { detail: state.localCloneTab }));
         if (state.localRoleTab !== localRoleTab) window.dispatchEvent(new CustomEvent('nav:roles', { detail: state.localRoleTab }));
+
+        // ADD THIS LINE:
+        if (state.localGroupTab !== localGroupTab) window.dispatchEvent(new CustomEvent('nav:group', { detail: state.localGroupTab }));
     };
     window.addEventListener('nav:restore', handleRestore);
     return () => window.removeEventListener('nav:restore', handleRestore);
@@ -91,13 +95,22 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
     const handleSnap = (e) => setLocalSnapTab(e.detail);
     const handleClone = (e) => setLocalCloneTab(e.detail);
     const handleRole = (e) => setLocalRoleTab(e.detail);
+    // ADD THIS LINE:
+    const handleGroup = (e) => setLocalGroupTab(e.detail);
+
     window.addEventListener('sync:snapshot_tab', handleSnap);
     window.addEventListener('sync:clone_tab', handleClone);
     window.addEventListener('sync:roles_tab', handleRole);
+
+    // ADD THIS LINE:
+    window.addEventListener('sync:group_tab', handleGroup);
     return () => {
         window.removeEventListener('sync:snapshot_tab', handleSnap);
         window.removeEventListener('sync:clone_tab', handleClone);
         window.removeEventListener('sync:roles_tab', handleRole);
+
+        // ADD THIS LINE:
+        window.removeEventListener('sync:group_tab', handleGroup);
     };
   }, []);
 
@@ -202,6 +215,17 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
         <a className={`menu-item ${activeMenu === 'group' ? 'active' : ''}`} onClick={() => onNavigate('group')}>
            <IconGroup /> Group Management
         </a>
+        {/* ADD THIS ENTIRE BLOCK: */}
+        {activeMenu === 'group' && (
+           <div className="sidebar-sub-menu">
+               <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'CREATE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'CREATE'}))}>
+                     Create Group
+               </a>
+               <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'MANAGE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'MANAGE'}))}>
+                     Manage Groups
+               </a>
+           </div>
+        )}
         
         <a className={`menu-item ${activeMenu === 'snapshot' ? 'active' : ''}`} onClick={() => onNavigate('snapshot')}>
            <IconFolder /> Take Snapshot

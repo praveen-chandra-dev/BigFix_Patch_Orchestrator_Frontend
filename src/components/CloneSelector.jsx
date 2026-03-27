@@ -28,7 +28,8 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState("TARGETS");
-  const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
+  // const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
+  const [mode, setMode] = useState("COMPUTER"); 
   const [items, setItems] = useState([]);
   const [groups, setGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
@@ -512,8 +513,8 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
       {activeTab === "TARGETS" && (
         <>
           <div className="tabs sub">
-            <button className={`tab small ${mode === "GROUP" ? "active" : ""}`} onClick={() => setMode("GROUP")} disabled={processing}>By Group</button>
             <button className={`tab small ${mode === "COMPUTER" ? "active" : ""}`} onClick={() => setMode("COMPUTER")} disabled={processing}>All Servers</button>
+            <button className={`tab small ${mode === "GROUP" ? "active" : ""}`} onClick={() => setMode("GROUP")} disabled={processing}>By Group</button>
           </div>
           
           {mode === "GROUP" && (

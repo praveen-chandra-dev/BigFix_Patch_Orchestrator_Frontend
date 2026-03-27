@@ -556,7 +556,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   useEffect(() => {
     let timer; const ab = new AbortController();
-    async function tick() {
+   /* async function tick() {
       try {
         const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
 
@@ -614,7 +614,81 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
       } catch (err) {
         if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
       }
+    }  */
+async function tick() {
+    try {
+      const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
+
+      // 1. Fire all three requests at the exact same time, but don't update state yet!
+      const pHealth = getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal).catch(() => null);
+      
+      const pReboot = getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal).catch(() => null);
+      
+      const pSuccess = (async () => {
+        let idToUse = activeActionId;
+        if (!idToUse) {
+            const pinned = getPinnedActionId();
+            if (pinned) {
+                idToUse = pinned;
+                setActiveActionId(idToUse);
+                setIsActionStopped(false);
+            }
+        }
+        if (!idToUse) return { rate: 0, success: 0, total: 0 };
+
+        if (!isActionStopped || idToUse !== activeActionId) {
+            const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
+            const st = String(statusRes?.state || "").toLowerCase();
+            const isDone = st === 'stopped' || st === 'expired';
+
+            const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
+            let uniqueRows = [];
+            if (Array.isArray(res?.rows)) {
+                const map = new Map();
+                for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+                uniqueRows = Array.from(map.values());
+            }
+            const success = uniqueRows.length > 0 
+                ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+                : Number(res?.success ?? 0);
+            
+            const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
+            const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+            
+            if (isDone) setIsActionStopped(true); 
+            return { rate, success, total };
+        }
+        return null; // Return null if it's already stopped and we don't need to fetch
+      })();
+
+      // 2. Wait for all of them to cross the finish line together
+      const [ch, rp, successData] = await Promise.all([pHealth, pReboot, pSuccess]);
+
+      // 3. Update the UI EXACTLY ONCE for a perfectly smooth animation
+      setKpi((p) => {
+        const nextKpi = { ...p };
+        
+        if (ch !== null) {
+            nextKpi.critHealthFails = Number(ch?.count || 0);
+        }
+        if (rp !== null) {
+            const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
+            nextKpi.rebootPending = Number(rp?.count ?? (rpRows.length || 0));
+            setRebootRows(rpRows); 
+        }
+        if (successData !== null) {
+            nextKpi.successRate = successData.rate;
+            nextKpi.successCount = successData.success;
+            nextKpi.totalCount = successData.total;
+        }
+        
+        return nextKpi;
+      });
+
+    } catch (err) {
+      if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
     }
+  }
     tick(); timer = setInterval(tick, 15000); 
     return () => { clearInterval(timer); ab.abort(); };
   }, [mode, scopeGroup, activeActionId, isActionStopped]);
@@ -622,7 +696,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
       <h2>{title}</h2>
-      <div className="kpi-row-wrap">
+      <div className="kpi-row-wrap" style={{ marginBottom: 0 }}>
         <div className="flex-1 min-w-220">
           <div className="kpis kpi-row-wrap">
             {!isEUC && (
@@ -636,11 +710,86 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
             <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => handleKpiClick('health')} />
             <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => handleKpiClick('reboot')} />
           </div>
-          <div className="sep"></div>
-          <DonutChart 
+          {/* <div className="sep"></div> */}
+          {/* <DonutChart 
               donut={donut} center={center} hoverKey={hoverKey} setHoverKey={setHoverKey} 
               onClickMap={{ success: () => handleKpiClick('success'), health: () => handleKpiClick('health'), reboot: () => handleKpiClick('reboot') }}
-          />
+          /> */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px' }}>
+  {/* Donut SVG – same dimensions as PilotSandboxResult */}
+  <div style={{ width: '160px', flexShrink: 0, display: 'flex', justifyContent: 'center', marginLeft: '50px' }}>
+    <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={() => handleKpiClick('success')} style={{ cursor: 'pointer', width: '100%', height: 'auto' }}>
+      <g transform="translate(60,60)">
+        {donut.length === 0 ? (
+          fullRingPaths(0, 0, 48, 30).map((pd, idx) => (
+            <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" />
+          ))
+        ) : (
+          donut.map((s, i) => {
+            const mid = (s.start + s.end) / 2;
+            const rad = ((mid - 90) * Math.PI) / 180;
+            const explode = hoverKey === s.key ? 3 : 0;
+            const dx = explode * Math.cos(rad);
+            const dy = explode * Math.sin(rad);
+            const d = arcPath(0, 0, 48, s.start, s.end, 30);
+            const isFull = d === null;
+            
+            const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: 'pointer' };
+            
+            if (isFull) {
+              return (
+                <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle} onClick={() => handleKpiClick(s.key === 'Success' ? 'success' : s.key === 'Health Failures' ? 'health' : 'reboot')}>
+                  {fullRingPaths(0, 0, 48, 30).map((pd, idx) => (
+                    <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
+                  ))}
+                </g>
+              );
+            }
+            return (
+              <path
+                key={i}
+                d={d}
+                fill={s.fill}
+                stroke="var(--panel-1)"
+                strokeWidth="0.2"
+                transform={`translate(${dx},${dy})`}
+                onMouseEnter={() => setHoverKey(s.key)}
+                onMouseLeave={() => setHoverKey(null)}
+                onClick={() => handleKpiClick(s.key === 'Success' ? 'success' : s.key === 'Health Failures' ? 'health' : 'reboot')}
+                style={activeStyle}
+              />
+            );
+          })
+        )}
+        <text x="0" y="-2" textAnchor="middle" fontSize="14" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>
+          {center.pct}%
+        </text>
+        <text x="0" y="12" textAnchor="middle" fontSize="7" fill="var(--muted)" style={{ pointerEvents: 'none' }}>
+          {center.label}
+        </text>
+      </g>
+    </svg>
+  </div>
+
+  {/* External legend – vertical list */}
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto', paddingRight: '8px' }} className="custom-scrollbar" onMouseLeave={() => setHoverKey(null)}>
+    {donut.length === 0 && <div className="muted-text text-12">No Data</div>}
+    {donut.map(l => (
+      <div
+        key={l.key}
+        onClick={() => handleKpiClick(l.key === 'Success' ? 'success' : l.key === 'Health Failures' ? 'health' : 'reboot')}
+        onMouseEnter={() => setHoverKey(l.key)}
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', opacity: hoverKey && hoverKey !== l.key ? 0.4 : 1, transition: '0.2s' }}
+        title={l.key === 'Success' ? 'Action executed successfully' : l.key === 'Reboot Pending' ? 'Computers waiting for reboot' : 'Critical health failures'}
+      >
+        <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: l.fill, flexShrink: 0 }}></span>
+        <span style={{ fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {l.key} ({l.val})
+        </span>
+      </div>
+    ))}
+  </div>
+</div>
         </div>
       </div>
 

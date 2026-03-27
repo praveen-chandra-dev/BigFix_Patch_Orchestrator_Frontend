@@ -503,7 +503,6 @@ export default function KpiDetails({ context, activeTab }) {
           <div className="fade-in" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div className="grid-toolbar" style={{ margin: '0 0 16px 0', padding: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span className="title" style={{ fontWeight: 600, color: 'var(--text)' }}>Results</span>
                     
                     {type === 'reboot' && selectedReboots.size > 0 && (
                        <>
@@ -635,7 +634,7 @@ export default function KpiDetails({ context, activeTab }) {
                                             <td className="kpi-td-center" onClick={e => e.stopPropagation()}>
                                                 {canRestartSvc && (
                                                     <button className="btn pri h-32 px-10 text-11" onClick={(e) => { e.stopPropagation(); setConfirmService(row.server); }} disabled={!!actionStatus[`svc_${row.server}`]}>
-                                                        {actionStatus[`svc_${row.server}`] === "loading" ? "..." : actionStatus[`svc_${row.server}`] === "success" ? "Sent" : "Restart"}
+                                                        {actionStatus[`svc_${row.server}`] === "loading" ? "..." : actionStatus[`svc_${row.server}`] === "success" ? "Sent" : "Restart Service"}
                                                     </button>
                                                 )}
                                             </td>
