@@ -98,8 +98,9 @@ export default function Environment() {
       
       // 🚀 Keep the full objects so we can read the count
       const groupObjects = (gRes.groups || []).sort((a, b) => a.name.localeCompare(b.name));
+      const baselineObjects = (bRes.baselines || []).sort((a, b) => a.name.localeCompare(b.name));
 
-      setBaselines(bNames);
+      setBaselines(baselineObjects);
       setGroups(groupObjects);
 
       setEnv((f) => {
@@ -193,13 +194,11 @@ export default function Environment() {
       <div className="env-inputs-row" style={{ opacity: loading ? 0.6 : 1 }}>
         <FancySelect
           label="Baseline"
-          options={baselines.map((b) => ({ value: b, label: b }))}
+          options={baselines.map((b) => ({ value: b.name, label: `${b.name} [${b.component_count ?? 0}]` }))} // 🚀 Appended [count]
           value={env.baseline}
           onChange={(val) => setEnv((f) => ({ ...f, baseline: val }))}
           disabled={selectsDisabled || !baselines.length}
-          placeholder={
-            !baselines.length ? "— loading… —" : "— select baseline —"
-          }
+          placeholder={!baselines.length ? "— loading… —" : "— select baseline —"}
           searchable={true}
         />
 

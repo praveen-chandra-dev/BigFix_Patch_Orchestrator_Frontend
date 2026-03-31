@@ -139,6 +139,7 @@ export default function BaselineTab({
         name: b.name || "Unnamed Baseline",
         siteType: String(b.siteType || "").toLowerCase(),
         siteName: b.siteName,
+        componentCount: b.component_count ?? 0
       }));
       setBaselineList(formatted);
     } catch (e) {
@@ -619,28 +620,19 @@ export default function BaselineTab({
             className="baseline-list-table"
             style={{ width: "100%", borderCollapse: "collapse" }}
           >
-            <thead
-              style={{
-                position: "sticky",
-                top: 0,
-                zIndex: 1,
-                background: "var(--panel-2)",
-              }}
-            >
+            <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "var(--panel-2)" }}>
               <tr>
                 <th
                   onClick={() => handleSort("name")}
-                  style={{
-                    cursor: "pointer",
-                    padding: "12px 20px",
-                    textAlign: "left",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "var(--muted)",
-                    borderBottom: "1px solid var(--border)",
-                  }}
+                  style={{ cursor: "pointer", padding: "12px 20px", textAlign: "left", fontSize: "12px", fontWeight: 600, color: "var(--muted)", borderBottom: "1px solid var(--border)" }}
                 >
                   NAME {getSortIcon("name")}
+                </th>
+                <th 
+                  onClick={() => handleSort("componentCount")}
+                  style={{ cursor: "pointer", padding: "12px 20px", textAlign: "center", fontSize: "12px", fontWeight: 600, color: "var(--muted)", borderBottom: "1px solid var(--border)", width: "100px" }}
+                >
+                  COMPONENTS {getSortIcon("componentCount")}
                 </th>
               </tr>
             </thead>
@@ -681,15 +673,11 @@ export default function BaselineTab({
                         e.currentTarget.style.background = "transparent";
                     }}
                   >
-                    <td
-                      style={{
-                        padding: "14px 20px",
-                        wordBreak: "break-word",
-                        fontWeight: 500,
-                        color: "var(--primary)",
-                      }}
-                    >
+                    <td style={{ padding: "14px 20px", wordBreak: "break-word", fontWeight: 500, color: "var(--primary)" }}>
                       {b.name}
+                    </td>
+                    <td style={{ padding: "14px 20px", textAlign: "center", color: "var(--text)", fontWeight: 500 }}>
+                      {b.componentCount}
                     </td>
                     <td style={{ padding: "14px 20px" }}></td>
                   </tr>

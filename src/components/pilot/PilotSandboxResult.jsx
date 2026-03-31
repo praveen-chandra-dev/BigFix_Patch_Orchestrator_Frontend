@@ -211,6 +211,10 @@ function rowsToHTML(rows, title = "Results") {
 export default function PilotSandboxResult({ title = "Sandbox Result", detailTitle, actionId, onViewDetails }) {
   const [lockedId, setLockedId] = useState(null);
   const [summary, setSummary] = useState({ success: 0, total: 0 });
+
+  const finalSyncQueued = useRef(false);
+
+  const actionDeadRef = useRef(false); // 🚀 ADD THIS: The Instant Brick Wall
   const [counts, setCounts] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -230,6 +234,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     if (actionId != null && actionId !== "") {
         setLockedId(String(actionId));
         setIsActionStopped(false); // Reset stop state for new ID
+        actionDeadRef.current = false; // 🚀 Reset the wall
+        finalSyncQueued.current = false;
     }
   }, [actionId]);
 
@@ -321,6 +327,8 @@ const refresh = useCallback(async (abortSignal, isManual = false) => {
           idToUse = fetchedLastId;
           setLockedId(idToUse);
           setIsActionStopped(false); // Unfreeze! A new action was found globally
+          actionDeadRef.current = false; // 🚀 Reset the wall
+          finalSyncQueued.current = false;
         }
       }
 
@@ -334,7 +342,7 @@ const refresh = useCallback(async (abortSignal, isManual = false) => {
       
       // 🚀 Only skip fetching results if THIS SPECIFIC action is already done.
       // The block above still allowed us to detect if a *new* one arrived.
-      if (isActionStopped && idToUse === lockedId && !isManual) {
+      if (actionDeadRef.current && idToUse === lockedId) {
           setLoading(false);
           return;
       }
@@ -374,16 +382,13 @@ const refresh = useCallback(async (abortSignal, isManual = false) => {
           }
           else if (s === 'expired' || s === 'stopped') {
               setStatusBanner({ msg: "Action Stopped", type: 'completed' });
+              actionDeadRef.current = true;
               
               // 🚀 FIX 2: The Final Sync to guarantee a 100% match with the email CSV
-              if (!isActionStopped) {
-                  setIsActionStopped(true); // Freeze the 5-minute auto-poller
-                  
-                  // Wait 8 seconds for BigFix to settle, then pull ONE final time
-                  setTimeout(() => {
-                      refresh(null, true);
-                  }, 8000); 
-              }
+              if (!finalSyncQueued.current) {
+                finalSyncQueued.current = true; 
+                setIsActionStopped(true); 
+            }
           }
           else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
         } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }

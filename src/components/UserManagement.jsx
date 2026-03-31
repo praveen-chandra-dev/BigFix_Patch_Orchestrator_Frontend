@@ -4,6 +4,7 @@ import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
+import InlineSpinner from "./common/InlineSpinner";
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
@@ -39,6 +40,15 @@ export default function UserManagement({ onClose, currentUserId }) {
 
   const isLdapUser = newU.includes("@");
 
+  
+
+  const [editingUserId, setEditingUserId] = useState(null);
+  // const [editRoleValue, setEditRoleValue] = useState("");
+  const [editRoleValue, setEditRoleValue] = useState([]);
+
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false);
+
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -49,13 +59,28 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
 
+  // NEW STATE FOR PASSWORD RESET MODAL
+  const [resetModal, setResetModal] = useState({ open: false, user: '' });
+  const [resetPass, setResetPass] = useState("");
+  const [resetOptLocal, setResetOptLocal] = useState(true);
+  const [resetOptBF, setResetOptBF] = useState(true);
+  const [resetting, setResetting] = useState(false);
+
   const colRef = useRef(null);
   const expRef = useRef(null);
+
+  // const [cols, setCols] = useState([
+  //   { id: 'UserID', label: 'User ID', show: true },
+  //   { id: 'LoginName', label: 'Login Name', show: true },
+  //   { id: 'Role', label: 'Role', show: true },
+  //   { id: 'CreatedAt', label: 'Created At', show: true }
+  // ]);
 
   const [cols, setCols] = useState([
     { id: 'UserID', label: 'User ID', show: true },
     { id: 'LoginName', label: 'Login Name', show: true },
-    { id: 'Role', label: 'Role', show: true },
+    { id: 'Role', label: 'Current Role', show: true },
+    { id: 'UpdateRole', label: 'Change Role', show: true }, // NEW COLUMN
     { id: 'CreatedAt', label: 'Created At', show: true }
   ]);
 
@@ -105,6 +130,93 @@ export default function UserManagement({ onClose, currentUserId }) {
       setSuccess("User deleted successfully.");
       setTimeout(() => setSuccess(""), 3000);
     } catch (e) { setErr(e.message); }
+  }
+
+async function submitPasswordReset(e) {
+    e.preventDefault();
+    if (!resetOptLocal && !resetOptBF) return setErr("Please select at least one system to reset.");
+    if (!resetPass) return setErr("New password is required.");
+
+    setErr("");
+    setResetting(true);
+    try {
+      const res = await apiFetch(`/api/auth/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({ 
+            username: resetModal.user, 
+            newPassword: resetPass,
+            resetLocal: resetOptLocal,
+            resetBigFix: resetOptBF
+        })
+      });
+      setSuccess(res.message || `Password for ${resetModal.user} reset successfully.`);
+      setTimeout(() => setSuccess(""), 4000);
+      
+      // Close and clear modal
+      setResetModal({ open: false, user: '' });
+      setResetPass("");
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setResetting(false);
+    }
+  }
+
+
+  async function handleRoleUpdate(userId, newRole) {
+    if (!window.confirm(`Are you sure you want to change this user's role to ${newRole}?`)) return;
+    
+    setErr("");
+    try {
+      const res = await apiFetch(`/api/auth/users/${userId}/role`, { 
+          method: 'PUT', 
+          body: JSON.stringify({ role: newRole }) 
+      });
+      
+      // Update the local state so the UI reflects the change immediately
+      setUsers(u => u.map(x => x.UserID === userId ? { ...x, Role: newRole } : x));
+      
+      setSuccess(res.message || `Role updated to ${newRole} successfully.`);
+      setTimeout(() => setSuccess(""), 4000);
+    } catch (e) { 
+      setErr(e.message); 
+    }
+  }
+
+ async function submitRoleUpdate(userId) {
+    const originalRoleStr = users.find(u => u.UserID === userId)?.Role || "";
+    const originalRoles = originalRoleStr !== 'No Role Assigned' ? originalRoleStr.split(',').map(r => r.trim()) : [];
+    
+    const selectedRoles = editRoleValue; 
+
+    const sortedOriginal = [...originalRoles].sort().join(',');
+    const sortedNew = [...selectedRoles].sort().join(',');
+
+    if (sortedOriginal === sortedNew) {
+      setEditingUserId(null);
+      return; 
+    }
+    
+    setErr("");
+    setIsUpdating(true); // START LOADING
+    
+    try {
+      const res = await apiFetch(`/api/auth/users/${userId}/role`, { 
+          method: 'PUT', 
+          body: JSON.stringify({ roles: selectedRoles }) 
+      });
+      
+      const updatedRoleString = selectedRoles.length > 0 ? selectedRoles.join(', ') : 'No Role Assigned';
+
+      setUsers(u => u.map(x => x.UserID === userId ? { ...x, Role: updatedRoleString } : x));
+      setSuccess(res.message || `Roles updated successfully.`);
+      setTimeout(() => setSuccess(""), 4000);
+      setEditingUserId(null); // Close editor on success
+    } catch (e) { 
+      setErr(e.message); 
+    } finally {
+      setIsUpdating(false); // STOP LOADING
+    }
   }
 
   async function handleAdd(e) {
@@ -226,6 +338,60 @@ export default function UserManagement({ onClose, currentUserId }) {
         {success && <div className="banner success">{success}</div>}
       </div>
 
+      {/* NEW RESET PASSWORD MODAL */}
+      {resetModal.open && (
+        <div className="section mb-20" style={{ border: '1px solid var(--primary)', background: '#f8fafc' }}>
+          <div className="section-head" style={{ background: '#e2e8f0' }}>
+              <span className="title">Reset Password: <strong style={{ color: 'var(--primary)' }}>{resetModal.user}</strong></span>
+          </div>
+          <form onSubmit={submitPasswordReset} className="flex-col gap-16 p-20">
+            <div className="field">
+              <span className="label">New Password</span>
+              <input 
+                  className="control" 
+                  type="text" 
+                  value={resetPass} 
+                  onChange={e => setResetPass(e.target.value)} 
+                  disabled={resetting} 
+                  placeholder="Enter new password" 
+                  required 
+              />
+            </div>
+            
+            <div className="flex-row gap-20">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input 
+                        type="checkbox" 
+                        checked={resetOptLocal} 
+                        onChange={e => setResetOptLocal(e.target.checked)} 
+                        disabled={resetting} 
+                    />
+                    <span style={{ fontSize: '13px', fontWeight: 500 }}>Reset Patch Setu Login</span>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input 
+                        type="checkbox" 
+                        checked={resetOptBF} 
+                        onChange={e => setResetOptBF(e.target.checked)} 
+                        disabled={resetting} 
+                    />
+                    <span style={{ fontSize: '13px', fontWeight: 500 }}>Reset BigFix Operator Password</span>
+                </label>
+            </div>
+
+            <div className="pb-0" style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+              <button type="submit" className="btn pri small min-w-100" style={{ height: '32px' }} disabled={resetting}>
+                  {resetting ? "Resetting..." : "Confirm Reset"}
+              </button>
+              <button type="button" className="btn ghost small min-w-100" style={{ height: '32px' }} onClick={() => setResetModal({ open: false, user: '' })} disabled={resetting}>
+                  Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {addOpen && (
         <div className="section mb-20">
           <div className="section-head"><span className="title">Add New User</span></div>
@@ -263,7 +429,8 @@ export default function UserManagement({ onClose, currentUserId }) {
         </div>
       )}
 
-      <div className="section flex-col flex-1 overflow-hidden" style={{ borderRadius: '8px', border: '1px solid var(--border)' }}>
+      {/* <div className="section flex-col flex-1 overflow-hidden" style={{ borderRadius: '8px', border: '1px solid var(--border)' }}> */}
+      <div className="section flex-col flex-1" style={{ borderRadius: '8px', border: '1px solid var(--border)', overflow: 'visible' }}>
           {activeFilterCount > 0 && (
               <div className="p-0-20-20 mt-20">
                   <div className="active-filter-banner active">
@@ -341,18 +508,34 @@ export default function UserManagement({ onClose, currentUserId }) {
             </div>
           </div>
 
-          <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
-            {loading ? (
+          {/* <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}> */}
+          {/* <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'visible' }}> */}
+              <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'auto', paddingBottom: editingUserId ? '200px' : '0' }}>            
+                {loading ? (
                 <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading users...</div>
             ) : paginatedData.length === 0 ? (
                 <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No users found.</div>
             ) : (
               <table>
-                <thead className="kpi-th-sticky">
+                {/* <thead className="kpi-th-sticky">
                   <tr>
                     {cols.find(c=>c.id==='UserID')?.show && <th className="cursor-pointer" onClick={() => handleSort('UserID')}>User ID{getSortIcon('UserID')}</th>}
                     {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Login Name{getSortIcon('LoginName')}</th>}
                     {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortIcon('Role')}</th>}
+                    {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
+                    <th className="right">Actions</th>
+                  </tr>
+                </thead> */}
+                <thead className="kpi-th-sticky">
+                  <tr>
+                    {cols.find(c=>c.id==='UserID')?.show && <th className="cursor-pointer" onClick={() => handleSort('UserID')}>User ID{getSortIcon('UserID')}</th>}
+                    {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Login Name{getSortIcon('LoginName')}</th>}
+                    
+                    {/* Updated Role Header */}
+                    {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Current Role{getSortIcon('Role')}</th>}
+                    
+                    {/* New Change Role Header */}
+                    {cols.find(c=>c.id==='UpdateRole')?.show && <th>Change Role</th>}
                     {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
                     <th className="right">Actions</th>
                   </tr>
@@ -362,14 +545,140 @@ export default function UserManagement({ onClose, currentUserId }) {
                     <tr key={u.UserID}>
                       {cols.find(c=>c.id==='UserID')?.show && <td><b>{u.UserID}</b></td>}
                       {cols.find(c=>c.id==='LoginName')?.show && <td>{u.LoginName}</td>}
-                      {cols.find(c=>c.id==='Role')?.show && <td><span className={u.Role === 'Admin' ? 'pill purple' : 'pill soft'}>{u.Role}</span></td>}
+                      {/* {cols.find(c=>c.id==='Role')?.show && <td><span className={u.Role === 'Admin' ? 'pill purple' : 'pill soft'}>{u.Role}</span></td>} */}
+                      {/* 1. The original display column (Restored to just show the pill) */}
+                      {/* {cols.find(c=>c.id==='Role')?.show && <td>
+                          <span className={u.Role === 'Admin' ? 'pill purple' : 'pill soft'}>{u.Role}</span>
+                      </td>} */}
+                      {cols.find(c=>c.id==='Role')?.show && <td>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                            {u.Role ? u.Role.split(',').map(r => r.trim()).map(r => (
+                                <span key={r} className={r === 'Admin' ? 'pill purple' : 'pill soft'}>{r}</span>
+                            )) : <span className="muted-text text-11">None</span>}
+                        </div>
+                    </td>}
+
+                      {/* 2. The new interactive column with FancySelect */}
+                      {/* {cols.find(c=>c.id==='UpdateRole')?.show && <td>
+                        {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
+                          <span className="muted-text text-11" style={{ paddingLeft: '8px' }}>Cannot change</span>
+                        ) : (
+                          <div style={{ minWidth: '180px' }}>
+                            <FancySelect 
+                              options={roleOptions}
+                              value={u.Role}
+                              onChange={(newVal) => handleRoleUpdate(u.UserID, newVal)}
+                              searchable={true}
+                              menuPlacement="bottom"
+                            />
+                          </div>
+                        )}
+                      </td>} */}
+                      {/* 2. The new interactive column with FancySelect */}
+                      {/* 2. The interactive column with Inline Editing */}
+                      {/* 2. The interactive column with Inline Editing */}
+                      {/* 2. The interactive column with Custom Checkbox Dropdown */}
+{/* 2. The interactive column using FancySelect for Multi-Select */}
+{cols.find(c=>c.id==='UpdateRole')?.show && <td>
+  {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
+    <span className="muted-text text-11" style={{ paddingLeft: '8px' }}>Cannot change</span>
+  ) : editingUserId === u.UserID ? (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: '320px' }}>
+      
+      {/* Use FancySelect exactly as you do in BaselineManager */}
+      <div style={{ flex: 1, position: 'relative', zIndex: 9999 }}>
+        <FancySelect 
+          options={roleOptions.map(opt => opt.value)} // Extract just the string values for the options
+          value={editRoleValue}                       // Pass the array of selected string values
+          onChange={setEditRoleValue}                 // Updates the array state
+          placeholder="— Select Roles —"
+          multiSelect={true}      
+          menuPlacement="bottom"                    // Enable checkbox mode!
+        />
+      </div>
+
+      {/* Save and Cancel Buttons */}
+      {/* Save and Cancel Buttons */}
+      <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+        <button 
+          className="btn pri small flex-row items-center justify-center" 
+          style={{ width: '30px', height: '30px', padding: 0 }} 
+          onClick={() => submitRoleUpdate(u.UserID)}
+          disabled={isUpdating}
+          title="Save"
+        >
+          {isUpdating ? <InlineSpinner size={14} variant="light" /> : "✓"}
+        </button>
+        <button 
+          className="btn outline sec small flex-row items-center justify-center" 
+          style={{ width: '30px', height: '30px', padding: 0 }} 
+          onClick={() => setEditingUserId(null)}
+          disabled={isUpdating}
+          title="Cancel"
+        >
+          ✕
+        </button>
+      </div>
+      
+    </div>
+  ) : (
+    <button 
+      className="btn outline sec small" 
+      onClick={() => { 
+          setEditingUserId(u.UserID); 
+          // Pre-fill the state with an array of the current role strings
+          const currentRoles = u.Role && u.Role !== 'No Role Assigned' ? u.Role.split(',').map(r => r.trim()) : [];
+          setEditRoleValue(currentRoles); 
+      }}
+    >
+      Change Role
+    </button>
+  )}
+</td>}
                       {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(u.CreatedAt)}</td>}
-                      <td className="right">
+                      {/* <td className="right">
                         {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
                           <span className="sub">Protected</span>
                         ) : (
                           <button className="btn-icon-sm" onClick={() => handleDelete(u.UserID)} title="Delete User">✕</button>
                         )}
+                      </td> */}
+                      {/* Replace your current <td className="right"> with this: */}
+                      <td className="right">
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
+                            <span className="sub" style={{ paddingRight: '8px' }}>Protected</span>
+                          ) : (
+                            <>
+                              {/* CHECK FOR LDAP USER HERE */}
+                              {u.LoginName.includes('@') ? (
+                                <button 
+                                  className="btn outline sec small" 
+                                  disabled 
+                                  style={{ opacity: 0.5, cursor: 'not-allowed' }} 
+                                  title="LDAP users must reset passwords via Active Directory"
+                                >
+                                  LDAP Sync
+                                </button>
+                              ) : (
+                                  <button 
+                                    className="btn outline sec small" 
+                                    onClick={() => {
+                                        setResetModal({ open: true, user: u.LoginName });
+                                        setResetPass("");
+                                        setResetOptLocal(true);
+                                        setResetOptBF(true);
+                                    }} 
+                                    title="Reset Password"
+                                  >
+                                    Reset Pass
+                                  </button>
+                              )}
+
+                              <button className="btn-icon-sm" onClick={() => handleDelete(u.UserID)} title="Delete User">✕</button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

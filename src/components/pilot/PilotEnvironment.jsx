@@ -73,7 +73,9 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       // 🚀 Keep the full objects so we can read the count
       const groupObjects = (gRes.groups || []).sort((a, b) => a.name.localeCompare(b.name));
 
-      setBaselines(bNames);
+      const baselineObjects = (bRes.baselines || []).sort((a, b) => a.name.localeCompare(b.name));
+
+      setBaselines(baselineObjects);
       setGroups(groupObjects);
 
       setEnv((f) => {
@@ -208,13 +210,11 @@ export default function PilotEnvironment({ mode = "pilot" }) {
       <div className={`env-inputs-row ${loading ? "opacity-60" : ""}`}>
         <FancySelect
           label="Baseline"
-          options={baselines.map((b) => ({ value: b, label: b }))}
+          options={baselines.map((b) => ({ value: b.name, label: `${b.name} [${b.component_count ?? 0}]` }))} // 🚀 Appended [count]
           value={env.baseline}
           onChange={(val) => setEnv((f) => ({ ...f, baseline: val }))}
           disabled={disabled || !baselines.length || inputsLocked}
-          placeholder={
-            !baselines.length ? "— loading… —" : "— select baseline —"
-          }
+          placeholder={!baselines.length ? "— loading… —" : "— select baseline —"}
           searchable={true}
         />
 

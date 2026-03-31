@@ -63,7 +63,7 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
   const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
   const [localRoleTab, setLocalRoleTab] = useState('LIST');
 
-  const [localGroupTab, setLocalGroupTab] = useState('CREATE');
+  const [localGroupTab, setLocalGroupTab] = useState('COMPUTERS');
   useEffect(() => {
     if (!isRestoring) {
         navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab, localGroupTab });
@@ -218,8 +218,11 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
         {/* ADD THIS ENTIRE BLOCK: */}
         {activeMenu === 'group' && (
            <div className="sidebar-sub-menu">
+                <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'COMPUTERS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'COMPUTERS'}))}>
+                     Computer List
+               </a>
                <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'CREATE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'CREATE'}))}>
-                     Create Group
+                     Create Group/Edit Group
                </a>
                <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'MANAGE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'MANAGE'}))}>
                      Manage Groups

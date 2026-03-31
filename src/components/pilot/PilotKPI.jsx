@@ -364,6 +364,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
 
   const [activeActionId, setActiveActionId] = useState(null);
   const [isActionStopped, setIsActionStopped] = useState(false);
+  const actionDeadRef = useRef(false); // 🚀 ADD THIS
 
   const [kpi, setKpi] = useState({ rebootPending: 0, critHealthFails: 0, successRate: 0, successCount: 0, totalCount: 0 });
   
@@ -396,6 +397,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     if (id) {
        setActiveActionId(id);
        setIsActionStopped(false); 
+       actionDeadRef.current = false; // 🚀 Reset the wall
     }
   }, [getPinnedActionId()]);
 
@@ -624,6 +626,43 @@ async function tick() {
       
       const pReboot = getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal).catch(() => null);
       
+      // const pSuccess = (async () => {
+      //   let idToUse = activeActionId;
+      //   if (!idToUse) {
+      //       const pinned = getPinnedActionId();
+      //       if (pinned) {
+      //           idToUse = pinned;
+      //           setActiveActionId(idToUse);
+      //           setIsActionStopped(false);
+      //       }
+      //   }
+      //   if (!idToUse) return { rate: 0, success: 0, total: 0 };
+
+      //   if (!isActionStopped || idToUse !== activeActionId) {
+      //       const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
+      //       const st = String(statusRes?.state || "").toLowerCase();
+      //       const isDone = st === 'stopped' || st === 'expired';
+
+      //       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
+      //       let uniqueRows = [];
+      //       if (Array.isArray(res?.rows)) {
+      //           const map = new Map();
+      //           for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+      //           uniqueRows = Array.from(map.values());
+      //       }
+      //       const success = uniqueRows.length > 0 
+      //           ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+      //           : Number(res?.success ?? 0);
+            
+      //       const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
+      //       const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+            
+      //       if (isDone) setIsActionStopped(true); 
+      //       return { rate, success, total };
+      //   }
+      //   return null; // Return null if it's already stopped and we don't need to fetch
+      // })();
+
       const pSuccess = (async () => {
         let idToUse = activeActionId;
         if (!idToUse) {
@@ -636,29 +675,33 @@ async function tick() {
         }
         if (!idToUse) return { rate: 0, success: 0, total: 0 };
 
-        if (!isActionStopped || idToUse !== activeActionId) {
-            const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
-            const st = String(statusRes?.state || "").toLowerCase();
-            const isDone = st === 'stopped' || st === 'expired';
-
-            const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
-            let uniqueRows = [];
-            if (Array.isArray(res?.rows)) {
-                const map = new Map();
-                for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-                uniqueRows = Array.from(map.values());
-            }
-            const success = uniqueRows.length > 0 
-                ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-                : Number(res?.success ?? 0);
-            
-            const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
-            const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-            
-            if (isDone) setIsActionStopped(true); 
-            return { rate, success, total };
+        // 🚀 THE FIX: Use absolute strict freezing. If the action is stopped, NEVER fetch again.
+        if (actionDeadRef.current && idToUse === activeActionId) {
+            return null; 
         }
-        return null; // Return null if it's already stopped and we don't need to fetch
+        const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
+        const st = String(statusRes?.state || "").toLowerCase();
+        const isDone = st === 'stopped' || st === 'expired';
+
+        const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
+        let uniqueRows = [];
+        if (Array.isArray(res?.rows)) {
+            const map = new Map();
+            for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+            uniqueRows = Array.from(map.values());
+        }
+        const success = uniqueRows.length > 0 
+            ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+            : Number(res?.success ?? 0);
+        
+        const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
+        const rate = total > 0 ? Math.round((success / total) * 100) : 0;
+        
+        if (isDone) {
+            actionDeadRef.current = true;
+            setIsActionStopped(true);
+        }
+        return { rate, success, total };
       })();
 
       // 2. Wait for all of them to cross the finish line together

@@ -5,8 +5,8 @@ import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
 import InlineSpinner from "./common/InlineSpinner";
-// 🚀 1. Import useToast
 import { useToast } from "./common/CustomToast";
+import ComputerList from "./ComputerList";
 
 const API = window.env.VITE_API_BASE;
 
@@ -30,18 +30,21 @@ async function postJSON(endpoint, body) {
 
 export default function GroupManager({ onClose }) {
   const isMO = sessionStorage.getItem("isMO") === "true";
-  
-  // 🚀 2. Initialize useToast
   const { showToast } = useToast();
-  // ADD THESE LINES:
-  const [activeTab, setActiveTab] = useState('CREATE');
   
+  // Tab Routing ('COMPUTERS' = ComputerList, 'MANAGE' = Manage Groups, 'CREATE' = Create/Edit Form)
+  const [activeTab, setActiveTab] = useState('COMPUTERS');
+  const [targetGroupId, setTargetGroupId] = useState(null);
+  const [targetGroupName, setTargetGroupName] = useState("");
+
+  // --- EDIT STATE ---
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+
+  // --- CREATE / EDIT FORM STATE ---
   const [groupType, setGroupType] = useState("Automatic");
   const [groupName, setGroupName] = useState("");
   const [creating, setCreating] = useState(false);
-
-  // Note: error and successMsg states have been removed!
-
   const [properties, setProperties] = useState([]);
   const [selectedProperty, setSelectedProperty] = useState("");
   const [operators] = useState([{value:"Contains", label:"Contains"}, {value:"Equals", label:"Equals"}, {value:"Starts With", label:"Starts With"}]);
@@ -69,6 +72,9 @@ export default function GroupManager({ onClose }) {
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
   
+  const logicOptions = useMemo(() => [{value:"All", label:"All"}, {value:"Any", label:"Any"}], []);
+const [groupLogic, setGroupLogic] = useState("All");
+
   const colRef = useRef(null);
   const expRef = useRef(null);
 
@@ -102,13 +108,9 @@ export default function GroupManager({ onClose }) {
     { value: "count", label: "Member Count" }
   ], []);
 
-  
-
-  // Change your fetchManageGroups function to look like this:
   const fetchManageGroups = async (forceRefresh = false) => {
     setFetchingManage(true);
     try {
-      // Append the refresh flag to the URL
       const data = await getJSON(`/api/groups/manage?refresh=${forceRefresh}`);
       if (data.ok) setManageGroups(data.groups || []);
     } catch (e) { showToast(e.message, "error"); } 
@@ -116,11 +118,9 @@ export default function GroupManager({ onClose }) {
   };
 
   useEffect(() => {
-    // Normal tab loading uses the cache
     if (activeTab === 'MANAGE') fetchManageGroups(false);
   }, [activeTab]);
 
-  // Click outside listener for Manage dropdowns
   useEffect(() => {
     const handleOutsideManage = (e) => {
       if (manageColRef.current && !manageColRef.current.contains(e.target)) setManageShowCol(false);
@@ -130,7 +130,7 @@ export default function GroupManager({ onClose }) {
     return () => document.removeEventListener("mousedown", handleOutsideManage);
   }, []);
 
-const applyManageFilters = (group) => {
+  const applyManageFilters = (group) => {
     if (!manageFilters.length) return true;
     let globalMatch = manageGlobalLogic === "OR" ? false : true;
     for (let b of manageFilters) {
@@ -176,24 +176,16 @@ const applyManageFilters = (group) => {
   }, [filteredManageGroups, manageSort]);
 
   const paginatedManageGroups = sortedManageGroups.slice((managePage - 1) * manageRpp, managePage * manageRpp);
-
   const handleManageSort = (key) => setManageSort(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   const getManageSortIcon = (key) => manageSort.key === key ? <span className="ml-6">{manageSort.direction === "asc" ? "↑" : "↓"}</span> : <span className="muted-text ml-6">↕</span>;
 
   const handleManageExport = (scope) => { 
     setManageShowExp(false); 
-    let dataToExport = [];
-    if (scope === 'page') dataToExport = paginatedManageGroups;
-    else if (scope === 'filtered') dataToExport = sortedManageGroups;
-    else dataToExport = manageGroups;
+    let dataToExport = scope === 'page' ? paginatedManageGroups : scope === 'filtered' ? sortedManageGroups : manageGroups;
     performExport(dataToExport, manageCols, exportFormat, "manage_groups_export");
   };
 
-  
-
-
-  
-
+  // --- CREATE / EDIT LOGIC ---
   const [cols, setCols] = useState([
     { id: 'name', label: 'Computer Name', show: true },
     { id: 'os', label: 'Operating System', show: true },
@@ -207,12 +199,21 @@ const applyManageFilters = (group) => {
   ], []);
 
   useEffect(() => {
-    const handleNav = (e) => setActiveTab(e.detail);
+    const handleNav = (e) => {
+        if (typeof e.detail === 'object') {
+            setActiveTab(e.detail.tab);
+            setTargetGroupId(e.detail.groupId);
+            setTargetGroupName(e.detail.groupName);
+        } else {
+            setActiveTab(e.detail);
+            if (e.detail !== 'COMPUTERS') {
+                setTargetGroupId(null);
+                setTargetGroupName("");
+            }
+        }
+    };
     window.addEventListener('nav:group', handleNav);
-    
-    // Sync the sidebar whenever the component loads or tab changes
     window.dispatchEvent(new CustomEvent('sync:group_tab', { detail: activeTab }));
-    
     return () => window.removeEventListener('nav:group', handleNav);
   }, [activeTab]);
 
@@ -232,7 +233,7 @@ const applyManageFilters = (group) => {
         setLoadingProps(true);
         getJSON("/api/groups/metadata/properties")
           .then(data => setProperties(data.properties?.map(p => ({value: p, label: p})) || []))
-          .catch(e => showToast(e.message, "error")) // 🚀 3. Replaced setError with showToast
+          .catch(e => showToast(e.message, "error")) 
           .finally(() => setLoadingProps(false));
       }
       if (customSites.length === 0) {
@@ -249,17 +250,13 @@ const applyManageFilters = (group) => {
   const fetchComputers = async () => {
     setFetchingComp(true);
     try {
-      const url = `/api/groups/metadata/computers?page=1&limit=10000`; 
-      const data = await getJSON(url);
+      const data = await getJSON(`/api/groups/metadata/computers?page=1&limit=10000`);
       if (data.ok) {
         setAllComputers(data.computers || []);
         setLastUpdated(new Date().toLocaleString());
       }
-    } catch (e) { 
-      showToast(e.message, "error"); // 🚀 Replaced setError
-    } finally { 
-      setFetchingComp(false); 
-    }
+    } catch (e) { showToast(e.message, "error"); } 
+    finally { setFetchingComp(false); }
   };
 
   useEffect(() => {
@@ -276,9 +273,7 @@ const applyManageFilters = (group) => {
         if (!c.value) continue;
         validConds++; let condition = true;
         const search = String(c.value).toLowerCase();
-        let field = "";
-        if (c.column === "ips") field = (computer.ips || []).join(", ").toLowerCase();
-        else field = String(computer[c.column] || "").toLowerCase();
+        let field = c.column === "ips" ? (computer.ips || []).join(", ").toLowerCase() : String(computer[c.column] || "").toLowerCase();
 
         if (c.operator === "contains") condition = field.includes(search);
         else if (c.operator === "=") condition = field === search;
@@ -291,20 +286,12 @@ const applyManageFilters = (group) => {
   };
 
   const visibleComputers = useMemo(() => allComputers.filter(applyFilters), [allComputers, filters, globalLogic]);
-
   const sortedComputers = useMemo(() => {
     let sortableItems = [...visibleComputers];
     if (sortConfig.key) {
       sortableItems.sort((a, b) => {
-        let aVal = a[sortConfig.key] || "";
-        let bVal = b[sortConfig.key] || "";
-        if (sortConfig.key === 'ips') {
-           aVal = Array.isArray(a.ips) ? a.ips.join(", ") : "";
-           bVal = Array.isArray(b.ips) ? b.ips.join(", ") : "";
-        }
-        aVal = String(aVal).toLowerCase();
-        bVal = String(bVal).toLowerCase();
-
+        let aVal = sortConfig.key === 'ips' ? (Array.isArray(a.ips) ? a.ips.join(", ") : "") : String(a[sortConfig.key] || "").toLowerCase();
+        let bVal = sortConfig.key === 'ips' ? (Array.isArray(b.ips) ? b.ips.join(", ") : "") : String(b[sortConfig.key] || "").toLowerCase();
         if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
         return 0;
@@ -317,57 +304,105 @@ const applyManageFilters = (group) => {
 
   const addCondition = () => {
     if (!selectedProperty || !valueInput.trim()) { 
-      showToast("Please select a property and enter a value.", "error"); // 🚀 Replaced setError
+      showToast("Please select a property and enter a value.", "error"); 
       return; 
     }
     setConditions([...conditions, { id: Date.now(), property: selectedProperty, operator: selectedOperator, value: valueInput }]);
     setValueInput(""); 
   };
 
-  const removeCondition = (id) => { setConditions(conditions.filter(c => c.id !== id)); };
-
-  const toggleComputer = (id) => { const next = new Set(selectedCompIds); if (next.has(id)) next.delete(id); else next.add(id); setSelectedCompIds(next); };
-
-  const toggleAllVisible = () => { const next = new Set(selectedCompIds); const allVisibleIds = paginatedComputers.map(c => c.id); const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); if (allSelected) allVisibleIds.forEach(id => next.delete(id)); else allVisibleIds.forEach(id => next.add(id)); setSelectedCompIds(next); };
-
-  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
-    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  const removeCondition = (id) => setConditions(conditions.filter(c => c.id !== id));
+  const toggleComputer = (id) => { const next = new Set(selectedCompIds); next.has(id) ? next.delete(id) : next.add(id); setSelectedCompIds(next); };
+  const toggleAllVisible = () => { 
+      const next = new Set(selectedCompIds); 
+      const allVisibleIds = paginatedComputers.map(c => c.id); 
+      const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); 
+      allSelected ? allVisibleIds.forEach(id => next.delete(id)) : allVisibleIds.forEach(id => next.add(id)); 
+      setSelectedCompIds(next); 
   };
 
-  const handleCreate = async () => {
-    if (!groupName.trim()) { 
-      showToast("Group Name is required.", "error"); // 🚀 Replaced setError
-      return; 
-    }
-    const payload = { name: groupName, type: groupType };
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortIcon = (key) => sortConfig.key !== key ? <span className="muted-text ml-6">↕</span> : <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+
+  // 🚀 RESET FORM LOGIC
+  const resetForm = () => {
+      setGroupName("");
+      setConditions([]);
+      setGroupLogic("All"); // <-- Reset logic
+      setSelectedCompIds(new Set());
+      setIsEditing(false);
+      setEditingGroupId(null);
+  };
+  // 🚀 HANDLE EDIT ROUTING
+  const handleEditClick = async (groupId) => {
+      try {
+          showToast("Loading group details...", "info");
+          const data = await getJSON(`/api/groups/${groupId}/details`);
+          if (data.ok) {
+              const g = data.groupData;
+              setGroupType(g.type);
+              setGroupName(g.name);
+              
+              if (g.type === "Automatic" || g.type === "ServerBased") {
+                  // <-- Set logic from backend
+                  setGroupLogic(g.logic === "Any" ? "Any" : "All"); 
+                  
+                  setConditions(g.conditions.map((c, i) => ({
+                      id: Date.now() + i,
+                      property: c.property || c.propertyId, 
+                      operator: c.operator,
+                      value: c.value
+                  })));
+                  setSelectedTargetSite(g.siteName === 'master' ? 'ActionSite' : g.siteName);
+              } else if (g.type === "Manual") {
+                  setSelectedCompIds(new Set(g.computerIds));
+                  if(allComputers.length === 0) fetchComputers();
+              }
+              
+              setIsEditing(true);
+              setEditingGroupId(groupId);
+              setActiveTab('CREATE'); 
+          }
+      } catch (e) {
+          showToast("Failed to load group details: " + e.message, "error");
+      }
+  };
+
+  // 🚀 UNIFIED SAVE/UPDATE LOGIC
+  const handleSaveGroup = async () => {
+    if (!groupName.trim()) return showToast("Group Name is required.", "error");
+    
+    const payload = { name: groupName, type: groupType, logic: groupLogic };
 
     if (groupType === "Automatic" || groupType === "ServerBased") {
-      if (conditions.length === 0) { 
-        showToast("Please add at least one condition.", "error"); // 🚀 Replaced setError
-        return; 
-      }
-      if (!selectedTargetSite) { 
-        showToast("Please select a target site.", "error"); // 🚀 Replaced setError
-        return; 
-      }
+      if (conditions.length === 0) return showToast("Please add at least one condition.", "error");
+      if (!selectedTargetSite) return showToast("Please select a target site.", "error");
       payload.targetSite = selectedTargetSite; payload.conditions = conditions;
     } else {
-      if (selectedCompIds.size === 0) { 
-        showToast("Please select at least one computer.", "error"); // 🚀 Replaced setError
-        return; 
-      }
+      if (selectedCompIds.size === 0) return showToast("Please select at least one computer.", "error");
       payload.computerIds = Array.from(selectedCompIds);
     }
 
     setCreating(true);
     try {
-      await postJSON("/api/groups/create", payload);
-      showToast(`${groupType} Group "${groupName}" created successfully!`, "success"); // 🚀 Replaced setSuccessMsg
-      setGroupName(""); setConditions([]); setSelectedCompIds(new Set()); setCurrentPage(1);
+      if (isEditing) {
+          const r = await fetch(`${API}/api/groups/${editingGroupId}`, {
+              method: "PUT",
+              headers: getHeaders(),
+              body: JSON.stringify(payload)
+          });
+          const j = await r.json();
+          if (!r.ok || j.ok === false) throw new Error(j.error || "Update failed");
+          showToast(`${groupType} Group "${groupName}" updated successfully!`, "success");
+      } else {
+          await postJSON("/api/groups/create", payload);
+          showToast(`${groupType} Group "${groupName}" created successfully!`, "success");
+      }
+      resetForm();
+      setActiveTab('MANAGE'); // Send back to the manage list
+      fetchManageGroups(true); // Auto-refresh the list
     } catch (e) { 
-      showToast(e.message, "error"); // 🚀 Replaced setError
+      showToast(e.message, "error"); 
     } finally { 
       setCreating(false); 
     }
@@ -377,23 +412,15 @@ const applyManageFilters = (group) => {
 
   const handleExport = (scope) => { 
     setShowExpDrop(false); 
-    let dataToExport = [];
-    if (scope === 'page') dataToExport = paginatedComputers;
-    else if (scope === 'filtered') dataToExport = sortedComputers;
-    else dataToExport = allComputers;
-
-    performExport(dataToExport, cols, exportFormat, "computers_export", (r, c) => {
-        if (c === 'ips') return Array.isArray(r.ips) ? r.ips.join(", ") : "";
-        return r[c];
-    });
+    let dataToExport = scope === 'page' ? paginatedComputers : scope === 'filtered' ? sortedComputers : allComputers;
+    performExport(dataToExport, cols, exportFormat, "computers_export", (r, c) => c === 'ips' ? (Array.isArray(r.ips) ? r.ips.join(", ") : "") : r[c]);
   };
 
-  {/* Update the onClick handler for the refresh button */}
-  <button className="iconbtn" onClick={() => fetchManageGroups(true)} title="Refresh Data">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-  </button>
+  if (activeTab === 'COMPUTERS') {
+      return <ComputerList groupId={targetGroupId} groupName={targetGroupName} />;
+  }
 
- if (activeTab === 'MANAGE') {
+  if (activeTab === 'MANAGE') {
     return (
       <div className="mgmt">
         <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -408,15 +435,13 @@ const applyManageFilters = (group) => {
                  </button>
                  {activeManageFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeManageFilterCount}</span>}
              </div>
-             <button className="iconbtn" onClick={fetchManageGroups} title="Refresh Data">
+             <button className="iconbtn" onClick={() => fetchManageGroups(true)} title="Refresh Data">
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
              </button>
           </div>
         </div>
         
         <div className="section overflow-visible" style={{ marginTop: '20px' }}>
-          
-          {/* Active Filter Banner */}
           {activeManageFilterCount > 0 && (
               <div className="p-0-20-20" style={{ paddingTop: '20px' }}>
                   <div className="active-filter-banner active">
@@ -506,6 +531,7 @@ const applyManageFilters = (group) => {
                     {manageCols.find(c=>c.id==='type')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('type')}>Type{getManageSortIcon('type')}</th>}
                     {manageCols.find(c=>c.id==='site')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('site')}>Site{getManageSortIcon('site')}</th>}
                     {manageCols.find(c=>c.id==='count')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('count')}>Member Computer Count{getManageSortIcon('count')}</th>}
+                    <th className="text-center w-80">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -515,7 +541,22 @@ const applyManageFilters = (group) => {
                       {manageCols.find(c=>c.id==='name')?.show && <td><strong>{g.name}</strong></td>}
                       {manageCols.find(c=>c.id==='type')?.show && <td><span className="rowchip">{g.type}</span></td>}
                       {manageCols.find(c=>c.id==='site')?.show && <td className="muted-text">{g.site}</td>}
-                      {manageCols.find(c=>c.id==='count')?.show && <td>{g.count}</td>}
+                      {manageCols.find(c=>c.id==='count')?.show && (
+                          <td className="cursor-pointer" onClick={() => window.dispatchEvent(new CustomEvent('nav:group', { detail: { tab: 'COMPUTERS', groupId: g.id, groupName: g.name } }))}>
+                              <span style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' }}>{g.count}</span>
+                          </td>
+                      )}
+                      <td className="text-center">
+                         {(isMO || g.type !== 'Manual') && (
+                            <button 
+                                className="btn outline small" 
+                                style={{ height: '28px', padding: '0 12px', fontSize: '12px' }}
+                                onClick={(e) => { e.stopPropagation(); handleEditClick(g.id); }} 
+                            >
+                                Edit
+                            </button>
+                         )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -526,23 +567,17 @@ const applyManageFilters = (group) => {
           <Paginator total={sortedManageGroups.length} rpp={manageRpp} setRpp={setManageRpp} page={managePage} setPage={setManagePage} edgeToEdge={false} />
         </div>
         
-        <FilterDrawer 
-          isOpen={manageDrawerOpen} 
-          onClose={() => setManageDrawerOpen(false)} 
-          filters={manageFilters} 
-          setFilters={setManageFilters} 
-          globalLogic={manageGlobalLogic} 
-          setGlobalLogic={setManageGlobalLogic} 
-          propertyOptions={managePropertyOptions} 
-        />
+        <FilterDrawer isOpen={manageDrawerOpen} onClose={() => setManageDrawerOpen(false)} filters={manageFilters} setFilters={setManageFilters} globalLogic={manageGlobalLogic} setGlobalLogic={setManageGlobalLogic} propertyOptions={managePropertyOptions} />
       </div>
     );
   }
+
+  // --- CREATE / EDIT GROUP FALLBACK VIEW ---
   return (
     <div className="mgmt">
       <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
-            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Create Computer Group</h2>
+            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{isEditing ? "Edit Computer Group" : "Create Computer Group"}</h2>
             <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
         </div>
         <div className="right flex-row gap-12 items-center">
@@ -567,10 +602,10 @@ const applyManageFilters = (group) => {
         <div className="controls-grid auto-1fr">
           <div className="field min-w-200">
             <span className="label">Group Type</span>
-            <div className="toggle-bg">
-              <button className={`toggle-btn ${groupType === "Automatic" ? "active" : ""}`} onClick={() => setGroupType("Automatic")}>Automatic</button>
-              {isMO && <button className={`toggle-btn ${groupType === "Manual" ? "active" : ""}`} onClick={() => setGroupType("Manual")}>Manual</button>}
-              <button className={`toggle-btn ${groupType === "ServerBased" ? "active" : ""}`} onClick={() => setGroupType("ServerBased")}>Server Based</button>
+            <div className={`toggle-bg ${isEditing ? 'disabled' : ''}`}>
+              <button disabled={isEditing} className={`toggle-btn ${groupType === "Automatic" ? "active" : ""}`} onClick={() => setGroupType("Automatic")}>Automatic</button>
+              {isMO && <button disabled={isEditing} className={`toggle-btn ${groupType === "Manual" ? "active" : ""}`} onClick={() => setGroupType("Manual")}>Manual</button>}
+              <button disabled={isEditing} className={`toggle-btn ${groupType === "ServerBased" ? "active" : ""}`} onClick={() => setGroupType("ServerBased")}>Server Based</button>
             </div>
           </div>
           <div className="field">
@@ -600,18 +635,52 @@ const applyManageFilters = (group) => {
             </div>
             <div className="pb-0"><button className="btn outline small" style={{ height: '32px' }} onClick={addCondition}>Add</button></div>
           </div>
-          <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
+          {/* <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
              <div className="flex-1">
                <FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} searchable={true} />
              </div>
+          </div> */}
+          <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
+             <div className="flex-1">
+               <FancySelect 
+                  label="Target Site (Custom)" 
+                  options={customSites} 
+                  value={selectedTargetSite} 
+                  onChange={setSelectedTargetSite} 
+                  placeholder="— Select Target Site —" 
+                  isLoading={loadingSites} 
+                  searchable={true} 
+                  disabled={isEditing} 
+                  isDisabled={isEditing} 
+               />
+             </div>
           </div>
           {conditions.length > 0 && (
-            <div className="tableWrap border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
+            <>
+              {/* 🚀 ADDED: overflow: 'visible' to prevent dropdowns from getting clipped */}
+              <div className="tableWrap border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'visible' }}>
+              
+              {/* 🚀 FIX: Increased width, added flexWrap, and adjusted alignment */}
+              <div style={{ padding: '16px 20px', backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: '26px', flexWrap: 'wrap' }}>
+                 <div style={{ width: '180px', flexShrink: 0 }}>
+                    <FancySelect 
+                        label="Evaluation Logic" 
+                        options={logicOptions} 
+                        value={groupLogic} 
+                        onChange={setGroupLogic} 
+                    />
+                 </div>
+                 <div className="text-13 muted-text" style={{ flex: 1, marginTop: '28px', minWidth: '250px' }}>
+                     {groupLogic === "All" ? "Computers must match ALL of the listed conditions." : "Computers must match ANY of the listed conditions."}
+                 </div>
+              </div>
+
               <table>
                 <thead><tr><th>Property</th><th>Comparison</th><th>Value</th><th>Target Site</th><th className="right">Action</th></tr></thead>
                 <tbody>{conditions.map(c => <tr key={c.id}><td><b>{c.property}</b></td><td><span className="rowchip succ">{c.operator}</span></td><td>{c.value}</td><td className="muted-text">{selectedTargetSite || "—"}</td><td className="right"><button className="btn-icon-sm" onClick={() => removeCondition(c.id)}>✕</button></td></tr>)}</tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -726,23 +795,25 @@ const applyManageFilters = (group) => {
         </div>
       )}
 
-      {/* 🚀 5. Old banner UI section removed here */}
-
       <div className="action-bar" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="spacer"></div>
-        {/* Added InlineSpinner integration from previous prompt */}
+        {isEditing && (
+            <button className="btn outline min-w-140 mr-12" onClick={() => { resetForm(); setActiveTab('MANAGE'); }}>
+                Cancel Edit
+            </button>
+        )}
         <button 
           className="btn pri min-w-140" 
-          onClick={handleCreate} 
+          onClick={handleSaveGroup} 
           disabled={creating || !groupName || ((groupType==='Automatic' || groupType === 'ServerBased') && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}
         >
           {creating ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
               <InlineSpinner size={16} variant="light" />
-              <span>Creating...</span>
+              <span>{isEditing ? "Updating..." : "Creating..."}</span>
             </div>
           ) : (
-            "Create Group"
+             isEditing ? "Update Group" : "Create Group/Edit Group"
           )}
         </button>
       </div>
