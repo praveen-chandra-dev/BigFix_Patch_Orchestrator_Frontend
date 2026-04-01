@@ -101,6 +101,9 @@ export default function PilotDecisionEngine({
   username,
   onOpenSnapshot,
   onOpenClone,
+  onFinish,
+  onResetStage,
+  stageFinished = false
 }) {
   const { env, setEnv } = useEnvironment();
   const inProduction = String(mode).toLowerCase() === "production";
@@ -183,6 +186,44 @@ export default function PilotDecisionEngine({
   }, [inProduction, localPilotEnabled, lastActions]);
 
   const trackingId = useMemo(() => prevActionsInfo.map(a => a.actionId).join(','), [prevActionsInfo]);
+
+  // 🚀 EXTRACT CURRENT ACTIONS ARRAY
+  const currentActionsInfo = useMemo(() => {
+    try {
+      const stageData = inProduction ? lastActions?.PRODUCTION : lastActions?.PILOT;
+      if (stageData?.actions && Array.isArray(stageData.actions)) return stageData.actions;
+      if (stageData?.id) return [{ actionId: stageData.id, group: stageData.group }];
+      return [];
+    } catch { return []; }
+  }, [inProduction, lastActions]);
+
+  const [isCurrentComplete, setIsCurrentComplete] = useState(false);
+
+  // 🚀 Poll current stage actions to unlock the Finish/Reset buttons
+  useEffect(() => {
+    if (!readOnly || currentActionsInfo.length === 0) {
+      setIsCurrentComplete(false);
+      return;
+    }
+    let cancelled = false; let timer;
+    async function pollCurrent() {
+      if (cancelled) return;
+      let allDone = true;
+      for (const act of currentActionsInfo) {
+        const { state } = await getActionMailStatus(act.actionId);
+        const st = String(state).toLowerCase();
+        if (st !== "expired" && st !== "stopped") { allDone = false; break; }
+      }
+      if (allDone) {
+        if (cancelled) return;
+        setIsCurrentComplete(true);
+        if (timer) clearInterval(timer);
+      }
+    }
+    pollCurrent(); 
+    timer = setInterval(pollCurrent, 15000);
+    return () => { cancelled = true; if (timer) clearInterval(timer); };
+  }, [readOnly, currentActionsInfo]);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -451,12 +492,20 @@ export default function PilotDecisionEngine({
       };
       if (requireChg && chgValidated) { payload.chgNumber = chgUpper; payload.requireChg = true; } else { payload.requireChg = false; }
 
+      // const trig = await postJSON(`${API_BASE}${endpoint}`, payload);
+      // setEnv((p) => ({ ...p, [`${mode}Unlocked`]: false, [`${mode}Evaluated`]: false }));
+
+      // if (trackingId) { sessionStorage.removeItem(`approved_${mode}_${trackingId}`); sessionStorage.removeItem(`chg_${mode}_${trackingId}`); }
+      // window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
+      // setEnableTriggerPilot(false); setDecision(`${inProduction ? "Production" : "Pilot"} triggered successfully.`);
       const trig = await postJSON(`${API_BASE}${endpoint}`, payload);
       setEnv((p) => ({ ...p, [`${mode}Unlocked`]: false, [`${mode}Evaluated`]: false }));
 
       if (trackingId) { sessionStorage.removeItem(`approved_${mode}_${trackingId}`); sessionStorage.removeItem(`chg_${mode}_${trackingId}`); }
       window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
-      setEnableTriggerPilot(false); setDecision(`${inProduction ? "Production" : "Pilot"} triggered successfully.`);
+      setEnableTriggerPilot(false); 
+      setEvaluated(false); // 🚀 FIX: Reset evaluation state to remove the FAIL tag
+      setDecision(`${inProduction ? "Production" : "Pilot"} triggered successfully.`);
       
       // Pass the generated actions back to App.jsx
       window.dispatchEvent(new CustomEvent(inProduction ? "production:triggered" : "pilot:triggered", { detail: { actions: trig?.actions } }));
@@ -496,14 +545,62 @@ export default function PilotDecisionEngine({
 
       {needsBackup && isGateSatisfied && <ValidationGate targetGroupName={validDeployments.map(d=>d.group).join(',')} onValidationChange={handleValidationChange} />}
 
+      {/* <div className="row" style={{ gap: 8, flexWrap: "wrap", display: "flex" }}>
+        <button className="btn outline small" onClick={refreshKpis} disabled={refreshing} style={{ display: "flex", alignItems: "center", gap: "6px" }}>{refreshing ? <><InlineSpinner size={14} variant="dark" /><span>Refreshing...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}</button>
+        {!isEUC && <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>}
+        {evaluated && !enableTriggerPilot && !chgValidated && !readOnly && !isEUC && <button className="btn outline amber" onClick={() => setShowUnlockConfirm(true)}>Unlock Settings</button>}
+        /// <button className="btn outline small" onClick={handleTriggerClick} disabled={isTriggerDisabled} title={isTriggerBlocked ? "Complete Validation first" : "Trigger"}>{busy ? <><InlineSpinner size={14} variant="dark" /><span>Triggering...</span></> : checkingBaseline ? <><InlineSpinner size={14} variant="dark" /><span>Checking...</span></> : inProduction ? "Trigger Production" : "Trigger Pilot"}</button> 
+       {!readOnly ? (
+            <button className="btn outline small" onClick={handleTriggerClick} disabled={isTriggerDisabled} title={isTriggerBlocked ? "Complete Validation first" : "Trigger"}>{busy ? <><InlineSpinner size={14} variant="dark" /><span>Triggering...</span></> : checkingBaseline ? <><InlineSpinner size={14} variant="dark" /><span>Checking...</span></> : inProduction ? "Trigger Production" : "Trigger Pilot"}</button>
+        ) : (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {!isCurrentComplete && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '8px', color: 'var(--muted)', fontSize: '13px', fontWeight: 600 }}>
+                        <InlineSpinner size={14} variant="dark" /> Actions Running
+                    </div>
+                )}
+                <button className="btn outline dan small" onClick={onResetStage} disabled={!isCurrentComplete}>Reset Stage</button>
+                <button className="btn pri small" onClick={onFinish} disabled={!isCurrentComplete}>Finish Stage</button>
+            </div>
+        )}
+        {isEUC && <button className="btn outline dan" onClick={() => window.dispatchEvent(new CustomEvent("orchestrator:resetAll"))} title="Reset the entire flow back to Configuration">Reset Deployment Flow</button>}
+        {!inProduction && showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
+        {inProduction && <>{showResetToPilot && <button className="btn outline small" onClick={resetToPilot} disabled={!isPrevStageComplete}>Reset to Pilot</button>}{showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}</>}
+      </div> */}
+
       <div className="row" style={{ gap: 8, flexWrap: "wrap", display: "flex" }}>
         <button className="btn outline small" onClick={refreshKpis} disabled={refreshing} style={{ display: "flex", alignItems: "center", gap: "6px" }}>{refreshing ? <><InlineSpinner size={14} variant="dark" /><span>Refreshing...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}</button>
         {!isEUC && <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>}
         {evaluated && !enableTriggerPilot && !chgValidated && !readOnly && !isEUC && <button className="btn outline amber" onClick={() => setShowUnlockConfirm(true)}>Unlock Settings</button>}
-        <button className="btn outline small" onClick={handleTriggerClick} disabled={isTriggerDisabled} title={isTriggerBlocked ? "Complete Validation first" : "Trigger"}>{busy ? <><InlineSpinner size={14} variant="dark" /><span>Triggering...</span></> : checkingBaseline ? <><InlineSpinner size={14} variant="dark" /><span>Checking...</span></> : inProduction ? "Trigger Production" : "Trigger Pilot"}</button>
-        {isEUC && <button className="btn outline dan" onClick={() => window.dispatchEvent(new CustomEvent("orchestrator:resetAll"))} title="Reset the entire flow back to Configuration">Reset Deployment Flow</button>}
-        {!inProduction && showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}
-        {inProduction && <>{showResetToPilot && <button className="btn outline small" onClick={resetToPilot} disabled={!isPrevStageComplete}>Reset to Pilot</button>}{showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={!isPrevStageComplete}>Reset to Sandbox</button>}</>}
+        
+       {!readOnly ? (
+            <button className="btn outline small" onClick={handleTriggerClick} disabled={isTriggerDisabled} title={isTriggerBlocked ? "Complete Validation first" : "Trigger"}>{busy ? <><InlineSpinner size={14} variant="dark" /><span>Triggering...</span></> : checkingBaseline ? <><InlineSpinner size={14} variant="dark" /><span>Checking...</span></> : inProduction ? "Trigger Production" : "Trigger Pilot"}</button>
+        ) : !stageFinished ? (
+            // 🚀 FIX: Hide Reset/Finish buttons if stageFinished is true
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {!isCurrentComplete && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '8px', color: 'var(--muted)', fontSize: '13px', fontWeight: 600 }}>
+                        <InlineSpinner size={14} variant="dark" /> Actions Running
+                    </div>
+                )}
+                <button className="btn outline dan small" onClick={onResetStage} disabled={!isCurrentComplete}>Reset Stage</button>
+                <button className="btn pri small" onClick={onFinish} disabled={!isCurrentComplete}>Finish Stage</button>
+            </div>
+        ) : null}
+
+       {/* 🚀 FIX: Disable cross-stage resets if the current stage is actively running its actions */}
+        {isEUC && <button className="btn outline dan" onClick={() => window.dispatchEvent(new CustomEvent("orchestrator:resetAll"))} disabled={readOnly && !isCurrentComplete} title="Reset the entire flow back to Configuration">Reset Deployment Flow</button>}
+        
+        {!inProduction && showResetToSandbox && (
+            <button className="btn outline dan" onClick={resetToSandbox} disabled={readOnly && !isCurrentComplete}>Reset to Sandbox</button>
+        )}
+        
+        {inProduction && (
+            <>
+                {showResetToPilot && <button className="btn outline small" onClick={resetToPilot} disabled={readOnly && !isCurrentComplete}>Reset to Pilot</button>}
+                {showResetToSandbox && <button className="btn outline dan" onClick={resetToSandbox} disabled={readOnly && !isCurrentComplete}>Reset to Sandbox</button>}
+            </>
+        )}
       </div>
 
       {showUnlockConfirm && (

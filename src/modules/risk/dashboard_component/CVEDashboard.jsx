@@ -21,7 +21,7 @@ export default function CVEDashboard({
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
-  const [exportFormat, setExportFormat] = useState('CSV');
+  const [exportFormat, setExportFormat] = useState("CSV");
   const colRef = useRef(null);
   const expRef = useRef(null);
 
@@ -36,9 +36,13 @@ export default function CVEDashboard({
   // Store baseline patch IDs for filtering
   const [baselinePatchMap, setBaselinePatchMap] = useState(() => {
     const map = {};
-    baselines.forEach(b => {
+    baselines.forEach((b) => {
       const name = (b.baseline_name || b.name || "").toLowerCase();
-      const patchIds = (b.patch_ids || []).map(id => String(id).replace(/^BIGFIX-/i, "").trim());
+      const patchIds = (b.patch_ids || []).map((id) =>
+        String(id)
+          .replace(/^BIGFIX-/i, "")
+          .trim(),
+      );
       if (patchIds.length) map[name] = new Set(patchIds);
     });
     return map;
@@ -62,14 +66,20 @@ export default function CVEDashboard({
     const fetchBaselines = async () => {
       try {
         const res = await api.get("/baselines/list");
-        const raw = Array.isArray(res.data?.baselines) ? res.data.baselines : [];
+        const raw = Array.isArray(res.data?.baselines)
+          ? res.data.baselines
+          : [];
         const newMap = { ...baselinePatchMap };
         for (const b of raw) {
           const name = (b.baseline_name || b.name || "").toLowerCase();
-          const patchIds = (b.patches || []).map(p => {
-            const id = typeof p === 'object' ? p.patch_id : p;
-            return String(id).replace(/^BIGFIX-/i, "").trim();
-          }).filter(Boolean);
+          const patchIds = (b.patches || [])
+            .map((p) => {
+              const id = typeof p === "object" ? p.patch_id : p;
+              return String(id)
+                .replace(/^BIGFIX-/i, "")
+                .trim();
+            })
+            .filter(Boolean);
           newMap[name] = new Set(patchIds);
         }
         setBaselinePatchMap(newMap);
@@ -99,7 +109,8 @@ export default function CVEDashboard({
     const map = {};
     patches.forEach((p) => {
       const patchId = p.patch_id ? p.patch_id.replace(/^BIGFIX-/i, "") : "";
-      map[patchId] = p.applicable_computers || [];
+      const key = `${patchId}-${p.site_name}`;
+      map[key] = p.applicable_computers || [];
     });
     return map;
   }, [patches]);
@@ -108,9 +119,16 @@ export default function CVEDashboard({
 
   const cveExposure = useMemo(() => {
     const map = {};
+
     cves.forEach((c) => {
-      if (!map[c.cve_id]) {
-        map[c.cve_id] = {
+      const patchId = c.patch_id ? c.patch_id.replace(/^BIGFIX-/i, "") : "";
+      const site = c.site_name || "";
+
+      const cveKey = `${c.cve_id}-${patchId}-${site}`;
+      const patchKey = `${patchId}-${site}`;
+
+      if (!map[cveKey]) {
+        map[cveKey] = {
           cve_id: c.cve_id,
           patches: new Set(),
           devices: new Set(),
@@ -118,15 +136,16 @@ export default function CVEDashboard({
           kev: c.is_kev ? "YES" : "NO",
         };
       }
-      const patchId = c.patch_id ? c.patch_id.replace(/^BIGFIX-/i, "") : "";
 
-      map[c.cve_id].patches.add(patchId);
+      // ✅ FIXED: use cveKey (NOT cve_id)
+      map[cveKey].patches.add(patchKey);
 
-      const devices = patchDeviceMap[patchId] || [];
+      const devices = patchDeviceMap[patchKey] || [];
       devices.forEach((d) => {
-        map[c.cve_id].devices.add(d);
+        map[cveKey].devices.add(d);
       });
     });
+
     return Object.values(map).map((c) => ({
       cve_id: c.cve_id,
       severity: c.severity,
@@ -165,8 +184,8 @@ export default function CVEDashboard({
             condition = false;
           } else {
             // Check if any of the CVE's patches are in the baseline
-            condition = (cve.patches || []).some(patchId =>
-              baselinePatchSet.has(patchId)
+            condition = (cve.patches || []).some((patchId) =>
+              baselinePatchSet.has(patchId),
             );
           }
         } else if (c.column === "device_name") {
@@ -222,7 +241,10 @@ export default function CVEDashboard({
     return sortable;
   }, [filteredCVEs, sortConfig]);
 
-  const paginatedCVEs = sortedCVEs.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+  const paginatedCVEs = sortedCVEs.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage,
+  );
 
   const handleSort = (key) =>
     setSortConfig((prev) => ({
@@ -231,22 +253,31 @@ export default function CVEDashboard({
     }));
 
   const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
-    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+    if (sortConfig.key !== key)
+      return <span className="muted-text ml-6">↕</span>;
+    return (
+      <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>
+    );
   };
 
   const handleExport = (scope) => {
     setShowExpDrop(false);
     let dataToExport = [];
-    if (scope === 'page') dataToExport = paginatedCVEs;
-    else if (scope === 'filtered') dataToExport = sortedCVEs;
+    if (scope === "page") dataToExport = paginatedCVEs;
+    else if (scope === "filtered") dataToExport = sortedCVEs;
     else dataToExport = cveExposure;
 
-    performExport(dataToExport, cols, exportFormat, "cve_exposure", (cve, c) => {
-      if (c === "patch_count") return cve.patches.join(",");
-      if (c === "device_count") return cve.devices.join(",");
-      return cve[c];
-    });
+    performExport(
+      dataToExport,
+      cols,
+      exportFormat,
+      "cve_exposure",
+      (cve, c) => {
+        if (c === "patch_count") return cve.patches.join(",");
+        if (c === "device_count") return cve.devices.join(",");
+        return cve[c];
+      },
+    );
   };
 
   return (
@@ -355,7 +386,7 @@ export default function CVEDashboard({
                     color: "var(--muted)",
                     textTransform: "uppercase",
                     marginBottom: "12px",
-                    letterSpacing: '0.05em'
+                    letterSpacing: "0.05em",
                   }}
                 >
                   Format
@@ -371,9 +402,12 @@ export default function CVEDashboard({
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
                     <button
                       key={fmt}
-                      className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`}
+                      className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
                       style={{ fontSize: "11px", height: "32px", padding: 0 }}
-                      onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExportFormat(fmt);
+                      }}
                     >
                       {fmt}
                     </button>
@@ -393,18 +427,21 @@ export default function CVEDashboard({
                     color: "var(--muted)",
                     textTransform: "uppercase",
                     marginBottom: "12px",
-                    letterSpacing: '0.05em'
+                    letterSpacing: "0.05em",
                   }}
                 >
                   Scope
                 </div>
-                <button className="item" onClick={() => handleExport('page')}>
+                <button className="item" onClick={() => handleExport("page")}>
                   Current Page
                 </button>
-                <button className="item" onClick={() => handleExport('filtered')}>
+                <button
+                  className="item"
+                  onClick={() => handleExport("filtered")}
+                >
                   Filtered Data
                 </button>
-                <button className="item" onClick={() => handleExport('all')}>
+                <button className="item" onClick={() => handleExport("all")}>
                   All Data
                 </button>
               </div>
@@ -491,7 +528,7 @@ export default function CVEDashboard({
               </tr>
             ) : (
               paginatedCVEs.map((c) => (
-                <tr key={c.cve_id}>
+                <tr key={`${c.cve_id}-${c.patch_count}-${c.device_count}`}>
                   {cols.find((c) => c.id === "cve_id")?.show && (
                     <td className="cve-id-cell">{c.cve_id}</td>
                   )}
@@ -574,7 +611,14 @@ export default function CVEDashboard({
         </table>
       </div>
 
-      <Paginator total={sortedCVEs.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
+      <Paginator
+        total={sortedCVEs.length}
+        rpp={rowsPerPage}
+        setRpp={setRowsPerPage}
+        page={currentPage}
+        setPage={setCurrentPage}
+        edgeToEdge={true}
+      />
     </div>
   );
 }

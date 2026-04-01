@@ -24,6 +24,7 @@ export default function DashboardTab({
   const [patches, setPatches] = useState([]);
   const [cves, setCves] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [uniqueCves, setUniqueCves] = useState([]);
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -32,12 +33,15 @@ export default function DashboardTab({
           api.get("/patches"),
           api.get("/cves"),
         ]);
-        
+
         // FIXED: Safely extract array out of potential { data: [], pagination: {} } wrapper
-        const patchData = Array.isArray(patchRes.data) ? patchRes.data : (patchRes.data?.data || []);
-        
+        const patchData = Array.isArray(patchRes.data)
+          ? patchRes.data
+          : patchRes.data?.data || [];
+
         setPatches(patchData);
         setCves(cveRes.data?.data || []);
+        setUniqueCves(cveRes.data?.unique_cves || []);
       } catch (err) {
         console.error("Dashboard load failed:", err);
       } finally {
@@ -61,7 +65,7 @@ export default function DashboardTab({
             onNavigateSubTab(section);
           }}
           patches={patches}
-          cves={cves}
+          cves={uniqueCves}
           baselines={baselines}
           onDataLoaded={onDataLoaded}
         />

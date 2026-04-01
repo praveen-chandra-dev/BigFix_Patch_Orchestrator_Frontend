@@ -95,6 +95,7 @@ export default function RiskModule({
       return [
         { value: "patch_id", label: "Patch ID" },
         { value: "patch_name", label: "Name" },
+        { value: "site_name", label: "Site" },
         { value: "severity", label: "Severity" },
         { value: "cve_id", label: "CVE ID" },
         { value: "final_score", label: "Risk Score" },
@@ -145,6 +146,7 @@ export default function RiskModule({
   const columnTypes = {
     patch_id: "text",
     patch_name: "text",
+    site_name: "text",
     severity: "text",
     cve_id: "text",
     status: "text",

@@ -157,6 +157,7 @@ export default function KpiDetails({ context, activeTab }) {
       if (type === 'success') {
           setCols([
               { id: 'server', label: 'Server', show: true },
+             { id: 'patch', label: 'Patch Name', show: true },
               { id: 'status', label: 'Status', show: true }
           ]);
       } else if (type === 'health') {
@@ -312,31 +313,52 @@ export default function KpiDetails({ context, activeTab }) {
                   try { return await getJson(`${API_BASE}/api/actions/${id}/results`); } 
                   catch (e) { return { rows: [] }; }
               }));
-              let combinedRows = [];
+            //   let combinedRows = [];
+            //   allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+            //   const map = new Map();
+            //   for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+            //   fetchedData = Array.from(map.values());
+            let combinedRows = [];
               allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+              
               const map = new Map();
-              for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+              for (const r of combinedRows) { 
+                  const key = `${r.server}_${r.patch}`; // 🚀 FIX: Deduplicate by Server AND Patch
+                  if (r.server && !map.has(key)) map.set(key, r); 
+              }
               fetchedData = Array.from(map.values());
               
           } else if (type === 'health') {
-              const allResults = await Promise.all(groupNamesArray.map(async (g) => {
-                  return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`).catch(() => null);
-              }));
-              let combinedRows = [];
-              allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
-              const map = new Map();
-              for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-              fetchedData = Array.from(map.values());
+              // 🚀 FIX: If no group is passed (Sidebar click), fetch full infrastructure (Backend will still enforce RBAC!)
+              if (groupNamesArray.length === 0) {
+                  const data = await getJson(`${API_BASE}/api/health/critical`);
+                  fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+              } else {
+                  const allResults = await Promise.all(groupNamesArray.map(async (g) => {
+                      return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`).catch(() => null);
+                  }));
+                  let combinedRows = [];
+                  allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+                  const map = new Map();
+                  for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+                  fetchedData = Array.from(map.values());
+              }
               
           } else if (type === 'reboot') {
-              const allResults = await Promise.all(groupNamesArray.map(async (g) => {
-                  return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`).catch(() => null);
-              }));
-              let combinedRows = [];
-              allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
-              const map = new Map();
-              for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-              fetchedData = Array.from(map.values());
+              // 🚀 FIX: If no group is passed, fetch full infrastructure
+              if (groupNamesArray.length === 0) {
+                  const data = await getJson(`${API_BASE}/api/health/reboot-pending`);
+                  fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+              } else {
+                  const allResults = await Promise.all(groupNamesArray.map(async (g) => {
+                      return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`).catch(() => null);
+                  }));
+                  let combinedRows = [];
+                  allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+                  const map = new Map();
+                  for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+                  fetchedData = Array.from(map.values());
+              }
           }
 
           setData(fetchedData);
@@ -573,8 +595,8 @@ export default function KpiDetails({ context, activeTab }) {
         <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{getTitle()}</h2>
-               <span className="pill gray">{groupName ? `Target Group: ${groupName}` : "Scope: Full Infrastructure"}</span>
-               {actionId && <span className="pill soft">Action ID: {actionId}</span>}
+               <span className="pill gray">{groupName ? `` : "Scope: Full Infrastructure"}</span>
+               {actionId && <span className="pill soft"></span>}
             </div>
             <div className="text-13 muted-text" style={{ marginTop: '4px' }}>
                Updated: {lastUpdated || "—"}
@@ -731,7 +753,7 @@ export default function KpiDetails({ context, activeTab }) {
                                                 )}
                                             </td>
                                         )}
-                                        {cols.map(c => {
+                                        {/* {cols.map(c => {
                                             if (!c.show) return null;
                                             let val = row[c.id];
                                             
@@ -742,6 +764,30 @@ export default function KpiDetails({ context, activeTab }) {
                                                 const isRunning = s === 'Running' || s === 'Evaluating'; 
                                                 const cls = isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber';
                                                 return <td key={c.id}><span className={cls}>{s}</span></td>;
+                                            }
+
+                                            if (c.id === 'issues') return <td key={c.id}>{(row.issues || []).map((issue, idx) => (<span key={idx} className="pill red mr-10 text-11">{issue}</span>))}</td>;
+                                            if (c.id === 'serviceStatus' && type === 'health') { const isWindows = String(row.os || "").toLowerCase().includes("win"); return <td key={c.id}>{isWindows ? (row.serviceStatus || "N/A") : "—"}</td>; }
+                                            if (c.id === 'pendingRestart') return <td key={c.id}>{String(row.pendingRestart ?? row.pending ?? row.restart ?? "N/A")}</td>;
+                                            return <td key={c.id}>{val || "N/A"}</td>;
+                                        })} */}
+                                        {cols.map(c => {
+                                            if (!c.show) return null;
+                                            let val = row[c.id];
+                                            
+                                            // 🚀 FIX: Handle the status column styling
+                                            if (type === 'success' && c.id === 'status') {
+                                                const s = classify(row.status);
+                                                const isSuccess = s === 'Fixed' || s === 'Completed'; 
+                                                const isFail = s === 'Failed' || s === 'error' || s === 'Download Failed'; 
+                                                const isRunning = s === 'Running' || s === 'Evaluating'; 
+                                                const cls = isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber';
+                                                return <td key={c.id}><span className={cls}>{s}</span></td>;
+                                            }
+
+                                            // 🚀 FIX: Ensure Patch Name is cleanly rendered
+                                            if (type === 'success' && c.id === 'patch') {
+                                                return <td key={c.id} style={{ color: 'var(--text)' }}>{row.patch || "—"}</td>;
                                             }
 
                                             if (c.id === 'issues') return <td key={c.id}>{(row.issues || []).map((issue, idx) => (<span key={idx} className="pill red mr-10 text-11">{issue}</span>))}</td>;

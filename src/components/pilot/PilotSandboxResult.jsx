@@ -776,7 +776,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
        <div className="flex-row items-center justify-between mb-16">
           <h2>{title}</h2>
           <button className="btn outline small" onClick={() => refresh(null, true)} title="Refresh Data" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            {loading ? <><InlineSpinner size={14} variant="dark" /><span>Loading...</span></> : "Refresh"}
+            {loading ? <><InlineSpinner size={14} variant="dark" /><span>Refreshing...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
           </button>
         </div>
         
@@ -1097,7 +1097,7 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
 
           <div className="tableWrap action-modal-body">
               <table className="action-modal-table">
-                <thead className="kpi-th-sticky">
+                {/* <thead className="kpi-th-sticky">
                   <tr><th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th><th onClick={() => handleSort('patch')} className="cursor-pointer">Patch {getSortIcon('patch')}</th><th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th><th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th><th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th><th className="w-15p">Issuer</th></tr>
                 </thead>
                 <tbody>
@@ -1124,6 +1124,45 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
                                       {displayStatus}
                                   </span>
                               </td>
+                              <td>{r.issuer}</td>
+                          </tr>
+                      ); 
+                  }))}
+                </tbody> */}
+                <thead className="kpi-th-sticky">
+                  <tr>
+                    <th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th>
+                    <th onClick={() => handleSort('patch')} className="cursor-pointer">Patch Name {getSortIcon('patch')}</th>
+                    <th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th>
+                    <th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th>
+                    <th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th>
+                    <th className="w-15p">Issuer</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated.length === 0 ? (<tr><td colSpan={6} className="text-center p-20">No results found.</td></tr>) : (paginated.map((r, i) => { 
+                      const shortStatus = classify(r.status); 
+                      
+                      let displayStatus = shortStatus;
+                      if ((shortStatus === 'Waiting' || shortStatus === 'error' || shortStatus === 'Failed') && r.status && r.status.toLowerCase() !== shortStatus.toLowerCase()) {
+                          displayStatus = `${shortStatus} (${r.status})`;
+                      }
+
+                      const isSuccess = shortStatus === 'Fixed' || shortStatus === 'Completed'; 
+                      const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'error'; 
+                      const isRunning = shortStatus === 'Running' || shortStatus === 'Evaluating'; 
+                      
+                      return (
+                          <tr key={i}>
+                              <td>{r.server}</td>
+                              <td>{r.patch}</td>
+                              <td>
+                                  <span className={`status-pill ${isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber'}`} title={DESCRIPTIONS[shortStatus] || r.status}>
+                                      {displayStatus}
+                                  </span>
+                              </td>
+                              <td className="whitespace-nowrap">{fmtTime(r.start)}</td>
+                              <td className="whitespace-nowrap">{fmtTime(r.end)}</td>
                               <td>{r.issuer}</td>
                           </tr>
                       ); 

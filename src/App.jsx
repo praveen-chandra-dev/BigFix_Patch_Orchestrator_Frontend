@@ -599,6 +599,7 @@ import Login from "./components/auth/Login.jsx";
 import { Sidebar, Topbar } from "./components/Header.jsx";
 import { useTeamState } from "./hooks/useTeamState.js";
 
+
 const PilotEnvironment = lazy(() => import("./components/pilot/PilotEnvironment.jsx"));
 const PilotSandboxResult = lazy(() => import("./components/pilot/PilotSandboxResult.jsx"));
 const PilotKPI = lazy(() => import("./components/pilot/PilotKPI.jsx"));
@@ -613,6 +614,7 @@ const CloneManager = lazy(() => import("./components/CloneSelector.jsx"));
 const PatchCalendar = lazy(() => import("./components/PatchCalendar.jsx"));
 const RiskModule = lazy(() => import("./modules/risk/RiskModule.jsx"));
 const KpiDashboard = lazy(() => import("./components/KpiDetails.jsx"));
+const PatchPolicy = lazy(() => import("./modules/policy/PatchPolicy.jsx"));
 
 const API = window.env?.VITE_API_BASE || "http://localhost:5174";
 
@@ -637,19 +639,51 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
   const configLocked = !!s.configLocked;
   const sandboxTriggered = !!s.sandboxTriggered;
   const pilotTriggered = !!s.pilotTriggered;
+  const productionTriggered = !!s.productionTriggered;
+  const sandboxFinished = completedStages.includes(Stage.SANDBOX);
+  const pilotFinished = completedStages.includes(Stage.PILOT);
+  const productionFinished = completedStages.includes(Stage.PRODUCTION);
   const lastActions = s.lastActions || {};
 
+  // useEffect(() => {
+  //   if (s.pilotUnlocked !== undefined || s.productionUnlocked !== undefined) {
+  //     setEnv(p => ({ 
+  //       ...p, 
+  //       pilotUnlocked: s.pilotUnlocked ?? p.pilotUnlocked, 
+  //       productionUnlocked: s.productionUnlocked ?? p.productionUnlocked 
+  //     }));
+  //   }
+  // }, [s.pilotUnlocked, s.productionUnlocked, setEnv]);
   useEffect(() => {
     if (s.pilotUnlocked !== undefined || s.productionUnlocked !== undefined) {
-      setEnv(p => ({ 
-        ...p, 
-        pilotUnlocked: s.pilotUnlocked ?? p.pilotUnlocked, 
-        productionUnlocked: s.productionUnlocked ?? p.productionUnlocked 
-      }));
+      setEnv(p => {
+         const pu = s.pilotUnlocked ?? p.pilotUnlocked;
+         const pr = s.productionUnlocked ?? p.productionUnlocked;
+         // 🚀 FIX: Prevent loop by safely returning existing state if nothing changed
+         if (p.pilotUnlocked === pu && p.productionUnlocked === pr) return p;
+         return { ...p, pilotUnlocked: pu, productionUnlocked: pr };
+      });
     }
   }, [s.pilotUnlocked, s.productionUnlocked, setEnv]);
 
   const postStageSignal = async (stage, status) => { try { await fetch(`${apiBase}/orchestrator/stages/${stage}`, { method: "POST", body: JSON.stringify({ status }) }); } catch {} };
+
+  // const canGotoStage = useCallback((next) => {
+  //   if (next === Stage.HISTORY) return true;
+  //   if (next === Stage.CONFIG) return true;
+  //   if (next === Stage.SANDBOX && !env.enableSandbox) return false;
+  //   if (next === Stage.PILOT && !env.enablePilot) return false;
+    
+  //   if (next === Stage.SANDBOX) return (configSaved || completedStages.includes(Stage.CONFIG));
+  //   if (next === Stage.PILOT) return env.enableSandbox ? completedStages.includes(Stage.SANDBOX) : (configSaved || completedStages.includes(Stage.CONFIG));
+  //   if (next === Stage.PRODUCTION) {
+  //       if (env.enablePilot) return completedStages.includes(Stage.PILOT);
+  //       if (env.enableSandbox) return completedStages.includes(Stage.SANDBOX);
+  //       return (configSaved || completedStages.includes(Stage.CONFIG));
+  //   }
+  //   if (next === Stage.FinalResult) return completedStages.includes(Stage.PRODUCTION);
+  //   return false;
+  // }, [configSaved, completedStages, env.enableSandbox, env.enablePilot]);
 
   const canGotoStage = useCallback((next) => {
     if (next === Stage.HISTORY) return true;
@@ -658,21 +692,42 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
     if (next === Stage.PILOT && !env.enablePilot) return false;
     
     if (next === Stage.SANDBOX) return (configSaved || completedStages.includes(Stage.CONFIG));
-    if (next === Stage.PILOT) return env.enableSandbox ? completedStages.includes(Stage.SANDBOX) : (configSaved || completedStages.includes(Stage.CONFIG));
-    if (next === Stage.PRODUCTION) {
-        if (env.enablePilot) return completedStages.includes(Stage.PILOT);
-        if (env.enableSandbox) return completedStages.includes(Stage.SANDBOX);
-        return (configSaved || completedStages.includes(Stage.CONFIG));
+    
+    // 🚀 FIX: Must click "Finish" (completedStages) to access the next tab
+    if (next === Stage.PILOT) {
+        if (!env.enableSandbox) return configSaved || completedStages.includes(Stage.CONFIG);
+        return sandboxFinished;
     }
-    if (next === Stage.FinalResult) return completedStages.includes(Stage.PRODUCTION);
+    
+    if (next === Stage.PRODUCTION) {
+        if (env.enablePilot) return pilotFinished;
+        if (env.enableSandbox) return sandboxFinished;
+        return configSaved || completedStages.includes(Stage.CONFIG);
+    }
+    
+    if (next === Stage.FinalResult) return productionFinished;
     return false;
-  }, [configSaved, completedStages, env.enableSandbox, env.enablePilot]);
+  }, [configSaved, sandboxFinished, pilotFinished, productionFinished, completedStages, env.enableSandbox, env.enablePilot]);
 
   const accessibleStages = useMemo(() => Object.values(Stage).filter(canGotoStage), [canGotoStage]);
   
+  // useEffect(() => {
+  //   if (onFlowUpdate) {
+  //       onFlowUpdate({ current: currentStage, completed: completedStages, accessible: accessibleStages });
+  //   }
+  // }, [currentStage, completedStages, accessibleStages, onFlowUpdate]);
+
   useEffect(() => {
     if (onFlowUpdate) {
-        onFlowUpdate({ current: currentStage, completed: completedStages, accessible: accessibleStages });
+        onFlowUpdate(prev => {
+            // 🚀 FIX: Deep compare arrays to prevent infinite re-rendering loops
+            if (prev.current === currentStage && 
+                JSON.stringify(prev.completed) === JSON.stringify(completedStages) && 
+                JSON.stringify(prev.accessible) === JSON.stringify(accessibleStages)) {
+                return prev;
+            }
+            return { current: currentStage, completed: completedStages, accessible: accessibleStages };
+        });
     }
   }, [currentStage, completedStages, accessibleStages, onFlowUpdate]);
 
@@ -703,46 +758,118 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
     postStageSignal(Stage.CONFIG, "completed"); postStageSignal(next, "active");
   }
 
+  // const handleSandboxDone = async (result) => {
+  //   if (!result?.ok) return;
+  //   let newActions = lastActions;
+  //   if (result?.actions) {
+  //       newActions = { ...lastActions, [Stage.SANDBOX]: { actions: result.actions, ts: Date.now() } };
+  //   }
+  //   const newCompleted = completedStages.includes(Stage.SANDBOX) ? completedStages : [...completedStages, Stage.SANDBOX];
+  //   const next = env.enablePilot ? Stage.PILOT : Stage.PRODUCTION;
+
+  //   updateTeamState({ sandboxTriggered: true, completedStages: newCompleted, lastActions: newActions, currentStage: next });
+  //   postStageSignal(Stage.SANDBOX, "completed"); postStageSignal(next, "active");
+  // };
+
+  // // 🚀 FIXED: Only ONE event listener block for Pilot and Prod Triggers
+  // useEffect(() => {
+  //   const onPilotTrig = (e) => { 
+  //       let newActions = lastActions;
+  //       if(e?.detail?.actions) {
+  //           newActions = { ...lastActions, [Stage.PILOT]: { actions: e.detail.actions, ts: Date.now() } };
+  //       }
+  //       const newCompleted = completedStages.includes(Stage.PILOT) ? completedStages : [...completedStages, Stage.PILOT];
+  //       updateTeamState({ pilotTriggered: true, lastActions: newActions, completedStages: newCompleted, currentStage: Stage.PRODUCTION });
+  //       postStageSignal(Stage.PILOT, "completed"); postStageSignal(Stage.PRODUCTION, "active");
+  //   };
+
+  //   const onProdTrig = (e) => { 
+  //       let newActions = lastActions;
+  //       if(e?.detail?.actions) {
+  //           newActions = { ...lastActions, [Stage.PRODUCTION]: { actions: e.detail.actions, ts: Date.now() } };
+  //       }
+  //       let newCompleted = completedStages.includes(Stage.PRODUCTION) ? completedStages : [...completedStages, Stage.PRODUCTION];
+  //       if (!newCompleted.includes(Stage.FinalResult)) newCompleted = [...newCompleted, Stage.FinalResult];
+  //       updateTeamState({ lastActions: newActions, completedStages: newCompleted, currentStage: Stage.FinalResult });
+  //       postStageSignal(Stage.PRODUCTION, "completed");
+  //   };
+    
+  //   window.addEventListener("pilot:triggered", onPilotTrig); 
+  //   window.addEventListener("production:triggered", onProdTrig);
+  //   return () => { window.removeEventListener("pilot:triggered", onPilotTrig); window.removeEventListener("production:triggered", onProdTrig); };
+  // }, [lastActions, completedStages, updateTeamState]);
+
+
+  // 🚀 STAGE 1: SANDBOX HANDLERS
   const handleSandboxDone = async (result) => {
     if (!result?.ok) return;
     let newActions = lastActions;
-    if (result?.actions) {
-        newActions = { ...lastActions, [Stage.SANDBOX]: { actions: result.actions, ts: Date.now() } };
-    }
+    if (result?.actions) newActions = { ...lastActions, [Stage.SANDBOX]: { actions: result.actions, ts: Date.now() } };
+    
+    // Just save the state, DO NOT advance the stage yet
+    updateTeamState({ sandboxTriggered: true, lastActions: newActions });
+  };
+
+  const handleFinishSandbox = () => {
     const newCompleted = completedStages.includes(Stage.SANDBOX) ? completedStages : [...completedStages, Stage.SANDBOX];
     const next = env.enablePilot ? Stage.PILOT : Stage.PRODUCTION;
-
-    updateTeamState({ sandboxTriggered: true, completedStages: newCompleted, lastActions: newActions, currentStage: next });
+    updateTeamState({ completedStages: newCompleted, currentStage: next });
     postStageSignal(Stage.SANDBOX, "completed"); postStageSignal(next, "active");
   };
 
-  // 🚀 FIXED: Only ONE event listener block for Pilot and Prod Triggers
+  const handleResetSandbox = () => {
+    const newActions = { ...lastActions };
+    delete newActions[Stage.SANDBOX];
+    updateTeamState({ sandboxTriggered: false, lastActions: newActions });
+  };
+
+  // 🚀 STAGE 2 & 3: PILOT / PROD HANDLERS
+ 
+// 🚀 STAGE 2 & 3: PILOT / PROD HANDLERS
   useEffect(() => {
     const onPilotTrig = (e) => { 
-        let newActions = lastActions;
-        if(e?.detail?.actions) {
-            newActions = { ...lastActions, [Stage.PILOT]: { actions: e.detail.actions, ts: Date.now() } };
-        }
-        const newCompleted = completedStages.includes(Stage.PILOT) ? completedStages : [...completedStages, Stage.PILOT];
-        updateTeamState({ pilotTriggered: true, lastActions: newActions, completedStages: newCompleted, currentStage: Stage.PRODUCTION });
-        postStageSignal(Stage.PILOT, "completed"); postStageSignal(Stage.PRODUCTION, "active");
+        if(!e?.detail?.actions) return;
+        // 🚀 FIX: Pass standard object to updateTeamState so the database saves it correctly
+        const newActions = { ...lastActions, [Stage.PILOT]: { actions: e.detail.actions, ts: Date.now() } };
+        updateTeamState({ pilotTriggered: true, lastActions: newActions });
     };
 
     const onProdTrig = (e) => { 
-        let newActions = lastActions;
-        if(e?.detail?.actions) {
-            newActions = { ...lastActions, [Stage.PRODUCTION]: { actions: e.detail.actions, ts: Date.now() } };
-        }
-        let newCompleted = completedStages.includes(Stage.PRODUCTION) ? completedStages : [...completedStages, Stage.PRODUCTION];
-        if (!newCompleted.includes(Stage.FinalResult)) newCompleted = [...newCompleted, Stage.FinalResult];
-        updateTeamState({ lastActions: newActions, completedStages: newCompleted, currentStage: Stage.FinalResult });
-        postStageSignal(Stage.PRODUCTION, "completed");
+        if(!e?.detail?.actions) return;
+        // 🚀 FIX: Pass standard object to updateTeamState
+        const newActions = { ...lastActions, [Stage.PRODUCTION]: { actions: e.detail.actions, ts: Date.now() } };
+        updateTeamState({ productionTriggered: true, lastActions: newActions });
     };
     
     window.addEventListener("pilot:triggered", onPilotTrig); 
     window.addEventListener("production:triggered", onProdTrig);
     return () => { window.removeEventListener("pilot:triggered", onPilotTrig); window.removeEventListener("production:triggered", onProdTrig); };
-  }, [lastActions, completedStages, updateTeamState]);
+  }, [lastActions, updateTeamState]);
+
+  const handleFinishPilot = () => {
+    const newCompleted = completedStages.includes(Stage.PILOT) ? completedStages : [...completedStages, Stage.PILOT];
+    updateTeamState({ completedStages: newCompleted, currentStage: Stage.PRODUCTION });
+    postStageSignal(Stage.PILOT, "completed"); postStageSignal(Stage.PRODUCTION, "active");
+  };
+
+  const handleResetPilot = () => {
+    const newActions = { ...lastActions };
+    delete newActions[Stage.PILOT];
+    updateTeamState({ pilotTriggered: false, lastActions: newActions });
+  };
+
+  const handleFinishProduction = () => {
+    let newCompleted = completedStages.includes(Stage.PRODUCTION) ? completedStages : [...completedStages, Stage.PRODUCTION];
+    if (!newCompleted.includes(Stage.FinalResult)) newCompleted = [...newCompleted, Stage.FinalResult];
+    updateTeamState({ completedStages: newCompleted, currentStage: Stage.FinalResult });
+    postStageSignal(Stage.PRODUCTION, "completed");
+  };
+
+  const handleResetProduction = () => {
+    const newActions = { ...lastActions };
+    delete newActions[Stage.PRODUCTION];
+    updateTeamState({ productionTriggered: false, lastActions: newActions });
+  };
 
   useEffect(() => {
     const onResetSbx = () => {
@@ -772,7 +899,7 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
       {currentStage === Stage.HISTORY && <DeploymentHistory />}
       {currentStage === Stage.CONFIG && <Configuration onSaved={handleConfigSaved} />}
 
-      {currentStage === Stage.SANDBOX && env.enableSandbox && (
+      {/* {currentStage === Stage.SANDBOX && env.enableSandbox && (
         <div className="stage-cards-row">
           <Environment />
           <DecisionEngine apiBase={apiBase} autoMail={env.autoMail} onDone={handleSandboxDone} disabled={sandboxTriggered} username={username} />
@@ -809,6 +936,71 @@ function Main({ username, onOpenSnapshot, onOpenClone, onFlowUpdate, onNavigate 
           <div className="stage-cards-row mt-20">
             <PilotDecisionEngine sbxDone={true} pilotDone={true} mode="production" autoMail={env.autoMail} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} />
           </div>
+        </Suspense>
+      )} */}
+
+      {currentStage === Stage.SANDBOX && env.enableSandbox && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="stage-cards-row">
+              <Environment />
+              {/* <DecisionEngine apiBase={apiBase} autoMail={env.autoMail} onDone={handleSandboxDone} disabled={sandboxTriggered} username={username} onFinish={handleFinishSandbox} onReset={handleResetSandbox} /> */}
+<DecisionEngine apiBase={apiBase} autoMail={env.autoMail} onDone={handleSandboxDone} disabled={sandboxTriggered} username={username} onFinish={handleFinishSandbox} onReset={handleResetSandbox} currentActions={lastActions?.SANDBOX?.actions || []} stageFinished={sandboxFinished} />            </div>
+            {/* 🚀 Show results instantly in the Sandbox stage */}
+            {sandboxTriggered && lastActions?.SANDBOX?.actions && (
+              <Suspense fallback={<div className="app-loading-content">Loading Results...</div>}>
+                 <div className="stage-cards-row">
+                   <PilotSandboxResult title="Sandbox Result" actions={lastActions.SANDBOX.actions} onViewDetails={(actId) => onNavigate('kpi-details', { type: 'success', id: actId })} />
+                 </div>
+              </Suspense>
+            )}
+        </div>
+      )}
+
+      {currentStage === Stage.PILOT && env.enablePilot && (
+        <Suspense fallback={<div className="app-loading-content">Loading Pilot Data...</div>}>
+          <div className="stage-cards-row">
+            <PilotEnvironment mode="pilot" lastActions={lastActions} />
+            {env.enableSandbox && (
+              <PilotSandboxResult title="Sandbox Result" actions={lastActions?.SANDBOX?.actions} onViewDetails={(actId) => onNavigate('kpi-details', { type: 'success', id: actId })} />
+            )}
+            <PilotKPI title="Pilot KPI" lastActions={lastActions} onKpiClick={(type) => onNavigate('kpi-details', type)} />
+          </div>
+          <div className="stage-cards-row mt-20">
+            <PilotDecisionEngine sbxDone={!env.enableSandbox || sandboxFinished} mode="pilot" autoMail={env.autoMail} readOnly={pilotTriggered} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} onFinish={handleFinishPilot} onResetStage={handleResetPilot} stageFinished={pilotFinished} />
+            {/* <PilotDecisionEngine sbxDone={!env.enableSandbox || sandboxTriggered} mode="pilot" autoMail={env.autoMail} readOnly={pilotTriggered} lastActions={lastActions} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} onFinish={handleFinishPilot} onResetStage={handleResetPilot} /> */}
+          </div>
+          {/* 🚀 Show Pilot results instantly inside the Pilot stage */}
+          {pilotTriggered && lastActions?.PILOT?.actions && (
+              <div className="stage-cards-row mt-20">
+                 <PilotSandboxResult title="Pilot Result" actions={lastActions.PILOT.actions} onViewDetails={(actId) => onNavigate('kpi-details', { type: 'success', id: actId })} />
+              </div>
+          )}
+        </Suspense>
+      )}
+
+      {currentStage === Stage.PRODUCTION && (
+        <Suspense fallback={<div className="app-loading-content">Loading Production Data...</div>}>
+          <div className="stage-cards-row">
+            <PilotEnvironment mode="production" lastActions={lastActions} />
+            {env.enablePilot && (
+              <PilotSandboxResult title="Pilot Result" actions={lastActions?.PILOT?.actions} onViewDetails={(actId) => onNavigate('kpi-details', { type: 'success', id: actId })} />
+            )}
+            {!env.enablePilot && env.enableSandbox && (
+                <PilotSandboxResult title="Sandbox Result" actions={lastActions?.SANDBOX?.actions} onViewDetails={(actId) => onNavigate('kpi-details', { type: 'success', id: actId })} />
+            )}
+            <PilotKPI title="Production KPI" lastActions={lastActions} onKpiClick={(type) => onNavigate('kpi-details', type)} />
+          </div>
+          <div className="stage-cards-row mt-20">
+            <PilotDecisionEngine sbxDone={true} pilotDone={true} mode="production" autoMail={env.autoMail} lastActions={lastActions} readOnly={productionTriggered} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} onFinish={handleFinishProduction} onResetStage={handleResetProduction} stageFinished={productionFinished} />
+            {/* <PilotDecisionEngine sbxDone={true} pilotDone={true} mode="production" autoMail={env.autoMail} lastActions={lastActions} readOnly={productionTriggered} username={username} onOpenSnapshot={onOpenSnapshot} onOpenClone={onOpenClone} onFinish={handleFinishProduction} onResetStage={handleResetProduction} /> */}
+          </div>
+          
+          {/* 🚀 Render the Production Result HERE once it's triggered */}
+          {productionTriggered && lastActions?.PRODUCTION?.actions && (
+              <div className="stage-cards-row mt-20">
+                 <PilotSandboxResult title="Production Result" actions={lastActions.PRODUCTION.actions} onViewDetails={(actId) => onNavigate('kpi-details', { type: 'success', id: actId })} />
+              </div>
+          )}
         </Suspense>
       )}
 
@@ -935,7 +1127,8 @@ export default function App() {
              activeMenu === 'users' ? <Suspense fallback={null}><UserManagement onClose={()=>handleNavigate('orchestration')} currentUserId={session?.userId}/></Suspense> :
              activeMenu === 'roles' ? <Suspense fallback={null}><RoleManagement onClose={()=>handleNavigate('orchestration')} role={session?.role} username={session?.username} /></Suspense> :
              activeMenu === 'kpi-details' ? <Suspense fallback={null}><KpiDashboard context={kpiContext} activeTab={kpiTab} /></Suspense> :
-             activeMenu === 'orchestration' ? <Main username={session?.username} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> : null
+             activeMenu === 'orchestration' ? <Main username={session?.username} onOpenSnapshot={()=>handleNavigate('snapshot')} onOpenClone={()=>handleNavigate('clone')} onFlowUpdate={setFlowState} onNavigate={handleNavigate} /> :
+             activeMenu === 'policy' ? <Suspense fallback={null}><PatchPolicy onClose={()=>handleNavigate('orchestration')}/></Suspense> : null
             }
           </div>
         </div>

@@ -1037,7 +1037,7 @@ useEffect(() => {
         </div>
       </div>
 
-      <EnhancedModal 
+      {/* <EnhancedModal 
         open={openSuccess} onClose={() => setOpenSuccess(false)} title={`${title.replace("KPI", "Success Details")}`} 
         rows={successRows} loading={successLoading} 
         renderRows={(rows, handleSort, sortConfig) => (
@@ -1050,6 +1050,30 @@ useEffect(() => {
             </thead>
             <tbody>
               {rows.length === 0 ? (<tr><td colSpan={2} className="sub">No success rows.</td></tr>) : (rows.map((r, i) => (<tr key={i}><td>{r.server || "—"}</td><td>Success</td></tr>)))}
+            </tbody>
+          </>
+        )}
+      /> */}
+      <EnhancedModal 
+        open={openSuccess} onClose={() => setOpenSuccess(false)} title={`${title.replace("KPI", "Success Details")}`} 
+        rows={successRows} loading={successLoading} 
+        renderRows={(rows, handleSort, sortConfig) => (
+          <>
+            <thead className="kpi-th-sticky">
+              <tr>
+                <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {sortConfig.key==='server'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
+                <th className="cursor-pointer" onClick={() => handleSort('patch')}>Patch Name {sortConfig.key==='patch'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
+                <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {sortConfig.key==='status'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (<tr><td colSpan={3} className="sub">No success rows.</td></tr>) : (rows.map((r, i) => (
+                  <tr key={i}>
+                      <td>{r.server || "—"}</td>
+                      <td>{r.patch || "—"}</td>
+                      <td><span className="pill green">Success</span></td>
+                  </tr>
+              )))}
             </tbody>
           </>
         )}

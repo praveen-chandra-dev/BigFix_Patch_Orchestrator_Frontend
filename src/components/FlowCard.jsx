@@ -311,7 +311,8 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
 
     const [cols, setCols] = useState([
         { id: 'server', label: 'Server Name', show: true },
-        { id: 'status', label: 'Status', show: true }
+        { id: 'status', label: 'Status', show: true },
+        { id: 'patch', label: 'Patch Name', show: true },
     ]);
 
     const [drawerOpen, setDrawerOpen] = useState(false);
@@ -491,7 +492,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
 
                 <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
                     <table>
-                        <thead className="kpi-th-sticky">
+                        {/* <thead className="kpi-th-sticky">
                             <tr>
                                 {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server')}</th>}
                                 {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status')}</th>}
@@ -504,6 +505,32 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                                 paginated.map((r, i) => (
                                     <tr key={i}>
                                         {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 500 }}>{r.server}</td>}
+                                        {cols.find(c=>c.id==='status')?.show && (
+                                          <td>
+                                            <span className={getBadgeClass(r.status)}>
+                                              {classify(r.status)}
+                                            </span>
+                                          </td>
+                                        )}
+                                    </tr>
+                                ))
+                            )}
+                        </tbody> */}
+                        <thead className="kpi-th-sticky">
+                            <tr>
+                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server')}</th>}
+                                {cols.find(c=>c.id==='patch')?.show && <th className="cursor-pointer" onClick={() => handleSort('patch')}>Patch Name {getSortIcon('patch')}</th>}
+                                {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status')}</th>}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {paginated.length === 0 ? (
+                                <tr><td colSpan="3" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No results found.</td></tr>
+                            ) : (
+                                paginated.map((r, i) => (
+                                    <tr key={i}>
+                                        {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 500 }}>{r.server}</td>}
+                                        {cols.find(c=>c.id==='patch')?.show && <td>{r.patch}</td>}
                                         {cols.find(c=>c.id==='status')?.show && (
                                           <td>
                                             <span className={getBadgeClass(r.status)}>

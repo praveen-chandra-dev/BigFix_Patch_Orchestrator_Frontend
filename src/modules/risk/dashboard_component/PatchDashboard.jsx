@@ -67,6 +67,7 @@ export default function PatchDashboard({
   const [cols, setCols] = useState([
     { id: "patch_id", label: "Patch ID", show: true },
     { id: "patch_name", label: "Name", show: true },
+    { id: "site_name", label: "Site", show: true },
     { id: "final_score", label: "Score", show: true },
     { id: "severity", label: "Severity", show: true },
     { id: "cve_count", label: "CVEs", show: true },
@@ -149,15 +150,17 @@ export default function PatchDashboard({
   const patchCveMap = useMemo(() => {
     const map = {};
     cves.forEach((c) => {
-      if (!map[c.patch_id]) map[c.patch_id] = [];
-      map[c.patch_id].push(c.cve_id);
+      const key = `${c.patch_id}-${c.site_name}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(c.cve_id);
     });
     return map;
   }, [cves]);
 
   const patchExposure = useMemo(() => {
     return patches.map((patch) => {
-      const cvesForPatch = patchCveMap[patch.patch_id] || [];
+      const key = `${patch.patch_id}-${patch.site_name}`;
+      const cvesForPatch = patchCveMap[key] || [];
       const devices = patch.applicable_computers || [];
       const score = Number(patch.final_score || 0);
 
@@ -166,6 +169,7 @@ export default function PatchDashboard({
       return {
         patch_id: patch.patch_id ? patch.patch_id.replace(/^BIGFIX-/i, "") : "",
         patch_name: patch.patch_name || "Unknown",
+        site_name: patch.site_name || "",
         vendor: patch.vendor || "Unknown",
         final_score: score,
         severity: finalSev,
@@ -587,6 +591,14 @@ export default function PatchDashboard({
                   Name{getSortIcon("patch_name")}
                 </th>
               )}
+              {cols.find((c) => c.id === "site_name")?.show && (
+                <th
+                  className="cursor-pointer"
+                  onClick={() => handleSort("site_name")}
+                >
+                  Site{getSortIcon("site_name")}
+                </th>
+              )}
               {cols.find((c) => c.id === "final_score")?.show && (
                 <th
                   className="cursor-pointer"
@@ -658,6 +670,9 @@ export default function PatchDashboard({
                       {p.patch_name}
                     </td>
                   )}
+                  {cols.find((c) => c.id === "site_name")?.show && (
+                    <td>{p.site_name}</td>
+                  )}
                   {cols.find((c) => c.id === "final_score")?.show && (
                     <td style={{ textAlign: "center" }}>
                       <span
@@ -690,6 +705,11 @@ export default function PatchDashboard({
                                     column: "patch_id",
                                     operator: "=",
                                     value: p.patch_id,
+                                  },
+                                  {
+                                    column: "site_name",
+                                    operator: "=",
+                                    value: p.site_name,
                                   },
                                 ],
                               },

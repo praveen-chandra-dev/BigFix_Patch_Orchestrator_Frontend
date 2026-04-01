@@ -4,6 +4,10 @@ import api from "../../api/api";
 import { performExport } from "../../utils/exportUtils";
 import { useToast } from "../../components/common/CustomToast";
 import Paginator from "../../components/common/Paginator";
+import SidePanel from "../../components/common/SidePanel";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faCircleInfo, faXmark } from "@fortawesome/free-solid-svg-icons";
+import { parseDescription } from "../../utils/descriptionParser";
 
 const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
 
@@ -34,12 +38,15 @@ export default function PatchTab({
   const expRef = useRef(null);
   const headerCheckboxRef = useRef(null);
   const [isMaster, setIsMaster] = useState(false);
+  const [selectedPatch, setSelectedPatch] = useState(null);
+  const [showPanel, setShowPanel] = useState(false);
 
   const { showToast } = useToast();
 
   const [cols, setCols] = useState([
     { id: "patch_id", label: "Patch ID", show: true, width: "140px" },
     { id: "patch_name", label: "Name", show: true, width: "auto" },
+    { id: "site_name", label: "Site", show: true, width: "160px" },
     { id: "applicable_count", label: "Applicable", show: true, width: "100px" },
     { id: "cve_count", label: "CVEs", show: true, width: "70px" },
     { id: "severity", label: "Severity", show: true, width: "120px" },
@@ -142,6 +149,10 @@ export default function PatchTab({
       else visible.forEach((p) => (updated[getPatchKey(p)] = p));
       return updated;
     });
+  };
+  const openPatchDetails = (p) => {
+    setSelectedPatch(p);
+    setShowPanel(true);
   };
 
   const applyFilters = (patch) => {
@@ -617,6 +628,17 @@ export default function PatchTab({
                   Name{getSortIcon("patch_name")}
                 </th>
               )}
+              {cols.find((c) => c.id === "site_name")?.show && (
+                <th
+                  style={{
+                    width: cols.find((c) => c.id === "site_name").width,
+                  }}
+                  onClick={() => handleSort("site_name")}
+                  className="cursor-pointer"
+                >
+                  Site{getSortIcon("site_name")}
+                </th>
+              )}
               {cols.find((c) => c.id === "applicable_count")?.show && (
                 <th
                   style={{
@@ -727,9 +749,63 @@ export default function PatchTab({
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                         }}
-                        title={p.patch_name}
                       >
-                        {p.patch_name}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {p.patch_name}
+                          </span>
+
+                          <span
+                            style={{
+                              cursor: "pointer",
+                              color: "var(--primary)",
+                              flexShrink: 0,
+                            }}
+                            title="View Description"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPatchDetails(p);
+                            }}
+                          >
+                            <FontAwesomeIcon
+                              icon={faCircleInfo}
+                              style={{
+                                cursor: "pointer",
+                                color: "var(--primary)",
+                                fontSize: "14px",
+                                flexShrink: 0,
+                              }}
+                              title="View Description"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPatchDetails(p);
+                              }}
+                            />
+                          </span>
+                        </div>
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "site_name")?.show && (
+                      <td
+                        style={{
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={p.site_name}
+                      >
+                        {p.site_name}
                       </td>
                     )}
                     {cols.find((c) => c.id === "applicable_count")?.show && (
@@ -780,6 +856,11 @@ export default function PatchTab({
                                         /^BIGFIX-/,
                                         "",
                                       ),
+                                    },
+                                    {
+                                      column: "site_name",
+                                      operator: "=",
+                                      value: p.site_name,
                                     },
                                   ],
                                 },
@@ -841,6 +922,166 @@ export default function PatchTab({
         setPage={setCurrentPage}
         edgeToEdge={true}
       />
+
+      <SidePanel
+        open={showPanel}
+        onClose={() => setShowPanel(false)}
+        title="Patch Details"
+      >
+        {selectedPatch && (
+          <>
+            <div style={{ marginBottom: "12px" }}>
+              <strong>ID:</strong>{" "}
+              {selectedPatch.patch_id?.replace(/^BIGFIX-/, "")}
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <strong>Name:</strong> {selectedPatch.patch_name}
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <strong>Site:</strong> {selectedPatch.site_name}
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <strong>Score:</strong> {selectedPatch.final_score?.toFixed(2)}
+            </div>
+
+            <div>
+              <strong>Description:</strong>
+              {(() => {
+                const { summary, packages, meta, notes, stats } =
+                  parseDescription(selectedPatch.description);
+
+                const isKBOnly =
+                  packages.length > 0 &&
+                  packages.every((p) => p.startsWith("KB"));
+
+                return (
+                  <div style={{ fontSize: "13px", lineHeight: "1.7" }}>
+                    {/* SUMMARY */}
+                    {summary && (
+                      <div style={{ marginBottom: "16px" }}>{summary}</div>
+                    )}
+
+                    {/* PACKAGES (ONLY WHEN MEANINGFUL) */}
+                    {packages.length > 0 && !isKBOnly && (
+                      <div style={{ marginBottom: "20px" }}>
+                        <div style={{ fontWeight: 600, marginBottom: "8px" }}>
+                          Target Packages
+                        </div>
+
+                        <div
+                          style={{
+                            maxHeight: "320px",
+                            overflowY: "auto",
+                            padding: "12px",
+                            background: "#f8fafc",
+                            borderRadius: "8px",
+                            fontFamily: "monospace",
+                            fontSize: "12px",
+                            border: "1px solid var(--border)",
+                          }}
+                        >
+                          {packages.map((pkg, i) => (
+                            <div key={i}>{pkg}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* META */}
+                    {meta && meta.length > 0 && (
+                      <div
+                        style={{ marginBottom: "16px", color: "var(--muted)" }}
+                      >
+                        {meta.map((line, i) => (
+                          <div key={i} style={{ marginBottom: "8px" }}>
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* STATS */}
+                    {stats &&
+                      (stats.fileCount ||
+                        stats.fileSize ||
+                        stats.cves.length > 0) && (
+                        <div
+                          style={{
+                            marginBottom: "16px",
+                            padding: "10px",
+                            background: "#f1f5f9",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                          }}
+                        >
+                          {stats.fileCount && (
+                            <div>
+                              <strong>Target Files:</strong> {stats.fileCount}
+                            </div>
+                          )}
+
+                          {stats.fileSize && (
+                            <div>
+                              <strong>Download Size:</strong> {stats.fileSize}
+                            </div>
+                          )}
+
+                          {stats.cves.length > 0 && (
+                            <div style={{ marginTop: "6px" }}>
+                              <strong>CVEs:</strong>
+                              <div style={{ marginTop: "4px" }}>
+                                {stats.cves.map((cve, i) => (
+                                  <span
+                                    key={i}
+                                    style={{
+                                      display: "inline-block",
+                                      padding: "2px 6px",
+                                      margin: "2px",
+                                      background: "#e2e8f0",
+                                      borderRadius: "4px",
+                                      fontSize: "11px",
+                                    }}
+                                  >
+                                    {cve}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* NOTES */}
+                    {notes.length > 0 && (
+                      <div
+                        style={{
+                          padding: "12px",
+                          background: "#fff7ed",
+                          border: "1px solid #fdba74",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: "8px" }}>
+                          Notes
+                        </div>
+                        {notes.map((n, i) => (
+                          <div key={i} style={{ marginBottom: "10px" }}>
+                            {n}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        )}
+      </SidePanel>
     </div>
   );
 }

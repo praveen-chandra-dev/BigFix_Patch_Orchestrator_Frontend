@@ -4,6 +4,7 @@ import api from "../../api/api";
 import { useToast } from "../../components/common/CustomToast";
 import { getErrorMessage } from "../../utils/errorHandler";
 import InlineSpinner from "../../components/common/InlineSpinner";
+import ConfirmModal from "../../components/common/ConfirmModal";
 
 const RiskDropdown = ({
   options,
@@ -101,6 +102,7 @@ export default function BaselineTab({
 
   const [creatingBaseline, setCreatingBaseline] = useState(false);
   const [deletingBaseline, setDeletingBaseline] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [patchLookup, setPatchLookup] = useState({});
 
   const [baselineDetails, setBaselineDetails] = useState(null);
@@ -139,7 +141,7 @@ export default function BaselineTab({
         name: b.name || "Unnamed Baseline",
         siteType: String(b.siteType || "").toLowerCase(),
         siteName: b.siteName,
-        componentCount: b.component_count ?? 0
+        componentCount: b.component_count ?? 0,
       }));
       setBaselineList(formatted);
     } catch (e) {
@@ -460,34 +462,35 @@ export default function BaselineTab({
     }
   }, [patches, baselineDetails]);
 
-  const deleteBaseline = async () => {
+  const deleteBaseline = () => {
     if (!selectedBaselineId || isExternal) {
       showToast("Cannot delete this baseline", "error");
       return;
     }
 
-    showToast("permanently delete this baseline?", "warning", {
-      action: {
-        onConfirm: async () => {
-          try {
-            setDeletingBaseline(true);
-            const b = baselineList.find((x) => x.id === selectedBaselineId);
+    setShowDeleteModal(true);
+  };
 
-            await api.delete(
-              `/baselines/${selectedBaselineId}?siteType=${b?.siteType}&siteName=${b?.siteName}`,
-            );
+  const confirmDeleteBaseline = async () => {
+    try {
+      setDeletingBaseline(true);
 
-            showToast("Baseline deleted successfully", "success");
-            clearEditor();
-            refreshList();
-          } catch (err) {
-            showToast(getErrorMessage(err, "Delete failed"), "error");
-          } finally {
-            setDeletingBaseline(false);
-          }
-        },
-      },
-    });
+      const b = baselineList.find((x) => x.id === selectedBaselineId);
+
+      await api.delete(
+        `/baselines/${selectedBaselineId}?siteType=${b?.siteType}&siteName=${b?.siteName}`,
+      );
+
+      showToast("Baseline deleted successfully", "success");
+
+      setShowDeleteModal(false);
+      clearEditor();
+      refreshList();
+    } catch (err) {
+      showToast(getErrorMessage(err, "Delete failed"), "error");
+    } finally {
+      setDeletingBaseline(false);
+    }
   };
   /* ADDED: Sorting and Filtering logic */
   const [sortConfig, setSortConfig] = useState({
@@ -620,17 +623,41 @@ export default function BaselineTab({
             className="baseline-list-table"
             style={{ width: "100%", borderCollapse: "collapse" }}
           >
-            <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "var(--panel-2)" }}>
+            <thead
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 1,
+                background: "var(--panel-2)",
+              }}
+            >
               <tr>
                 <th
                   onClick={() => handleSort("name")}
-                  style={{ cursor: "pointer", padding: "12px 20px", textAlign: "left", fontSize: "12px", fontWeight: 600, color: "var(--muted)", borderBottom: "1px solid var(--border)" }}
+                  style={{
+                    cursor: "pointer",
+                    padding: "12px 20px",
+                    textAlign: "left",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    borderBottom: "1px solid var(--border)",
+                  }}
                 >
                   NAME {getSortIcon("name")}
                 </th>
-                <th 
+                <th
                   onClick={() => handleSort("componentCount")}
-                  style={{ cursor: "pointer", padding: "12px 20px", textAlign: "center", fontSize: "12px", fontWeight: 600, color: "var(--muted)", borderBottom: "1px solid var(--border)", width: "100px" }}
+                  style={{
+                    cursor: "pointer",
+                    padding: "12px 20px",
+                    textAlign: "center",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    borderBottom: "1px solid var(--border)",
+                    width: "100px",
+                  }}
                 >
                   COMPONENTS {getSortIcon("componentCount")}
                 </th>
@@ -673,10 +700,24 @@ export default function BaselineTab({
                         e.currentTarget.style.background = "transparent";
                     }}
                   >
-                    <td style={{ padding: "14px 20px", wordBreak: "break-word", fontWeight: 500, color: "var(--primary)" }}>
+                    <td
+                      style={{
+                        padding: "14px 20px",
+                        wordBreak: "break-word",
+                        fontWeight: 500,
+                        color: "var(--primary)",
+                      }}
+                    >
                       {b.name}
                     </td>
-                    <td style={{ padding: "14px 20px", textAlign: "center", color: "var(--text)", fontWeight: 500 }}>
+                    <td
+                      style={{
+                        padding: "14px 20px",
+                        textAlign: "center",
+                        color: "var(--text)",
+                        fontWeight: 500,
+                      }}
+                    >
                       {b.componentCount}
                     </td>
                     <td style={{ padding: "14px 20px" }}></td>
@@ -1354,7 +1395,9 @@ export default function BaselineTab({
                     gap: "8px",
                   }}
                 >
-                  {creatingBaseline && <InlineSpinner size={16} variant="light" />}
+                  {creatingBaseline && (
+                    <InlineSpinner size={16} variant="light" />
+                  )}
 
                   {creatingBaseline
                     ? selectedBaselineId
@@ -1400,6 +1443,25 @@ export default function BaselineTab({
           </div>
         )}
       </div>
+      <ConfirmModal
+        open={showDeleteModal}
+        title="Delete Baseline"
+        message={
+          <>
+            <div style={{ marginBottom: "6px" }}>
+              Are you sure you want to delete this baseline?
+            </div>
+            <div style={{ color: "#dc2626", fontSize: "13px" }}>
+              This action cannot be undone.
+            </div>
+          </>
+        }
+        confirmText="Delete"
+        cancelText="Cancel"
+        loading={deletingBaseline}
+        onConfirm={confirmDeleteBaseline}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </div>
   );
 }
