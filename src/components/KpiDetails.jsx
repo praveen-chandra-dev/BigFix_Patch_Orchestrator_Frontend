@@ -188,14 +188,117 @@ export default function KpiDetails({ context, activeTab }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  const fetchData = async () => {
+//   const fetchData = async () => {
+//       setLoading(true); 
+//       setError(""); 
+//       setSelectedReboots(new Set());
+//       setSelectedHealth(new Set());
+      
+//       try {
+//           const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
+//           let fetchedData = [];
+
+//           if (type === 'success') {
+//               if (!actionId) {
+//                   setError("No Action ID was pinned for the previous deployment.");
+//                   setLoading(false);
+//                   return;
+//               }
+//               const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`);
+//               if (Array.isArray(res?.rows)) {
+//                   const map = new Map();
+//                   for (const r of res.rows) {
+//                       if (r.server && !map.has(r.server)) { map.set(r.server, r); }
+//                   }
+//                   fetchedData = Array.from(map.values());
+//               }
+//           } else if (type === 'health') {
+//               const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
+//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+//           } else if (type === 'reboot') {
+//               const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
+//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+//           }
+
+//           setData(fetchedData);
+//           setLastUpdated(new Date().toLocaleString());
+//       } catch (e) {
+//           setError(e.message || "Failed to fetch KPI data.");
+//       } finally {
+//           setLoading(false);
+//       }
+//   };
+
+
+//     const fetchData = async () => {
+//       setLoading(true); 
+//       setError(""); 
+//       setSelectedReboots(new Set());
+//       setSelectedHealth(new Set());
+      
+//       try {
+//           const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
+//           let fetchedData = [];
+
+//           if (type === 'success') {
+//               if (!actionId) {
+//                   setError("No Action ID was pinned for the previous deployment.");
+//                   setLoading(false);
+//                   return;
+//               }
+              
+//               // 🚀 NEW: Split comma-separated IDs into an array and fetch all of them concurrently
+//               const idArray = String(actionId).split(",").map(id => id.trim()).filter(Boolean);
+              
+//               const allResults = await Promise.all(idArray.map(async (id) => {
+//                   try {
+//                       return await getJson(`${API_BASE}/api/actions/${id}/results`);
+//                   } catch (e) {
+//                       console.warn(`Failed to fetch KPI details for action ${id}:`, e);
+//                       return { rows: [] };
+//                   }
+//               }));
+
+//               // Merge all rows from all actions
+//               let combinedRows = [];
+//               allResults.forEach(res => {
+//                   if (Array.isArray(res?.rows)) {
+//                       combinedRows = combinedRows.concat(res.rows);
+//                   }
+//               });
+
+//               // Deduplicate by server name
+//               const map = new Map();
+//               for (const r of combinedRows) {
+//                   if (r.server && !map.has(r.server)) { map.set(r.server, r); }
+//               }
+//               fetchedData = Array.from(map.values());
+              
+//           } else if (type === 'health') {
+//               const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
+//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+//           } else if (type === 'reboot') {
+//               const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
+//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+//           }
+
+//           setData(fetchedData);
+//           setLastUpdated(new Date().toLocaleString());
+//       } catch (e) {
+//           setError(e.message || "Failed to fetch KPI data.");
+//       } finally {
+//           setLoading(false);
+//       }
+//   };
+
+    const fetchData = async () => {
       setLoading(true); 
       setError(""); 
       setSelectedReboots(new Set());
       setSelectedHealth(new Set());
       
       try {
-          const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
+          const groupNamesArray = groupName ? groupName.split(",").map(g => g.trim()).filter(Boolean) : [];
           let fetchedData = [];
 
           if (type === 'success') {
@@ -204,20 +307,36 @@ export default function KpiDetails({ context, activeTab }) {
                   setLoading(false);
                   return;
               }
-              const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`);
-              if (Array.isArray(res?.rows)) {
-                  const map = new Map();
-                  for (const r of res.rows) {
-                      if (r.server && !map.has(r.server)) { map.set(r.server, r); }
-                  }
-                  fetchedData = Array.from(map.values());
-              }
+              const idArray = String(actionId).split(",").map(id => id.trim()).filter(Boolean);
+              const allResults = await Promise.all(idArray.map(async (id) => {
+                  try { return await getJson(`${API_BASE}/api/actions/${id}/results`); } 
+                  catch (e) { return { rows: [] }; }
+              }));
+              let combinedRows = [];
+              allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+              const map = new Map();
+              for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+              fetchedData = Array.from(map.values());
+              
           } else if (type === 'health') {
-              const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
-              fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+              const allResults = await Promise.all(groupNamesArray.map(async (g) => {
+                  return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`).catch(() => null);
+              }));
+              let combinedRows = [];
+              allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+              const map = new Map();
+              for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+              fetchedData = Array.from(map.values());
+              
           } else if (type === 'reboot') {
-              const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
-              fetchedData = Array.isArray(data?.rows) ? data.rows : [];
+              const allResults = await Promise.all(groupNamesArray.map(async (g) => {
+                  return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`).catch(() => null);
+              }));
+              let combinedRows = [];
+              allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+              const map = new Map();
+              for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+              fetchedData = Array.from(map.values());
           }
 
           setData(fetchedData);
