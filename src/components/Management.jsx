@@ -14,6 +14,7 @@ const LABELS = {
   SN_URL: "SERVICENOW URL", SN_USER: "SERVICENOW USERNAME", SN_PASSWORD: "SERVICENOW PASSWORD", SN_ALLOW_SELF_SIGNED: "SERVICENOW ALLOW SELF SIGNED",
   VCENTER_URL: "VCENTER URL", VCENTER_USER: "VCENTER USERNAME", VCENTER_PASSWORD: "VCENTER PASSWORD", VCENTER_ALLOW_SELF_SIGNED:"VCENTER ALLOW SELF SIGNED",
   LDAP_ENABLED: "ENABLE DIRECTORY SERVICES", LDAP_URL: "LDAP URL", LDAP_DOMAIN: "LDAP DOMAIN", LDAP_ALLOW_SELF_SIGNED: "LDAP ALLOW SELF SIGNED",
+  SAML_ENABLED: "SAML ENABLED", FORCE_SSO: "FORCE SSO", SAML_ENTRY_POINT: "SAML ENTRY POINT", SAML_ISSUER: "SAML ISSUER", SAML_CERT: "SAML CERTIFICATE",
   PRISM_BASE_URL: "PRISM URL", PRISM_USER: "PRISM USERNAME", PRISM_PASS: "PRISM PASSWORD",
   DEBUG_LOG: "DEBUG LEVEL",
 };
@@ -41,6 +42,12 @@ const TEMPLATE = [
   { key: "LDAP_URL", value: "", type: "string", secret: false, hint: "ldaps://dc.example.com:636" }, 
   { key: "LDAP_DOMAIN", value: "", type: "string", secret: false, hint: "example.com" },
   { key: "LDAP_ALLOW_SELF_SIGNED", value: "false", type: "boolean", secret: false, hint: "Disable SSL validation (internal)" },
+  // 🚀 ADD THESE 5 SAML TEMPLATES
+  { key: "SAML_ENABLED", value: "false", type: "boolean", secret: false, hint: "Allow users to log in using Okta" },
+  { key: "FORCE_SSO", value: "false", type: "boolean", secret: false, hint: "Hide local login form completely" },
+  { key: "SAML_ENTRY_POINT", value: "", type: "string", secret: false, hint: "https://dev-xxxxx.okta.com/app/xxx/sso/saml" },
+  { key: "SAML_ISSUER", value: "patch-setu-app", type: "string", secret: false, hint: "e.g. patch-setu-app" },
+  { key: "SAML_CERT", value: "", type: "textarea", secret: false, hint: "Paste the Okta X.509 certificate here..." },
   { key: "SMTP_HOST", value: "", type: "string", secret: false, hint: "smtp.domain.com" },
   { key: "SMTP_USER", value: "", type: "string", secret: false, hint: "" },
   { key: "SMTP_PASSWORD", value: "", type: "string", secret: true, hint: "" },
@@ -131,6 +138,11 @@ function Field({ item, value, onChange, invalid, disabled = false }) {
           <Select value={val} options={item.options || []} onChange={(v) => onChange(item.key, v)} placeholder="" disabled={disabled} />
           {item.key === "DEBUG_LOG" && <button type="button" className="ghost tiny" onClick={() => onChange(item.key, val === "1" ? "0" : "1")} disabled={disabled}>{val === "1" ? "Debug" : "Info"}</button>}
         </div>
+      ) : item.type === "textarea" ? (
+        // 🚀 ADDED TEXTAREA LOGIC HERE
+        <div className="inputwrap" style={{ height: 'auto', padding: 0 }}>
+          <textarea id={item.key} className="control" placeholder={item.hint || ""} value={val} onChange={(e) => onChange(item.key, e.target.value)} disabled={disabled} rows={6} style={{ fontFamily: "monospace", fontSize: "12px", resize: "vertical", width: "100%", padding: "10px", border: "none", outline: "none", background: "transparent" }} />
+        </div>
       ) : (
         <div className="inputwrap">
           <input id={item.key} type={isSecret && !show ? "password" : item.type === "number" ? "number" : "text"} placeholder={item.hint || ""} value={val} onChange={(e) => onChange(item.key, e.target.value)} autoComplete="off" disabled={disabled} min={item.type === "number" ? "1" : undefined} />
@@ -167,6 +179,7 @@ export default function Management({ onClose }) {
       PILOT_: ["PILOT_BIGFIX_BASE_URL","PILOT_BIGFIX_USER","PILOT_BIGFIX_PASS","PILOT_BIGFIX_ALLOW_SELF_SIGNED"],
       PRODUCTION_: ["PRODUCTION_BIGFIX_BASE_URL","PRODUCTION_BIGFIX_USER","PRODUCTION_BIGFIX_PASS","PRODUCTION_BIGFIX_ALLOW_SELF_SIGNED"],
       LDAP_: ["LDAP_ENABLED", "LDAP_URL", "LDAP_DOMAIN", "LDAP_ALLOW_SELF_SIGNED"],
+      SAML_: ["SAML_ENABLED", "FORCE_SSO", "SAML_ENTRY_POINT", "SAML_ISSUER", "SAML_CERT"], // 🚀 ADD THIS
       SMTP_: ["SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","SMTP_TO","SMTP_PORT","SMTP_SECURE","SMTP_CC","SMTP_BCC","SMTP_ALLOW_SELF_SIGNED"],
       SN_: ["SN_URL","SN_USER","SN_PASSWORD","SN_ALLOW_SELF_SIGNED"],
       PRISM_: ["PRISM_BASE_URL","PRISM_USER","PRISM_PASS"],
@@ -174,7 +187,7 @@ export default function Management({ onClose }) {
       DEBUG_: ["DEBUG_LOG"]
     };
     const pick = (pfx) => TEMPLATE.filter(i => i.key.startsWith(pfx) || ord[pfx].includes(i.key)).sort((a,b) => (ord[pfx] || []).indexOf(a.key) - (ord[pfx] || []).indexOf(b.key));
-    if (!isMO) return { SECURITY: [], BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SMTP: [], SN: [], PRISM: [], VCENTER: [], DEBUG: [] };
+    if (!isMO) return { SECURITY: [], BIGFIX: [], SANDBOX: [], PILOT: [], PRODUCTION: [], LDAP: [], SAML: [], SMTP: [], SN: [], PRISM: [], VCENTER: [], DEBUG: [] };
     return {
       SECURITY: pick("SECURITY_"),
       BIGFIX: pick("BIGFIX_"),
@@ -182,6 +195,7 @@ export default function Management({ onClose }) {
       PILOT: pick("PILOT_"),
       PRODUCTION: pick("PRODUCTION_"),
       LDAP: pick("LDAP_"),
+      SAML: pick("SAML_"),
       SMTP: pick("SMTP_"),
       SN: pick("SN_"),
       PRISM: pick("PRISM_"),
@@ -222,6 +236,7 @@ export default function Management({ onClose }) {
       };
       if (isMO) {
           map.LDAP = sections.LDAP.every(it => !invalidMap[it.key]);
+          map.SAML = sections.SAML.every(it => !invalidMap[it.key]); // 🚀 ADD THIS
           map.SMTP = sections.SMTP.every(it => !(smtpTouched ? invalidMap[it.key] : false));
           map.SN = true;
           map.PRISM = sections.PRISM.every(it => !(prismTouched ? invalidMap[it.key] : false));
@@ -466,6 +481,22 @@ export default function Management({ onClose }) {
                         <div className="grid">
                             {/* 🚀 BUG FIX: Removed the buggy '|| !ldapEnabled' lock. Now inputs are immediately editable when you click Edit. */}
                             {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP'} />)}
+                        </div>
+                    </details>
+
+                    {/* Okta SAML SSO */}
+                    <details className="section overflow-visible" open>
+                        <summary className="section-head">
+                            <span className="title">Okta SAML 2.0 Settings</span><span className="pill soft">Optional</span><div className="spacer" />
+                            {editingSection === 'SAML' ? (
+                            <div className="actions">
+                                <button className="btn ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+                                <button className="btn primary" onClick={() => onSave('SAML')} disabled={saving || !validationMap['SAML']}>{saving?"Saving…":"Save"}</button>
+                            </div>
+                            ) : <button className="btn" onClick={() => setEditingSection('SAML')} disabled={saving || editingSection !== null}>Edit</button>}
+                        </summary>
+                        <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+                            {sections.SAML.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'SAML'} />)}
                         </div>
                     </details>
                     

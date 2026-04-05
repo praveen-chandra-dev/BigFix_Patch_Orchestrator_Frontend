@@ -322,17 +322,38 @@ export default function PilotDecisionEngine({
           globalSuccess += successCount; globalTotal += totalCount;
       }));
 
+      // setSandbox({ success: globalSuccess, total: globalTotal, rows: [] });
+
+      // let globalCritical = 0; let globalComps = 0;
+      // await Promise.all(Array.from(uniqueGroups).map(async (g) => {
+      //     const ch = await getCriticalHealth(g, ab.signal).catch(()=>null);
+      //     globalCritical += num(ch?.count, 0);
+      //     const tot = await getTotalComputersMaybe(g, ab.signal).catch(()=>0);
+      //     globalComps += tot;
+      // }));
+
+      // setCounts((c) => ({ ...c, critical: globalCritical }));
+      // if (globalComps > 0) setTotalComputers(globalComps);
+
       setSandbox({ success: globalSuccess, total: globalTotal, rows: [] });
 
-      let globalCritical = 0; let globalComps = 0;
+      // 🚀 FIX: Deduplicate Critical Health rows exactly like the KPI tile does!
+      let globalComps = 0;
+      const allCriticalRows = [];
+      
       await Promise.all(Array.from(uniqueGroups).map(async (g) => {
           const ch = await getCriticalHealth(g, ab.signal).catch(()=>null);
-          globalCritical += num(ch?.count, 0);
+          if (Array.isArray(ch?.rows)) allCriticalRows.push(...ch.rows);
+          
           const tot = await getTotalComputersMaybe(g, ab.signal).catch(()=>0);
           globalComps += tot;
       }));
 
-      setCounts((c) => ({ ...c, critical: globalCritical }));
+      const uniqueHealthMap = new Map();
+      allCriticalRows.forEach(r => { if (r.server && !uniqueHealthMap.has(r.server)) uniqueHealthMap.set(r.server, r); });
+      const trueCriticalCount = uniqueHealthMap.size;
+
+      setCounts((c) => ({ ...c, critical: trueCriticalCount }));
       if (globalComps > 0) setTotalComputers(globalComps);
 
       setTimeout(() => { window.dispatchEvent(new CustomEvent("pilot:requestKpiCounts")); }, 0);
@@ -400,15 +421,53 @@ export default function PilotDecisionEngine({
   //   }
   // }
 
+  // function evaluateAndDecide() {
+  //   if (!isGateSatisfied || !enableEvaluate || readOnly) return;
+  //   let threshold = num(env?.successThreshold, 90); let allowableCHF = num(env?.allowableCriticalHF, 0);
+  //   const T = totalComputers > 0 ? totalComputers : Math.max(1, sandbox.total);
+  //   const successPct = sandbox.total > 0 ? Math.round((sandbox.success / sandbox.total) * 100) : 0;
+
+  //   if (sandbox.total === 0 && counts.critical === undefined) {
+  //     setDecision("FAIL: No data loaded."); setEnableTriggerPilot(false); setEvaluated(true); return;
+  //   }
+
+  //   const okSuccess = successPct >= threshold; const okHealth = (counts.critical || 0) <= allowableCHF;
+  //   setEvaluated(true);
+
+  //   if (okSuccess && okHealth) {
+  //     // 🚀 FIX: Prevent looping by only returning new state if it actually changed
+  //     setEnv((p) => {
+  //         if (p[`${mode}Evaluated`] === true && p[`${mode}Unlocked`] === true) return p;
+  //         return { ...p, [`${mode}Evaluated`]: true, [`${mode}Unlocked`]: true };
+  //     });
+  //     if (trackingId) sessionStorage.setItem(`approved_${mode}_${trackingId}`, "true");
+  //     if (requireChg) { setDecision("PASS: Thresholds met. Validate CHG."); setShowChg(true); setChgErr(""); if (!chgNumber) setChgNumber("CHG"); setEnableTriggerPilot(false); } 
+  //     else { setDecision("PASS: Thresholds met. Configuration Unlocked."); setEnableTriggerPilot(true); }
+  //   } else {
+  //     // 🚀 FIX
+  //     setEnv((p) => {
+  //         if (p[`${mode}Evaluated`] === false && p[`${mode}Unlocked`] === false) return p;
+  //         return { ...p, [`${mode}Evaluated`]: false, [`${mode}Unlocked`]: false };
+  //     });
+  //     if (trackingId) sessionStorage.removeItem(`approved_${mode}_${trackingId}`);
+  //     setDecision(`FAIL: Thresholds not met (Success: ${successPct}%, Critical Fails: ${counts.critical}).`);
+  //     setEnableTriggerPilot(false);
+  //   }
+  // }
+
   function evaluateAndDecide() {
     if (!isGateSatisfied || !enableEvaluate || readOnly) return;
-    let threshold = num(env?.successThreshold, 90); let allowableCHF = num(env?.allowableCriticalHF, 0);
-    const T = totalComputers > 0 ? totalComputers : Math.max(1, sandbox.total);
-    const successPct = sandbox.total > 0 ? Math.round((sandbox.success / sandbox.total) * 100) : 0;
-
-    if (sandbox.total === 0 && counts.critical === undefined) {
-      setDecision("FAIL: No data loaded."); setEnableTriggerPilot(false); setEvaluated(true); return;
+    
+    // 🚀 FIX: Prevent evaluation before data has finished loading!
+    if (refreshing || sandbox.total === 0) {
+      setDecision("FAIL: Data is still loading or unavailable. Please wait."); 
+      setEnableTriggerPilot(false); 
+      setEvaluated(true); 
+      return;
     }
+
+    let threshold = num(env?.successThreshold, 90); let allowableCHF = num(env?.allowableCriticalHF, 0);
+    const successPct = Math.round((sandbox.success / sandbox.total) * 100);
 
     const okSuccess = successPct >= threshold; const okHealth = (counts.critical || 0) <= allowableCHF;
     setEvaluated(true);
@@ -570,7 +629,8 @@ export default function PilotDecisionEngine({
 
       <div className="row" style={{ gap: 8, flexWrap: "wrap", display: "flex" }}>
         <button className="btn outline small" onClick={refreshKpis} disabled={refreshing} style={{ display: "flex", alignItems: "center", gap: "6px" }}>{refreshing ? <><InlineSpinner size={14} variant="dark" /><span>Refreshing...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}</button>
-        {!isEUC && <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>}
+        {/* {!isEUC && <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly}>Evaluate &amp; Approve</button>} */}
+        {!isEUC && <button className="btn outline ok" onClick={evaluateAndDecide} disabled={!isGateSatisfied || !enableEvaluate || readOnly || refreshing}>Evaluate &amp; Approve</button>}
         {evaluated && !enableTriggerPilot && !chgValidated && !readOnly && !isEUC && <button className="btn outline amber" onClick={() => setShowUnlockConfirm(true)}>Unlock Settings</button>}
         
        {!readOnly ? (

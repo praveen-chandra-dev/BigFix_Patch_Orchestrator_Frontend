@@ -98,10 +98,28 @@ export default function RoleManagement({ onClose, role, username }) {
   const [roleRpp, setRoleRpp] = useState(10);
   const [roleSort, setRoleSort] = useState({ key: null, direction: 'asc' });
 
-  useEffect(() => {
+//   useEffect(() => {
+//       const handleNav = (e) => {
+//           const tab = String(e.detail).toUpperCase();
+//           if (tab === 'LIST') {
+//               setView("LIST"); setEditingRoleId(null);
+//           } else {
+//               if (!editingRoleId && tab !== 'DETAILS') {
+//                   setModalConfig({ open: true, title: "Action Required", message: "You must fill out and 'Save Details' to create the Role before assigning Computers, Sites, or Operators.", confirmText: "Got it", hideCancel: true, onConfirm: () => { setModalConfig({ open: false }); window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: "DETAILS" })); } });
+//                   return;
+//               }
+//               setView("CREATE"); setActiveTab(tab);
+//           }
+//       };
+//       window.addEventListener('nav:roles', handleNav);
+//       return () => window.removeEventListener('nav:roles', handleNav);
+//   }, [editingRoleId]);
+
+useEffect(() => {
       const handleNav = (e) => {
           const tab = String(e.detail).toUpperCase();
           if (tab === 'LIST') {
+              sessionStorage.setItem('role_mode', 'LIST'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
               setView("LIST"); setEditingRoleId(null);
           } else {
               if (!editingRoleId && tab !== 'DETAILS') {
@@ -141,13 +159,36 @@ export default function RoleManagement({ onClose, role, username }) {
       } catch (e) { showToast("Failed to load dependency data: " + e.message, "error"); }
   }
 
-  const handleOpenCreate = () => {
+//   const handleOpenCreate = () => {
+//       setEditingRoleId(null); setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); 
+//       setName(""); setDescription(""); setSelectedComputers([]); setSelectedSites([]); setSelectedOperators([]); 
+//       setExpandedNodes(new Set(["ROOT", "RETRIEVED"])); loadCreateData();
+//   };
+
+//   const handleEditRole = async (r) => {
+//       setEditingRoleId(r.BigFixRoleID); setName(r.Name); setDescription(r.Description);
+//       setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); setLoading(true);
+//       try {
+//           await loadCreateData();
+//           const res = await apiFetch(`/api/roles/${r.BigFixRoleID}/details`);
+//           if (res.details) {
+//               const d = res.details;
+//               if (d.perms) setPerms(p => ({ ...p, ...d.perms }));
+//               setSelectedComputers(d.computers || []); setSelectedSites(d.sites || []); setSelectedOperators(d.operators || []);
+//           }
+//       } catch (e) { showToast("Failed to load role details: " + e.message, "error"); } finally { setLoading(false); }
+//   };
+
+//   const handleCancel = () => { setView("LIST"); setEditingRoleId(null); setSaving(false); };
+const handleOpenCreate = () => {
+      sessionStorage.setItem('role_mode', 'CREATE'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
       setEditingRoleId(null); setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); 
       setName(""); setDescription(""); setSelectedComputers([]); setSelectedSites([]); setSelectedOperators([]); 
       setExpandedNodes(new Set(["ROOT", "RETRIEVED"])); loadCreateData();
   };
 
   const handleEditRole = async (r) => {
+      sessionStorage.setItem('role_mode', 'EDIT'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
       setEditingRoleId(r.BigFixRoleID); setName(r.Name); setDescription(r.Description);
       setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); setLoading(true);
       try {
@@ -161,7 +202,10 @@ export default function RoleManagement({ onClose, role, username }) {
       } catch (e) { showToast("Failed to load role details: " + e.message, "error"); } finally { setLoading(false); }
   };
 
-  const handleCancel = () => { setView("LIST"); setEditingRoleId(null); setSaving(false); };
+  const handleCancel = () => { 
+      sessionStorage.setItem('role_mode', 'LIST'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
+      setView("LIST"); setEditingRoleId(null); setSaving(false); 
+  };
 
   const toggleVal = (nodeId) => {
       const next = new Set(expandedNodes);

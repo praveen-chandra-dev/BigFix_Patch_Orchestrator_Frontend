@@ -652,6 +652,13 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
   const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
   const [localRoleTab, setLocalRoleTab] = useState('LIST');
 
+const [roleMode, setRoleMode] = useState(sessionStorage.getItem('role_mode') || 'LIST');
+useEffect(() => {
+      const handleRoleMode = () => setRoleMode(sessionStorage.getItem('role_mode') || 'LIST');
+      window.addEventListener('sync:roles_mode', handleRoleMode);
+      return () => window.removeEventListener('sync:roles_mode', handleRoleMode);
+  }, []);
+
   const [localGroupTab, setLocalGroupTab] = useState('COMPUTERS');
   useEffect(() => {
     if (!isRestoring) {
@@ -868,7 +875,7 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
             <a className={`menu-item ${activeMenu === 'roles' ? 'active' : ''}`} onClick={() => onNavigate('roles')}>
                <IconShield /> Role Management
             </a>
-            {activeMenu === 'roles' && (
+            {/* {activeMenu === 'roles' && (
                <div className="sidebar-sub-menu">
                    <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'LIST' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'LIST'}))}>
                          Role List
@@ -883,6 +890,63 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
                          Sites
                    </a>
                    <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'OPERATORS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'OPERATORS'}))}>
+                         Operators
+                   </a>
+               </div>
+            )} */}
+            {activeMenu === 'roles' && (
+               <div className="sidebar-sub-menu">
+                   
+                   <a className={`menu-item sub-item step ${localRoleTab === 'LIST' ? 'active' : ''}`} 
+                      style={{ fontWeight: localRoleTab === 'LIST' ? 'bold' : 'normal', color: 'inherit' }} 
+                      onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'LIST'}))}>
+                         Role List
+                   </a>
+
+                   <a className={`menu-item sub-item step ${localRoleTab === 'DETAILS' ? 'active' : ''}`} 
+                      style={{ 
+                          fontWeight: localRoleTab === 'DETAILS' ? 'bold' : 'normal', 
+                          color: 'inherit',
+                          pointerEvents: roleMode === 'LIST' ? 'none' : 'auto',
+                          cursor: roleMode === 'LIST' ? 'default' : 'pointer'
+                      }} 
+                      onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'DETAILS'}))}>
+                         Details
+                   </a>
+
+                   <a className={`menu-item sub-item step ${localRoleTab === 'COMPUTERS' ? 'active' : ''}`} 
+                      style={{ 
+                          fontWeight: localRoleTab === 'COMPUTERS' ? 'bold' : 'normal', 
+                          color: 'inherit',
+                          // 🚀 FIX: Unlock the tab if the mode is EDIT
+                          pointerEvents: roleMode === 'EDIT' ? 'auto' : 'none',
+                          cursor: roleMode === 'EDIT' ? 'pointer' : 'default'
+                      }} 
+                      onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'COMPUTERS'}))}>
+                         Computer Assignments
+                   </a>
+
+                   <a className={`menu-item sub-item step ${localRoleTab === 'SITES' ? 'active' : ''}`} 
+                      style={{ 
+                          fontWeight: localRoleTab === 'SITES' ? 'bold' : 'normal', 
+                          color: 'inherit',
+                          // 🚀 FIX: Unlock the tab if the mode is EDIT
+                          pointerEvents: roleMode === 'EDIT' ? 'auto' : 'none',
+                          cursor: roleMode === 'EDIT' ? 'pointer' : 'default'
+                      }} 
+                      onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'SITES'}))}>
+                         Sites
+                   </a>
+
+                   <a className={`menu-item sub-item step ${localRoleTab === 'OPERATORS' ? 'active' : ''}`} 
+                      style={{ 
+                          fontWeight: localRoleTab === 'OPERATORS' ? 'bold' : 'normal', 
+                          color: 'inherit',
+                          // 🚀 FIX: Unlock the tab if the mode is EDIT
+                          pointerEvents: roleMode === 'EDIT' ? 'auto' : 'none',
+                          cursor: roleMode === 'EDIT' ? 'pointer' : 'default'
+                      }} 
+                      onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'OPERATORS'}))}>
                          Operators
                    </a>
                </div>
