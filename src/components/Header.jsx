@@ -807,9 +807,9 @@ useEffect(() => {
            <IconCalendar /> Patch Calendar
         </a>
 
-        <a className={`menu-item ${activeMenu === 'policy' ? 'active' : ''}`} onClick={() => onNavigate('policy')}>
+        {/* <a className={`menu-item ${activeMenu === 'policy' ? 'active' : ''}`} onClick={() => onNavigate('policy')}>
            <IconPolicy /> Patch Policy
-        </a>
+        </a> */}
 
         <div className="menu-label">Infrastructure</div>
         <a className={`menu-item ${activeMenu === 'group' ? 'active' : ''}`} onClick={() => onNavigate('group')}>

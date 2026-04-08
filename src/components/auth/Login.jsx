@@ -174,7 +174,7 @@ export default function Login({ onSuccess }) {
   const [isSetup, setIsSetup] = useState(false);
   const [setupConfirm, setSetupConfirm] = useState("");
   
-  // 🚀 State for SAML/Okta Configuration
+  //  State for SAML/Okta Configuration
   const [samlEnabled, setSamlEnabled] = useState(false);
   const [forceSso, setForceSso] = useState(false);
   
@@ -194,8 +194,8 @@ export default function Login({ onSuccess }) {
   //     })
   //     .catch(() => {});
 
-  //   // 🚀 2. Check if SAML/Okta is enabled in Environment Settings
-  //   // 🚀 2. Check if SAML/Okta is enabled in Environment Settings
+  //   //  2. Check if SAML/Okta is enabled in Environment Settings
+  //   //  2. Check if SAML/Okta is enabled in Environment Settings
   //   fetch(`${API_BASE}/api/env`)
   //     .then(res => res.json())
   //     .then(data => {
@@ -221,7 +221,7 @@ export default function Login({ onSuccess }) {
       })
       .catch(() => {});
 
-    // 🚀 NEW: Check if we just returned from a successful SSO login
+    //  NEW: Check if we just returned from a successful SSO login
     // We check the backend status using credentials: 'include' to send the cookie
     fetch(`${API_BASE}/api/auth/status`, { credentials: 'include' })
       .then(res => res.json())
@@ -317,10 +317,15 @@ export default function Login({ onSuccess }) {
     setBusy(false);
   }
 
-  // 🚀 Redirect to Okta Login Route
   const handleOktaLogin = () => {
-      window.location.href = `${API_BASE}/api/auth/saml/login`;
+      
+      const link = document.createElement('a');
+      link.href = `${API_BASE}/api/auth/saml/login`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   };
+
 
   return (
     <div className="login-outer">
@@ -393,7 +398,7 @@ export default function Login({ onSuccess }) {
             </form>
         )}
 
-        {/* 🚀 OKTA SSO BUTTON: Show if SAML is enabled and we are not in setup mode */}
+        {/*  OKTA SSO BUTTON: Show if SAML is enabled and we are not in setup mode */}
         {samlEnabled && !isSetup && (
             <div style={{ marginTop: forceSso ? '10px' : '24px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 
