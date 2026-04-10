@@ -19,7 +19,7 @@ export default function ValidationGate({ targetGroupName, onValidationChange }) 
     const API = window.env?.VITE_API_BASE || "http://localhost:5174";
     
     try {
-      // 🚀 Split comma-separated string into an array of individual groups
+      //  Split comma-separated string into an array of individual groups
       const groups = targetGroupName ? targetGroupName.split(",").map(g => g.trim()).filter(Boolean) : [];
       
       if (groups.length === 0) {
@@ -35,7 +35,7 @@ export default function ValidationGate({ targetGroupName, onValidationChange }) 
       let hasError = false;
       let errorList = [];
 
-      // 🚀 Fetch validation for every group concurrently
+      // Fetch validation for every group concurrently
       await Promise.all(groups.map(async (gName) => {
           try {
             const res = await fetch(`${API}/api/vcenter/validate`, {

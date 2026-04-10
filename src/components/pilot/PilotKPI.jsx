@@ -342,32 +342,13 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
 export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiClick }) {
   const mode = /production/i.test(title) ? "production" : "pilot";
   
-  // const getPinnedActionId = useCallback(() => {
-  //   try {
-  //     const la = lastActions || {};
-  //     if (mode === "production") return la?.PILOT?.id ?? null;
-  //     return la?.SANDBOX?.id ?? null;
-  //   } catch {
-  //     return null;
-  //   }
-  // }, [lastActions, mode]);
-
-  // const scopeGroup = useMemo(() => {
-  //   try {
-  //     const la = lastActions || {};
-  //     if (mode === "production") return la?.PILOT?.group ?? la?.SANDBOX?.group ?? null;
-  //     return la?.SANDBOX?.group ?? null;
-  //   } catch {
-  //     return null;
-  //   }
-  // }, [lastActions, mode]);
 
   const getPinnedActionId = useCallback(() => {
     try {
       const la = lastActions || {};
       const stageData = mode === "production" ? la?.PILOT : la?.SANDBOX;
       
-      // 🚀 Extract comma-separated IDs from the new array
+      // Extract comma-separated IDs from the new array
       if (stageData?.actions && Array.isArray(stageData.actions)) {
           return stageData.actions.map(a => a.actionId).join(",");
       }
@@ -382,7 +363,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
       const la = lastActions || {};
       const stageData = mode === "production" ? la?.PILOT : la?.SANDBOX;
       
-      // 🚀 Extract comma-separated Group Names from the new array
+      //  Extract comma-separated Group Names from the new array
       if (stageData?.actions && Array.isArray(stageData.actions)) {
           // Use a Set to avoid duplicating group names if multiple baselines target the same group
           return [...new Set(stageData.actions.map(a => a.group))].join(", ");
@@ -428,7 +409,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     if (id) {
        setActiveActionId(id);
        setIsActionStopped(false); 
-       actionDeadRef.current = false; // 🚀 Reset the wall
+       actionDeadRef.current = false; // Reset the wall
     }
   }, [getPinnedActionId()]);
 
@@ -508,25 +489,6 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     } catch { setSuccessRows([]); } finally { setSuccessLoading(false); }
   }
 
-  // async function openHealthModal() {
-  //   setOpenHealth(true); setGlobalError("");
-  //   try {
-  //     setHealthLoading(true);
-  //     const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
-  //     const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
-  //     setHealthRows(Array.isArray(data?.rows) ? data.rows : []);
-  //   } catch { setHealthRows([]); } finally { setHealthLoading(false); }
-  // }
-
-  // async function openRebootModal() {
-  //   setOpenReboot(true); setGlobalError(""); setSelectedReboots(new Set()); 
-  //   try {
-  //     setRebootLoading(true);
-  //     const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
-  //     const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
-  //     setRebootRows(Array.isArray(data?.rows) ? data.rows : []);
-  //   } catch { setRebootRows([]); } finally { setRebootLoading(false); }
-  // }
 
   async function openHealthModal() {
     setOpenHealth(true); setGlobalError("");
@@ -619,199 +581,16 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiC
     }
   }
 
-//   useEffect(() => {
-//     let timer; const ab = new AbortController();
-//    /* async function tick() {
-//       try {
-//         const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
-
-//         const ch = await getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal);
-//         const healthPayload = { count: Number(ch?.count || 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
-//         setKpi((p) => ({ ...p, critHealthFails: healthPayload.count }));
-        
-//         try {
-//           const rp = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal);
-//           const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
-//           const rpCount = Number(rp?.count ?? (rpRows.length || 0));
-//           setKpi((p) => ({ ...p, rebootPending: rpCount }));
-//           setRebootRows(rpRows);
-//         } catch (e) {}
-
-//         // 🚀 ALWAYS CHECK GLOBAL ACTION ID TO SYNC TABS ACROSS USERS
-//         const last = await getJson(`${API_BASE}/api/actions/last`, ab.signal).catch(()=>null);
-//         const globalLastId = last?.actionId ? String(last.actionId) : null;
-        
-//         let idToUse = activeActionId;
-//         if (globalLastId && globalLastId !== activeActionId) {
-//             idToUse = globalLastId;
-//             setActiveActionId(idToUse);
-//             setIsActionStopped(false); // Unfreeze polling
-//         }
-
-//         if (!idToUse) {
-//             setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
-//             return;
-//         }
-
-//         if (!isActionStopped || idToUse !== activeActionId) {
-//             const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
-//             const st = String(statusRes?.state || "").toLowerCase();
-//             const isDone = st === 'stopped' || st === 'expired';
-
-//             const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
-//             let uniqueRows = [];
-//             if (Array.isArray(res?.rows)) {
-//                 const map = new Map();
-//                 for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-//                 uniqueRows = Array.from(map.values());
-//             }
-//             const success = uniqueRows.length > 0 
-//                 ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-//                 : Number(res?.success ?? 0);
-            
-//             const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
-//             const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-            
-//             setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
-
-//             if (isDone) setIsActionStopped(true); 
-//         }
-//       } catch (err) {
-//         if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
-//       }
-//     }  */
-// async function tick() {
-//     try {
-//       const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
-
-//       // 1. Fire all three requests at the exact same time, but don't update state yet!
-//       const pHealth = getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal).catch(() => null);
-      
-//       const pReboot = getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal).catch(() => null);
-      
-//       // const pSuccess = (async () => {
-//       //   let idToUse = activeActionId;
-//       //   if (!idToUse) {
-//       //       const pinned = getPinnedActionId();
-//       //       if (pinned) {
-//       //           idToUse = pinned;
-//       //           setActiveActionId(idToUse);
-//       //           setIsActionStopped(false);
-//       //       }
-//       //   }
-//       //   if (!idToUse) return { rate: 0, success: 0, total: 0 };
-
-//       //   if (!isActionStopped || idToUse !== activeActionId) {
-//       //       const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
-//       //       const st = String(statusRes?.state || "").toLowerCase();
-//       //       const isDone = st === 'stopped' || st === 'expired';
-
-//       //       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
-//       //       let uniqueRows = [];
-//       //       if (Array.isArray(res?.rows)) {
-//       //           const map = new Map();
-//       //           for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-//       //           uniqueRows = Array.from(map.values());
-//       //       }
-//       //       const success = uniqueRows.length > 0 
-//       //           ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-//       //           : Number(res?.success ?? 0);
-            
-//       //       const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
-//       //       const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-            
-//       //       if (isDone) setIsActionStopped(true); 
-//       //       return { rate, success, total };
-//       //   }
-//       //   return null; // Return null if it's already stopped and we don't need to fetch
-//       // })();
-
-//       const pSuccess = (async () => {
-//         let idToUse = activeActionId;
-//         if (!idToUse) {
-//             const pinned = getPinnedActionId();
-//             if (pinned) {
-//                 idToUse = pinned;
-//                 setActiveActionId(idToUse);
-//                 setIsActionStopped(false);
-//             }
-//         }
-//         if (!idToUse) return { rate: 0, success: 0, total: 0 };
-
-//         // 🚀 THE FIX: Use absolute strict freezing. If the action is stopped, NEVER fetch again.
-//         if (actionDeadRef.current && idToUse === activeActionId) {
-//             return null; 
-//         }
-//         const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
-//         const st = String(statusRes?.state || "").toLowerCase();
-//         const isDone = st === 'stopped' || st === 'expired';
-
-//         const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
-//         let uniqueRows = [];
-//         if (Array.isArray(res?.rows)) {
-//             const map = new Map();
-//             for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-//             uniqueRows = Array.from(map.values());
-//         }
-//         const success = uniqueRows.length > 0 
-//             ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-//             : Number(res?.success ?? 0);
-        
-//         const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
-//         const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-        
-//         if (isDone) {
-//             actionDeadRef.current = true;
-//             setIsActionStopped(true);
-//         }
-//         return { rate, success, total };
-//       })();
-
-//       // 2. Wait for all of them to cross the finish line together
-//       const [ch, rp, successData] = await Promise.all([pHealth, pReboot, pSuccess]);
-
-//       // 3. Update the UI EXACTLY ONCE for a perfectly smooth animation
-//       setKpi((p) => {
-//         const nextKpi = { ...p };
-        
-//         if (ch !== null) {
-//             nextKpi.critHealthFails = Number(ch?.count || 0);
-//         }
-//         if (rp !== null) {
-//             const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
-//             nextKpi.rebootPending = Number(rp?.count ?? (rpRows.length || 0));
-//             setRebootRows(rpRows); 
-//         }
-//         if (successData !== null) {
-//             nextKpi.successRate = successData.rate;
-//             nextKpi.successCount = successData.success;
-//             nextKpi.totalCount = successData.total;
-//         }
-        
-//         return nextKpi;
-//       });
-
-//     } catch (err) {
-//       if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
-//     }
-//   }
-//     tick(); timer = setInterval(tick, 15000); 
-//     return () => { clearInterval(timer); ab.abort(); };
-//   }, [mode, scopeGroup, activeActionId, isActionStopped]);
-
 useEffect(() => {
     let timer; const ab = new AbortController();
     
     async function tick() {
       try {
-        // const groupQuery = scopeGroup ? `?group=${encodeURIComponent(scopeGroup)}` : "";
-
-        // const pHealth = getJson(`${API_BASE}/api/health/critical${groupQuery}`, ab.signal).catch(() => null);
-        // const pReboot = getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`, ab.signal).catch(() => null);
+      
 
         const groupNamesArray = scopeGroup ? scopeGroup.split(",").map(g => g.trim()).filter(Boolean) : [];
 
-        // 🚀 NEW: Fetch Critical Health for multiple groups concurrently and deduplicate
+        // NEW: Fetch Critical Health for multiple groups concurrently and deduplicate
         const pHealth = (async () => {
             if (groupNamesArray.length === 0) return { count: 0, rows: [] };
             const results = await Promise.all(groupNamesArray.map(async (g) => {
@@ -825,7 +604,7 @@ useEffect(() => {
             return { count: uRows.length, rows: uRows };
         })();
 
-        // 🚀 NEW: Fetch Reboot Pending for multiple groups concurrently and deduplicate
+        // NEW: Fetch Reboot Pending for multiple groups concurrently and deduplicate
         const pReboot = (async () => {
             if (groupNamesArray.length === 0) return { count: 0, rows: [] };
             const results = await Promise.all(groupNamesArray.map(async (g) => {
@@ -839,7 +618,7 @@ useEffect(() => {
             return { count: uRows.length, rows: uRows };
         })();
 
-        // 🚀 NEW: Aggregate Success Across All Actions in the Payload
+        // NEW: Aggregate Success Across All Actions in the Payload
         const pSuccess = (async () => {
           let actionsArray = [];
           
@@ -954,11 +733,7 @@ useEffect(() => {
             <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => handleKpiClick('health')} />
             <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => handleKpiClick('reboot')} />
           </div>
-          {/* <div className="sep"></div> */}
-          {/* <DonutChart 
-              donut={donut} center={center} hoverKey={hoverKey} setHoverKey={setHoverKey} 
-              onClickMap={{ success: () => handleKpiClick('success'), health: () => handleKpiClick('health'), reboot: () => handleKpiClick('reboot') }}
-          /> */}
+          
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px' }}>
   {/* Donut SVG – same dimensions as PilotSandboxResult */}
   <div style={{ width: '160px', flexShrink: 0, display: 'flex', justifyContent: 'center', marginLeft: '50px' }}>
@@ -1037,23 +812,6 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* <EnhancedModal 
-        open={openSuccess} onClose={() => setOpenSuccess(false)} title={`${title.replace("KPI", "Success Details")}`} 
-        rows={successRows} loading={successLoading} 
-        renderRows={(rows, handleSort, sortConfig) => (
-          <>
-            <thead className="kpi-th-sticky">
-              <tr>
-                <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {sortConfig.key==='server'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
-                <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {sortConfig.key==='status'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (<tr><td colSpan={2} className="sub">No success rows.</td></tr>) : (rows.map((r, i) => (<tr key={i}><td>{r.server || "—"}</td><td>Success</td></tr>)))}
-            </tbody>
-          </>
-        )}
-      /> */}
       <EnhancedModal 
         open={openSuccess} onClose={() => setOpenSuccess(false)} title={`${title.replace("KPI", "Success Details")}`} 
         rows={successRows} loading={successLoading} 

@@ -98,22 +98,6 @@ export default function RoleManagement({ onClose, role, username }) {
   const [roleRpp, setRoleRpp] = useState(10);
   const [roleSort, setRoleSort] = useState({ key: null, direction: 'asc' });
 
-//   useEffect(() => {
-//       const handleNav = (e) => {
-//           const tab = String(e.detail).toUpperCase();
-//           if (tab === 'LIST') {
-//               setView("LIST"); setEditingRoleId(null);
-//           } else {
-//               if (!editingRoleId && tab !== 'DETAILS') {
-//                   setModalConfig({ open: true, title: "Action Required", message: "You must fill out and 'Save Details' to create the Role before assigning Computers, Sites, or Operators.", confirmText: "Got it", hideCancel: true, onConfirm: () => { setModalConfig({ open: false }); window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: "DETAILS" })); } });
-//                   return;
-//               }
-//               setView("CREATE"); setActiveTab(tab);
-//           }
-//       };
-//       window.addEventListener('nav:roles', handleNav);
-//       return () => window.removeEventListener('nav:roles', handleNav);
-//   }, [editingRoleId]);
 
 useEffect(() => {
       const handleNav = (e) => {
@@ -159,27 +143,7 @@ useEffect(() => {
       } catch (e) { showToast("Failed to load dependency data: " + e.message, "error"); }
   }
 
-//   const handleOpenCreate = () => {
-//       setEditingRoleId(null); setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); 
-//       setName(""); setDescription(""); setSelectedComputers([]); setSelectedSites([]); setSelectedOperators([]); 
-//       setExpandedNodes(new Set(["ROOT", "RETRIEVED"])); loadCreateData();
-//   };
 
-//   const handleEditRole = async (r) => {
-//       setEditingRoleId(r.BigFixRoleID); setName(r.Name); setDescription(r.Description);
-//       setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); setLoading(true);
-//       try {
-//           await loadCreateData();
-//           const res = await apiFetch(`/api/roles/${r.BigFixRoleID}/details`);
-//           if (res.details) {
-//               const d = res.details;
-//               if (d.perms) setPerms(p => ({ ...p, ...d.perms }));
-//               setSelectedComputers(d.computers || []); setSelectedSites(d.sites || []); setSelectedOperators(d.operators || []);
-//           }
-//       } catch (e) { showToast("Failed to load role details: " + e.message, "error"); } finally { setLoading(false); }
-//   };
-
-//   const handleCancel = () => { setView("LIST"); setEditingRoleId(null); setSaving(false); };
 const handleOpenCreate = () => {
       sessionStorage.setItem('role_mode', 'CREATE'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
       setEditingRoleId(null); setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); 
@@ -252,26 +216,45 @@ const handleOpenCreate = () => {
     if (!selectedSites.some(s => s.url === site.url)) setSelectedSites([...selectedSites, { ...site, permission: 'Reader' }]);
   };
 
-  const executeSave = async () => {
-      setSaving(true);
-      try {
-          if (activeTab === 'DETAILS') {
-              if (!editingRoleId) {
-                  const payload = { name, description, perms };
-                  const res = await apiFetch("/api/roles/create", { method: "POST", body: JSON.stringify(payload) });
-                  setEditingRoleId(res.roleId); 
-              } else {
-                  const payload = { details: { name, description }, perms };
-                  await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify(payload) });
-              }
-          } else if (activeTab === 'COMPUTERS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ computers: selectedComputers }) });
-          else if (activeTab === 'SITES') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
-          else if (activeTab === 'OPERATORS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
-          
-          showToast("Role updated successfully! Redirecting...", "success");
-          setTimeout(() => { handleCancel(); loadRoles(); setSaving(false); }, 1200);
-      } catch (e) { showToast(e.message, "error"); setSaving(false); } finally { setModalConfig({ open: false }); }
-  };
+const executeSave = async () => {
+    setSaving(true);
+    try {
+        if (activeTab === 'DETAILS') {
+            if (!editingRoleId) {
+                // 1. Initial Creation
+                const payload = { name, description, perms };
+                const res = await apiFetch("/api/roles/create", { method: "POST", body: JSON.stringify(payload) });
+                setEditingRoleId(res.roleId); 
+                
+                // NEW LOGIC: Switch mode to EDIT immediately to unlock the other tabs!
+                sessionStorage.setItem('role_mode', 'EDIT'); 
+                window.dispatchEvent(new CustomEvent('sync:roles_mode'));
+                
+                showToast("Role created! You can now assign Computers, Sites, and Operators.", "success");
+                loadRoles();
+                setSaving(false);
+                return; // Stop here so it doesn't redirect back to the List page
+                
+            } else {
+                // Updating Existing Details
+                const payload = { details: { name, description }, perms };
+                await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify(payload) });
+            }
+        } 
+        else if (activeTab === 'COMPUTERS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ computers: selectedComputers }) });
+        else if (activeTab === 'SITES') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
+        else if (activeTab === 'OPERATORS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
+        
+        // This redirect will now only happen when updating tabs of an already existing role
+        showToast("Role updated successfully! Redirecting...", "success");
+        setTimeout(() => { handleCancel(); loadRoles(); setSaving(false); }, 1200);
+    } catch (e) { 
+        showToast(e.message, "error"); 
+        setSaving(false); 
+    } finally { 
+        setModalConfig({ open: false }); 
+    }
+};
 
   const handleSaveInit = () => {
       if (activeTab === 'DETAILS' && !name) { showToast("Role Name is required.", "error"); return; }

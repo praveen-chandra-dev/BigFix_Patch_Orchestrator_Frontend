@@ -91,47 +91,6 @@ export default function BaselineDashboard({
     return map;
   }, [cves]);
 
-  // const baselineExposure = useMemo(() => {
-  //   return baselines.map((b) => {
-  //     // FIX: Robust Patch ID Extraction
-  //     // If backend sends an array of objects, array of strings, or a stringified JSON
-  //     let rawPatches = [];
-  //     if (Array.isArray(b.patches)) {
-  //         rawPatches = b.patches;
-  //     } else if (typeof b.patches === 'string') {
-  //         try {
-  //             rawPatches = JSON.parse(b.patches);
-  //             if (!Array.isArray(rawPatches)) rawPatches = [];
-  //         } catch(e) {
-  //             rawPatches = [];
-  //         }
-  //     }
-
-  //     // Ensure we just have simple string IDs like "260865901" without prefixes
-  //     const patchIds = rawPatches.map(p => {
-  //         let id = "";
-  //         if (typeof p === 'object' && p !== null) id = String(p.patch_id || p.id || "");
-  //         else id = String(p);
-  //         return id.replace(/^BIGFIX-/i, "").trim();
-  //     }).filter(Boolean);
-      
-  //     const cveSet = new Set();
-  //     patchIds.forEach((cleanId) => {
-  //       // Match both plain ID and BIGFIX- prefixed ID from CVE cache
-  //       const cvesForPatch = patchCveMap[cleanId] || patchCveMap[`BIGFIX-${cleanId}`] || [];
-  //       cvesForPatch.forEach((c) => cveSet.add(c));
-  //     });
-      
-  //     return {
-  //       baseline_name: b.baseline_name || b.name || "Unknown Baseline",
-  //       patch_count: patchIds.length,
-  //       cve_count: cveSet.size,
-  //       patches: patchIds,
-  //       cves: Array.from(cveSet),
-  //     };
-  //   });
-  // }, [baselines, patchCveMap]);
-
     const baselineExposure = useMemo(() => {
     // Create a quick lookup map of Patch ID -> Applicable Computers
     const patchCompMap = {};
@@ -176,7 +135,7 @@ export default function BaselineDashboard({
         baseline_name: b.baseline_name || b.name || "Unknown Baseline",
         patch_count: patchIds.length,
         cve_count: cveSet.size,
-        // 🚀 FIX: Use the exact 100% accurate native count from BigFix!
+        //  FIX: Use the exact 100% accurate native count from BigFix!
         computer_count: b.computer_count !== undefined ? b.computer_count : compSet.size, 
         patches: patchIds,
         cves: Array.from(cveSet),
@@ -349,7 +308,7 @@ export default function BaselineDashboard({
                 </th>
               )}
 
-              {/* 🚀 ADD THIS HEADER: */}
+          
               {cols.find((c) => c.id === "computer_count")?.show && (
                 <th className="cursor-pointer" style={{ textAlign: "center", width: colWidth }} onClick={() => handleSort("computer_count")}>
                   Applicable Computers{getSortIcon("computer_count")}
@@ -384,7 +343,7 @@ export default function BaselineDashboard({
                       </span>
                     </td>
                   )}
-                  {/* 🚀 ADD THIS CELL: */}
+                 
                   {cols.find((c) => c.id === "computer_count")?.show && (
                     <td style={{ textAlign: "center", wordBreak: "break-word" }}>
                       <span className="cell-link" onClick={() => navigate("computer", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}>

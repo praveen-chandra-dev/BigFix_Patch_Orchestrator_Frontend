@@ -28,11 +28,7 @@ export default function RiskModule({
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [selectedPatches, setSelectedPatches] = useState({});
 
-  useEffect(() => {
-    if (activeTab !== "dashboard") {
-      setFilters([]);
-    }
-  }, [activeTab]);
+  // FIX: The rogue useEffect that was wiping out your filters on tab change has been removed!
 
   const addBaseline = (data) => {
     setPendingPatches(data.patches);
@@ -300,6 +296,7 @@ export default function RiskModule({
                 refreshTrigger={refreshTrigger}
                 patches={patches}
                 patchLoading={patchLoading}
+                baselines={baselines}
                 addBaseline={addBaseline}
                 selectedMap={selectedPatches}
                 setSelectedMap={setSelectedPatches}
@@ -323,27 +320,36 @@ export default function RiskModule({
                 clearPendingPatches={() => setPendingPatches([])}
                 setEditingBaseline={setEditingBaseline}
                 onGoToPatches={() => setRiskTab("patches")}
-                parentFilters={filters}         // 🚀 FIXED: Passing Filters!
-                parentLogic={globalLogic}       // 🚀 FIXED: Passing Logic!
+                parentFilters={filters}
+                parentLogic={globalLogic}
               />
           </div>
 
           {activeTab === "dashboard" && (
              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <DashboardTab
-                  key={`dash-${refreshTrigger}`} 
-                  baselines={baselines}
-                  activeSection={activeSubTab}
-                  onNavigateSubTab={setRiskSubTab}
-                  setGlobalFilters={setNormalizedFilters}
-                  setGlobalLogic={setGlobalLogic}
-                  parentFilters={filters}
-                  parentLogic={globalLogic}
-                  refreshTrigger={refreshTrigger}
-                  onDataLoaded={() => {
-                    if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
-                  }}
-                />
+                    key={`dash-${refreshTrigger}`} 
+                    baselines={baselines}
+                    activeSection={activeSubTab}
+                    onNavigateSubTab={(section, incomingFilters = [], logic = "AND") => {
+                        // 🚀 FIX: Intercept requests to view patches and bounce the user out of the dashboard!
+                        if (section === "patch") {
+                            setNormalizedFilters(incomingFilters);
+                            setGlobalLogic(logic);
+                            setRiskTab("patches"); 
+                        } else {
+                            setNormalizedFilters(incomingFilters);
+                            setGlobalLogic(logic);
+                            setRiskSubTab(section);
+                        }
+                    }}
+                    parentFilters={filters}
+                    parentLogic={globalLogic}
+                    refreshTrigger={refreshTrigger}
+                    onDataLoaded={() => {
+                      if (!lastUpdated) setLastUpdated(new Date().toLocaleString());
+                    }}
+                  />
              </div>
           )}
         </div>

@@ -209,369 +209,6 @@ function rowsToHTML(rows, title = "Results") {
 }
 
 
-
-// export default function PilotSandboxResult({ title = "Sandbox Result", detailTitle, actionId, onViewDetails }) {
-//   const [lockedId, setLockedId] = useState(null);
-//   const [summary, setSummary] = useState({ success: 0, total: 0 });
-
-//   const finalSyncQueued = useRef(false);
-
-//   const actionDeadRef = useRef(false); // 🚀 ADD THIS: The Instant Brick Wall
-//   const [counts, setCounts] = useState(new Map());
-//   const [loading, setLoading] = useState(true);
-//   const [err, setErr] = useState("");
-//   const [statusBanner, setStatusBanner] = useState(null);
-//   const [hoverKey, setHoverKey] = useState(null);
-  
-//   const [rows, setRows] = useState([]); 
-//   const [uniqueRows, setUniqueRows] = useState([]); 
-  
-//   const [open, setOpen] = useState(false);
-//   const [donutFilter, setDonutFilter] = useState(null);
-//   const refreshAbortRef = useRef(null);
-
-//   const [isActionStopped, setIsActionStopped] = useState(false);
-
-//   useEffect(() => {
-//     if (actionId != null && actionId !== "") {
-//         setLockedId(String(actionId));
-//         setIsActionStopped(false); // Reset stop state for new ID
-//         actionDeadRef.current = false; // 🚀 Reset the wall
-//         finalSyncQueued.current = false;
-//     }
-//   }, [actionId]);
-
-// // const refresh = useCallback(async (abortSignal, isManual = false) => {    setErr("");
-// //     try {
-// //       let idToUse = lockedId;
-
-// //       // 🚀 ALWAYS poll for a newer action if we don't have a hardcoded actionId prop.
-// //       // This synchronizes users on other machines.
-// //       if (!actionId) {
-// //         const last = await getJson(`${API_BASE}/api/actions/last`, abortSignal).catch(()=>null);
-// //         const fetchedLastId = last?.actionId ? String(last.actionId) : null;
-// //         if (fetchedLastId && fetchedLastId !== lockedId) {
-// //           idToUse = fetchedLastId;
-// //           setLockedId(idToUse);
-// //           setIsActionStopped(false); // Unfreeze! A new action was found globally
-// //         }
-// //       }
-
-// //       if (!idToUse) {
-// //         setSummary({ success: 0, total: 0 });
-// //         setCounts(new Map());
-// //         setStatusBanner(null);
-// //         setLoading(false);
-// //         return;
-// //       }
-      
-// //       // 🚀 Only skip fetching results if THIS SPECIFIC action is already done.
-// //       // The block above still allowed us to detect if a *new* one arrived.
-// //      if (isActionStopped && idToUse === lockedId && !isManual) {
-// //           setLoading(false);
-// //           return;
-// //       }
-// //       setLoading(true);
-// //       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
-      
-// //       const allRows = Array.isArray(res?.rows) ? res.rows : [];
-// //       setRows(allRows);
-
-// //       let uRows = [];
-// //       const map = new Map();
-// //       for (const r of allRows) {
-// //           if (r.server && !map.has(r.server)) {
-// //               map.set(r.server, r);
-// //           }
-// //       }
-// //       uRows = Array.from(map.values());
-// //       setUniqueRows(uRows);
-
-// //       const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
-// //       const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
-// //       const success = uRows.length > 0 
-// //           ? uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-// //           : Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
-      
-// //       setCounts(cm);
-// //       setSummary({ success, total });
-      
-// //       try {
-// //         const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
-// //         const s = String(statusRes?.state || "").toLowerCase();
-// //         if (s === 'open' || s === 'running') {
-// //             setStatusBanner({ msg: "Action is open", type: 'running' });
-// //         }
-// //         else if (s === 'expired' || s === 'stopped') {
-// //             setStatusBanner({ msg: "Action Stopped", type: 'completed' });
-// //             setIsActionStopped(true); // Freeze heavy polling for this specific action
-// //         }
-// //         else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
-// //       } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
-// //     } catch (e) {
-// //       if (e.name !== "AbortError") setErr(e.message);
-// //     } finally {
-// //       if (!abortSignal || !abortSignal.aborted) setLoading(false);
-// //     }
-// //   }, [lockedId, isActionStopped, actionId]); 
-
-// const refresh = useCallback(async (abortSignal, isManual = false) => {
-//     setErr("");
-//     try {
-//       let idToUse = lockedId;
-
-//       // 🚀 ALWAYS poll for a newer action if we don't have a hardcoded actionId prop.
-//       // This synchronizes users on other machines.
-//       if (!actionId) {
-//         const last = await getJson(`${API_BASE}/api/actions/last`, abortSignal).catch(()=>null);
-//         const fetchedLastId = last?.actionId ? String(last.actionId) : null;
-//         if (fetchedLastId && fetchedLastId !== lockedId) {
-//           idToUse = fetchedLastId;
-//           setLockedId(idToUse);
-//           setIsActionStopped(false); // Unfreeze! A new action was found globally
-//           actionDeadRef.current = false; // 🚀 Reset the wall
-//           finalSyncQueued.current = false;
-//         }
-//       }
-
-//       if (!idToUse) {
-//         setSummary({ success: 0, total: 0 });
-//         setCounts(new Map());
-//         setStatusBanner(null);
-//         setLoading(false);
-//         return;
-//       }
-      
-//       // 🚀 Only skip fetching results if THIS SPECIFIC action is already done.
-//       // The block above still allowed us to detect if a *new* one arrived.
-//       if (actionDeadRef.current && idToUse === lockedId) {
-//           setLoading(false);
-//           return;
-//       }
-//       setLoading(true);
-//       const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
-      
-//       const allRows = Array.isArray(res?.rows) ? res.rows : [];
-//       setRows(allRows);
-
-//       let uRows = [];
-//       const map = new Map();
-//       for (const r of allRows) {
-//           if (r.server && !map.has(r.server)) {
-//               map.set(r.server, r);
-//           }
-//       }
-//       uRows = Array.from(map.values());
-//       setUniqueRows(uRows);
-
-//       const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
-//       const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
-//       const success = uRows.length > 0 
-//           ? uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-//           : Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
-      
-//       setCounts(cm);
-//       setSummary({ success, total });
-      
-//       // 🚀 FIX 1: If we already know the action is stopped, SKIP the status API!
-//       // Manual refreshes will only update the results counts above, saving network traffic.
-//       if (!isActionStopped || idToUse !== lockedId) {
-//         try {
-//           const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
-//           const s = String(statusRes?.state || "").toLowerCase();
-//           if (s === 'open' || s === 'running') {
-//               setStatusBanner({ msg: "Action is open", type: 'running' });
-//           }
-//           else if (s === 'expired' || s === 'stopped') {
-//               setStatusBanner({ msg: "Action Stopped", type: 'completed' });
-//               actionDeadRef.current = true;
-              
-//               // 🚀 FIX 2: The Final Sync to guarantee a 100% match with the email CSV
-//               if (!finalSyncQueued.current) {
-//                 finalSyncQueued.current = true; 
-//                 setIsActionStopped(true); 
-//             }
-//           }
-//           else setStatusBanner({ msg: `Status: ${s}`, type: 'info' });
-//         } catch { setStatusBanner({ msg: "Status Unknown", type: 'info' }); }
-//       }
-//     } catch (e) {
-//       if (e.name !== "AbortError") setErr(e.message);
-//     } finally {
-//       if (!abortSignal || !abortSignal.aborted) setLoading(false);
-//     }
-//   }, [lockedId, isActionStopped, actionId]);
-
-//   useEffect(() => {
-//     refreshAbortRef.current?.abort();
-//     const ab = new AbortController();
-//     refreshAbortRef.current = ab;
-    
-//     refresh(ab.signal);
-
-//    if (isActionStopped) {
-//         return () => ab.abort();
-//     }
-
-//     // 3. Otherwise, set up the strict 5-minute (300,000ms) interval
-//     const interval = setInterval(() => { 
-//         refresh(ab.signal); 
-//     }, 300000); 
-
-//     return () => { 
-//         ab.abort(); 
-//         clearInterval(interval); 
-//     };
-    
-//     // 🚀 FIX: Removed 'loading' and 'isActionStopped' to stop the infinite loop!
-//   }, [lockedId, refresh]);
-//   const handleContainerClick = (e, statusFilter = null) => {
-//     e.stopPropagation();
-//     if (onViewDetails) {
-//       if (statusFilter) {
-//           const payload = [{ logic: "Single", conds: [{ column: "status", operator: "contains", value: statusFilter }] }];
-//           sessionStorage.setItem("kpi_pending_filter", JSON.stringify(payload));
-//           onViewDetails(lockedId, payload);
-//       } else {
-//           sessionStorage.removeItem("kpi_pending_filter");
-//           onViewDetails(lockedId, []);
-//       }
-//     } else {
-//       setDonutFilter(statusFilter);
-//       setOpen(true);
-//     }
-//   };
-
-//   const donut = useMemo(() => {
-//     const entries = BUCKETS.map((b) => [b, counts.get(b) || 0]).filter(([, v]) => v > 0);
-//     const ordered = [
-//       ...entries.filter(([k]) => ORDER.includes(k)).sort((a, b) => ORDER.indexOf(a[0]) - ORDER.indexOf(b[0])),
-//       ...entries.filter(([k]) => !ORDER.includes(k)).sort((a, b) => a[0].localeCompare(b[0])),
-//     ];
-//     const total = Math.max(1, ordered.reduce((a, [, v]) => a + v, 0));
-//     let acc = 0;
-//     return ordered.map(([key, val]) => {
-//       const start = (acc / total) * 360;
-//       const end = ((acc + val) / total) * 360;
-//       acc += val;
-//       return { key, start, end, fill: pickColor(key), val, pct: Math.round((val / total) * 100) };
-//     });
-//   }, [counts]);
-
-//   const center = useMemo(() => {
-//     let lbl = "Success";
-//     let pt = summary.total > 0 ? Math.round((summary.success / summary.total) * 100) : 0;
-    
-//     if (hoverKey && counts.has(hoverKey)) {
-//       lbl = hoverKey;
-//       pt = Math.round(((counts.get(hoverKey) || 0) / Math.max(1, summary.total)) * 100);
-//     }
-
-//     const shortLabel = lbl.length > 10 ? lbl.substring(0, 8) + '..' : lbl;
-//     return { pct: pt, label: shortLabel, fullLabel: lbl };
-//   }, [hoverKey, counts, summary]);
-
-//   return (
-//     <>
-//       <section className="card reveal" data-reveal>
-//        <div className="flex-row items-center justify-between mb-16">
-//           <h2>{title}</h2>
-//           <button 
-//             className="btn outline small" 
-//             onClick={() => refresh(null, true)} 
-//             title="Refresh Data"
-//             style={{ display: "flex", alignItems: "center", gap: "6px" }}
-//           >
-//             {loading ? (
-//               <>
-//                 <InlineSpinner size={14} variant="dark" />
-//                 <span>Loading...</span>
-//               </>
-//             ) : (
-//               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-//                 <path d="M23 4v6h-6"></path>
-//                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-//               </svg>
-//             )}
-//           </button>
-//         </div>
-//         {err ? <div className="sub error">{err}</div> : !lockedId ? <div className="sub">No data</div> : (
-//           <>
-//             <div className="flex-row items-center justify-between w-full mb-16 wrap gap-12">
-//               <div className="flex-row items-center gap-12">
-//                 <span className="pill green fw-600">{`Success: ${summary.success}/${summary.total}`}</span>
-//                 <span className="muted-text fw-600 text-13">ID: {lockedId}</span>
-//               </div>
-//               <button className="btn outline small" onClick={(e) => handleContainerClick(e, null)}>View Details</button>
-//             </div>
-            
-//             {statusBanner && (<div className={`status-banner ${statusBanner.type}`}>{statusBanner.type === 'running' && <span className="pulse-dot"></span>}{statusBanner.msg}</div>)}
-            
-//             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px'}}>
-              
-//               <div style={{ width: '160px', height: '200px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-//                 <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={(e) => handleContainerClick(e, null)} style={{ cursor: 'pointer', width: '100%', height: '100%' }}>
-//                   <g transform="translate(60,60)">
-//                     {donut.length === 0 ? (
-//                       fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" /> ))
-//                     ) : (
-//                       donut.map((s, i) => {
-//                         const mid = (s.start + s.end) / 2;
-//                         const rad = ((mid - 90) * Math.PI) / 180;
-//                         const explode = hoverKey === s.key ? 3 : 0;
-//                         const dx = explode * Math.cos(rad);
-//                         const dy = explode * Math.sin(rad);
-//                         const d = arcPath(0, 0, 48, s.start, s.end, 30);
-//                         const isFull = d === null;
-                        
-//                         const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: 'pointer' };
-                        
-//                         if (isFull) { return ( <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle} onClick={(e) => handleContainerClick(e, s.key)}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> ); }
-//                         return ( <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} onClick={(e) => handleContainerClick(e, s.key)} style={activeStyle} /> );
-//                       })
-//                     )}
-//                     <text x="0" y="-2" textAnchor="middle" fontSize="14" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>{center.pct}%</text>
-//                     <text x="0" y="12" textAnchor="middle" fontSize="7" fill="var(--muted)" style={{ pointerEvents: 'none' }}>{center.label}</text>
-//                   </g>
-//                 </svg>
-//               </div>
-
-//               <div style={{display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto', paddingRight: '8px' }} className="custom-scrollbar" onMouseLeave={() => setHoverKey(null)}>
-//                 {donut.length === 0 && <div className="muted-text text-12">No Data</div>}
-//                 {donut.map(l => (
-//                    <div 
-//                      key={l.key} 
-//                      onClick={(e) => handleContainerClick(e, l.key)} 
-//                      onMouseEnter={() => setHoverKey(l.key)} 
-//                      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', opacity: hoverKey && hoverKey !== l.key ? 0.4 : 1, transition: '0.2s' }}
-//                      title={DESCRIPTIONS[l.key] || l.key}
-//                    >
-//                       <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: l.fill, flexShrink: 0 }}></span>
-//                       <span style={{ fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-//                          {l.key} ({l.val})
-//                       </span>
-//                    </div>
-//                 ))}
-//               </div>
-
-//             </div> 
-          
-
-//           </>
-//         )}
-//       </section>
-      
-//       <DetailsModal 
-//         open={open} 
-//         onClose={() => { setOpen(false); setDonutFilter(null); }} 
-//         title={detailTitle || `${title} Details`} 
-//         rows={rows} 
-//         initialStatus={donutFilter} 
-//       />
-//     </>
-//   );
-// }
-
 export default function PilotSandboxResult({ title = "Sandbox Result", detailTitle, actions = [], onViewDetails }) {
   const [dataMap, setDataMap] = useState({});
   const [loading, setLoading] = useState(true);
@@ -582,7 +219,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   const deadActionsRef = useRef(new Set()); // Tracks actions that are 100% stopped
 
 
-  // 🚀 Scroll controls for the horizontal deployment row
+  //  Scroll controls for the horizontal deployment row
   const scrollRef = useRef(null);
   const handleScroll = (dir) => {
       if (scrollRef.current) {
@@ -591,7 +228,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
       }
   };
 
-  // 🚀 Calculate the global aggregated KPI numbers
+  //  Calculate the global aggregated KPI numbers
   const globalSummary = useMemo(() => {
     let success = 0, total = 0;
     Object.values(dataMap).forEach(d => { success += (d.summary?.success || 0); total += (d.summary?.total || 0); });
@@ -601,69 +238,6 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   const [openDetailId, setOpenDetailId] = useState(null);
   const [donutFilter, setDonutFilter] = useState(null);
 
-  // const refresh = useCallback(async (abortSignal, isManual = false) => {
-  //   if (!actions || actions.length === 0) {
-  //     setLoading(false);
-  //     setDataMap({});
-  //     return;
-  //   }
-  //   setErr("");
-  //   setLoading(true);
-
-  //   try {
-  //     const newDataMap = { ...dataMap };
-      
-  //     // 🚀 Run concurrent API fetches for all deployments
-  //     await Promise.all(actions.map(async (act) => {
-  //       const idToUse = String(act.actionId);
-  //       if (!idToUse) return;
-
-  //       // Skip heavy polling if this specific action is already complete
-  //       if (deadActionsRef.current.has(idToUse) && !isManual) return;
-
-  //       try {
-  //           const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
-  //           const allRows = Array.isArray(res?.rows) ? res.rows : [];
-            
-  //           const map = new Map();
-  //           allRows.forEach(r => { if (r.server && !map.has(r.server)) map.set(r.server, r); });
-  //           const uRows = Array.from(map.values());
-
-  //           const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
-  //           const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
-  //           const success = uRows.length > 0 
-  //               ? uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-  //               : Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
-
-  //           let statusBanner = { msg: "Status Unknown", type: "info" };
-  //           if (!deadActionsRef.current.has(idToUse) || isManual) {
-  //               try {
-  //                   const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
-  //                   const s = String(statusRes?.state || "").toLowerCase();
-  //                   if (s === 'open' || s === 'running') statusBanner = { msg: "Action is open", type: 'running' };
-  //                   else if (s === 'expired' || s === 'stopped') {
-  //                       statusBanner = { msg: "Action Stopped", type: 'completed' };
-  //                       deadActionsRef.current.add(idToUse);
-  //                   }
-  //                   else statusBanner = { msg: `Status: ${s}`, type: 'info' };
-  //               } catch { }
-  //           } else {
-  //               statusBanner = { msg: "Action Stopped", type: 'completed' };
-  //           }
-
-  //           newDataMap[idToUse] = { summary: { success, total }, counts: cm, rows: uRows, statusBanner, baseline: act.baseline, group: act.group };
-  //       } catch (actErr) {
-  //           console.error(`Failed to fetch action ${idToUse}:`, actErr);
-  //       }
-  //     }));
-      
-  //     setDataMap(newDataMap);
-  //   } catch (e) {
-  //     if (e.name !== "AbortError") setErr(e.message);
-  //   } finally {
-  //     if (!abortSignal || !abortSignal.aborted) setLoading(false);
-  //   }
-  // }, [actions, dataMap]);
 
   const refresh = useCallback(async (abortSignal, isManual = false) => {
     if (!actions || actions.length === 0) {
@@ -677,7 +251,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     try {
       const fetchedData = {};
       
-      // 🚀 Run concurrent API fetches for all deployments
+      // Run concurrent API fetches for all deployments
       await Promise.all(actions.map(async (act) => {
         const idToUse = String(act.actionId);
         if (!idToUse) return;
@@ -721,7 +295,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
         }
       }));
       
-      // 🚀 THE FIX: Use functional state update so `dataMap` isn't in the dependency array!
+      // THE FIX: Use functional state update so `dataMap` isn't in the dependency array!
       setDataMap(prevMap => ({ ...prevMap, ...fetchedData }));
 
     } catch (e) {
@@ -729,7 +303,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     } finally {
       if (!abortSignal || !abortSignal.aborted) setLoading(false);
     }
-  }, [actions]); // 🚀 FIX: Removed dataMap from dependencies to kill the infinite loop
+  }, [actions]); // FIX: Removed dataMap from dependencies to kill the infinite loop
 
   useEffect(() => {
     refreshAbortRef.current?.abort();
@@ -782,7 +356,6 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
         
         {err ? <div className="sub error">{err}</div> : (!actions || actions.length === 0) ? <div className="sub">No data</div> : (
           <>
-            {/* 🚀 AGGREGATED KPI BANNER */}
             <div className="flex-row items-center justify-between w-full mb-16 wrap gap-12" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '16px' }}>
               <div className="flex-row items-center gap-12">
                 <span className="pill green fw-600" style={{ fontSize: '14px', padding: '6px 12px' }}>
@@ -792,67 +365,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
               </div>
             </div>
             
-            {/* 🚀 GRID OF DONUTS */}
-            {/* <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
-                {actions.map(act => {
-                    const actId = String(act.actionId);
-                    const d = dataMap[actId] || { summary: { success: 0, total: 0 }, counts: new Map(), rows: [], statusBanner: null };
-                    
-                    const donut = BUCKETS.map((b) => [b, d.counts.get(b) || 0]).filter(([, v]) => v > 0)
-                        .sort((a, b) => (ORDER.includes(a[0]) ? ORDER.indexOf(a[0]) : 99) - (ORDER.includes(b[0]) ? ORDER.indexOf(b[0]) : 99))
-                        .reduce((acc, [key, val], _, arr) => {
-                            const total = Math.max(1, arr.reduce((a, [, v]) => a + v, 0));
-                            const start = (acc.sum / total) * 360;
-                            const end = ((acc.sum + val) / total) * 360;
-                            acc.res.push({ key, start, end, fill: pickColor(key), val, pct: Math.round((val / total) * 100) });
-                            acc.sum += val;
-                            return acc;
-                        }, { sum: 0, res: [] }).res;
-                        
-                    const pt = d.summary.total > 0 ? Math.round((d.summary.success / d.summary.total) * 100) : 0;
-
-                    return (
-                        <div key={actId} style={{ backgroundColor: 'var(--bg)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                            <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{act.baseline}</div>
-                            <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '12px' }}>➔ {act.group} (ID: {actId})</div>
-                            
-                            {d.statusBanner && (<div className={`status-banner ${d.statusBanner.type}`} style={{ marginBottom: '16px' }}>{d.statusBanner.type === 'running' && <span className="pulse-dot"></span>}{d.statusBanner.msg}</div>)}
-
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                                <div style={{ width: '120px', height: '120px', flexShrink: 0 }}>
-                                    <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={(e) => handleContainerClick(e, actId, null)} style={{ cursor: 'pointer', width: '100%', height: '100%' }}>
-                                        <g transform="translate(60,60)">
-                                            {donut.length === 0 ? (
-                                                fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" /> ))
-                                            ) : (
-                                                donut.map((s, i) => {
-                                                    const dPath = arcPath(0, 0, 48, s.start, s.end, 30);
-                                                    if (!dPath) return ( <g key={i} onClick={(e) => handleContainerClick(e, actId, s.key)}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> );
-                                                    return ( <path key={i} d={dPath} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" onClick={(e) => handleContainerClick(e, actId, s.key)} style={{ cursor: 'pointer', transition: "filter 0.2s" }} onMouseOver={e => e.currentTarget.style.filter = "brightness(1.1)"} onMouseOut={e => e.currentTarget.style.filter = "none"} /> );
-                                                })
-                                            )}
-                                            <text x="0" y="5" textAnchor="middle" fontSize="16" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>{pt}%</text>
-                                        </g>
-                                    </svg>
-                                </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '110px', overflowY: 'auto' }} className="custom-scrollbar">
-                                    {donut.length === 0 && <div className="muted-text text-12">No Data</div>}
-                                    {donut.map(l => (
-                                        <div key={l.key} onClick={(e) => handleContainerClick(e, actId, l.key)} title={DESCRIPTIONS[l.key] || l.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px' }}>
-                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: l.fill, flexShrink: 0 }}></span>
-                                            <span style={{ color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.key} ({l.val})</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                            <button className="btn outline small" style={{ width: '100%', marginTop: '16px' }} onClick={(e) => handleContainerClick(e, actId, null)}>View Details</button>
-                        </div>
-                    );
-                })}
-            </div> */}
-
-            {/* 🚀 HORIZONTAL SCROLLABLE ROW OF DONUTS */}
-            {/* 🚀 HORIZONTAL SCROLLABLE ROW WITH ARROWS */}
+            
+            
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                 
                 {/* Left Arrow */}
@@ -908,8 +422,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                                 border: '1px solid var(--border)', 
                                 display: 'flex', 
                                 flexDirection: 'column',
-                                minWidth: '340px', // 🚀 Lock width so cards don't shrink
-                                flex: '0 0 auto'   // 🚀 Prevent flexbox from shrinking
+                                minWidth: '340px', // Lock width so cards don't shrink
+                                flex: '0 0 auto'   // Prevent flexbox from shrinking
                             }}>
                                 <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{act.baseline}</div>
                                 <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '12px' }}>➔ {act.group} (ID: {actId})</div>
@@ -1097,38 +611,7 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
 
           <div className="tableWrap action-modal-body">
               <table className="action-modal-table">
-                {/* <thead className="kpi-th-sticky">
-                  <tr><th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th><th onClick={() => handleSort('patch')} className="cursor-pointer">Patch {getSortIcon('patch')}</th><th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th><th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th><th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th><th className="w-15p">Issuer</th></tr>
-                </thead>
-                <tbody>
-                  {paginated.length === 0 ? (<tr><td colSpan={6} className="text-center p-20">No results found.</td></tr>) : (paginated.map((r, i) => { 
-                      const shortStatus = classify(r.status); 
-                      
-                      let displayStatus = shortStatus;
-                      if ((shortStatus === 'Waiting' || shortStatus === 'error' || shortStatus === 'Failed') && r.status && r.status.toLowerCase() !== shortStatus.toLowerCase()) {
-                          displayStatus = `${shortStatus} (${r.status})`;
-                      }
-
-                      const isSuccess = shortStatus === 'Fixed' || shortStatus === 'Completed'; 
-                      const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'error'; 
-                      const isRunning = shortStatus === 'Running' || shortStatus === 'Evaluating'; 
-                      
-                      return (
-                          <tr key={i}>
-                              <td>{r.server}</td>
-                              <td>{r.patch}</td>
-                              <td className="whitespace-nowrap">{fmtTime(r.start)}</td>
-                              <td className="whitespace-nowrap">{fmtTime(r.end)}</td>
-                              <td>
-                                  <span className={`status-pill ${isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber'}`} title={DESCRIPTIONS[shortStatus] || r.status}>
-                                      {displayStatus}
-                                  </span>
-                              </td>
-                              <td>{r.issuer}</td>
-                          </tr>
-                      ); 
-                  }))}
-                </tbody> */}
+               
                 <thead className="kpi-th-sticky">
                   <tr>
                     <th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th>

@@ -69,12 +69,7 @@ export default function UserManagement({ onClose, currentUserId }) {
   const colRef = useRef(null);
   const expRef = useRef(null);
 
-  // const [cols, setCols] = useState([
-  //   { id: 'UserID', label: 'User ID', show: true },
-  //   { id: 'LoginName', label: 'Login Name', show: true },
-  //   { id: 'Role', label: 'Role', show: true },
-  //   { id: 'CreatedAt', label: 'Created At', show: true }
-  // ]);
+
 
   const [cols, setCols] = useState([
     { id: 'UserID', label: 'User ID', show: true },
@@ -558,26 +553,7 @@ async function submitPasswordReset(e) {
                         </div>
                     </td>}
 
-                      {/* 2. The new interactive column with FancySelect */}
-                      {/* {cols.find(c=>c.id==='UpdateRole')?.show && <td>
-                        {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
-                          <span className="muted-text text-11" style={{ paddingLeft: '8px' }}>Cannot change</span>
-                        ) : (
-                          <div style={{ minWidth: '180px' }}>
-                            <FancySelect 
-                              options={roleOptions}
-                              value={u.Role}
-                              onChange={(newVal) => handleRoleUpdate(u.UserID, newVal)}
-                              searchable={true}
-                              menuPlacement="bottom"
-                            />
-                          </div>
-                        )}
-                      </td>} */}
-                      {/* 2. The new interactive column with FancySelect */}
-                      {/* 2. The interactive column with Inline Editing */}
-                      {/* 2. The interactive column with Inline Editing */}
-                      {/* 2. The interactive column with Custom Checkbox Dropdown */}
+                      
 {/* 2. The interactive column using FancySelect for Multi-Select */}
 {cols.find(c=>c.id==='UpdateRole')?.show && <td>
   {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
@@ -598,7 +574,7 @@ async function submitPasswordReset(e) {
       </div>
 
       {/* Save and Cancel Buttons */}
-      {/* Save and Cancel Buttons */}
+      
       <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
         <button 
           className="btn pri small flex-row items-center justify-center" 
@@ -636,14 +612,7 @@ async function submitPasswordReset(e) {
   )}
 </td>}
                       {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(u.CreatedAt)}</td>}
-                      {/* <td className="right">
-                        {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
-                          <span className="sub">Protected</span>
-                        ) : (
-                          <button className="btn-icon-sm" onClick={() => handleDelete(u.UserID)} title="Delete User">✕</button>
-                        )}
-                      </td> */}
-                      {/* Replace your current <td className="right"> with this: */}
+                 
                       <td className="right">
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
                           {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (

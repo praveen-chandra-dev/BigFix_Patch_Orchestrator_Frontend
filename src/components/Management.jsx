@@ -360,7 +360,7 @@ export default function Management({ onClose }) {
                     <p className="text-13 muted-text" style={{ marginBottom: '20px' }}>Store your personal BigFix password in the securely to allow Patch Setu to seamlessly perform orchestration actions on your behalf.</p>
                     {!personalCreds.hasCreds && (
                         <div style={{ padding: '12px', backgroundColor: '#fff3e0', border: '1px solid #ffcc80', borderRadius: '6px', color: '#e65100', fontSize: '12px', marginBottom: '20px' }}>
-                           ⚠️ BigFix rejected the stored credentials or you have not configured them yet. Provide your active BigFix password to continue using the app.
+                            BigFix rejected the stored credentials or you have not configured them yet. Provide your active BigFix password to continue using the app.
                         </div>
                     )}
                     <form onSubmit={handleVerifyBf}>
@@ -479,7 +479,7 @@ export default function Management({ onClose }) {
                             ) : <button className="btn" onClick={() => setEditingSection('LDAP')} disabled={saving || editingSection !== null}>Edit</button>}
                         </summary>
                         <div className="grid">
-                            {/* 🚀 BUG FIX: Removed the buggy '|| !ldapEnabled' lock. Now inputs are immediately editable when you click Edit. */}
+                            {/*  BUG FIX: Removed the buggy '|| !ldapEnabled' lock. Now inputs are immediately editable when you click Edit. */}
                             {sections.LDAP.map(it => <Field key={it.key} item={it} value={values[it.key]} onChange={onChange} invalid={invalidMap[it.key]} disabled={editingSection !== 'LDAP'} />)}
                         </div>
                     </details>

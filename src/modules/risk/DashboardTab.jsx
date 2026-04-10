@@ -34,7 +34,6 @@ export default function DashboardTab({
           api.get("/cves"),
         ]);
 
-        // FIXED: Safely extract array out of potential { data: [], pagination: {} } wrapper
         const patchData = Array.isArray(patchRes.data)
           ? patchRes.data
           : patchRes.data?.data || [];
@@ -51,6 +50,11 @@ export default function DashboardTab({
     loadDashboardData();
   }, [refreshTrigger]);
 
+  // Helper function to pass all navigation data up to RiskModule
+  const handleChildNavigation = (section, filters = [], logic = "AND") => {
+    onNavigateSubTab(section, filters, logic);
+  };
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
       {loading && (
@@ -59,11 +63,7 @@ export default function DashboardTab({
 
       {!loading && activeSection === "overview" && (
         <DashboardOverview
-          navigate={(section, filters = [], logic = "AND") => {
-            setGlobalFilters(filters);
-            setGlobalLogic(logic);
-            onNavigateSubTab(section);
-          }}
+          navigate={handleChildNavigation}
           patches={patches}
           cves={uniqueCves}
           baselines={baselines}
@@ -79,11 +79,7 @@ export default function DashboardTab({
           parentFilters={parentFilters}
           parentLogic={parentLogic}
           onDataLoaded={onDataLoaded}
-          navigate={(section, filters = [], logic = "AND") => {
-            setGlobalFilters(filters);
-            setGlobalLogic(logic);
-            onNavigateSubTab(section);
-          }}
+          navigate={handleChildNavigation}
         />
       )}
 
@@ -94,11 +90,7 @@ export default function DashboardTab({
           baselines={baselines}
           parentFilters={parentFilters}
           parentLogic={parentLogic}
-          navigate={(section, filters = [], logic = "AND") => {
-            setGlobalFilters(filters);
-            setGlobalLogic(logic);
-            onNavigateSubTab(section);
-          }}
+          navigate={handleChildNavigation}
         />
       )}
 
@@ -109,11 +101,7 @@ export default function DashboardTab({
           parentFilters={parentFilters}
           parentLogic={parentLogic}
           onDataLoaded={onDataLoaded}
-          navigate={(section, filters = [], logic = "AND") => {
-            setGlobalFilters(filters);
-            setGlobalLogic(logic);
-            onNavigateSubTab(section);
-          }}
+          navigate={handleChildNavigation}
         />
       )}
 
@@ -122,11 +110,7 @@ export default function DashboardTab({
           parentFilters={parentFilters}
           parentLogic={parentLogic}
           onDataLoaded={onDataLoaded}
-          navigate={(section, filters = [], logic = "AND") => {
-            setGlobalFilters(filters);
-            setGlobalLogic(logic);
-            onNavigateSubTab(section);
-          }}
+          navigate={handleChildNavigation}
         />
       )}
     </div>

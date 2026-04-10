@@ -15,6 +15,7 @@ export default function PatchTab({
   patches = [],
   patchLoading,
   addBaseline,
+  baselines = [], 
   selectedMap,
   setSelectedMap,
   parentFilters = [],
@@ -88,6 +89,30 @@ export default function PatchTab({
     checkRole();
   }, []);
 
+  // FIX: Fetch CVEs so PatchTab can map cve_id filters to patches!
+  useEffect(() => {
+    const fetchCvesForPatches = async () => {
+      if (!patches || patches.length === 0) return;
+      
+      setCveLoading(true);
+      try {
+        const payload = patches.map((p) => ({
+          patch_id: p.patch_id,
+          site_name: p.site_name,
+        }));
+        
+        const res = await api.post("/cves/by-patches", { patches: payload });
+        setCves(res.data?.data || []);
+      } catch (err) {
+        console.error("Failed to load CVEs in PatchTab:", err);
+      } finally {
+        setCveLoading(false);
+      }
+    };
+
+    fetchCvesForPatches();
+  }, [patches]);
+
   const getScoreColorClass = (score) => {
     if (score >= 90) return "score-critical";
     if (score >= 75) return "score-high";
@@ -105,7 +130,6 @@ export default function PatchTab({
 
     let derivedSeverity = "UNSPECIFIED";
 
-    // RULE 1: No CVEs → use original severity
     if (cveCount === 0) {
       if (
         ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
@@ -155,6 +179,57 @@ export default function PatchTab({
     setShowPanel(true);
   };
 
+  // const applyFilters = (patch) => {
+  //   if (!parentFilters.length) return true;
+  //   let globalMatch = parentLogic === "OR" ? false : true;
+  //   for (let b of parentFilters) {
+  //     let blockMatch = true;
+  //     let validConds = 0;
+  //     for (let c of b.conds) {
+  //       if (!c.value) continue;
+  //       validConds++;
+  //       let condition = true;
+  //       const search = String(c.value).toLowerCase();
+  //       if (c.column === "cve_id") {
+  //         const list = patchCveMap[getPatchKey(patch)] || [];
+  //         condition = list.some((cve) => cve.toLowerCase().includes(search));
+  //       } else if (c.column === "final_score") {
+  //         const field = Number(patch.final_score || 0);
+  //         const val = Number(c.value);
+  //         if (!isNaN(val)) {
+  //           if (c.operator === ">") condition = field > val;
+  //           else if (c.operator === "<") condition = field < val;
+  //           else if (c.operator === "=") condition = field === val;
+  //           else if (c.operator === ">=") condition = field >= val;
+  //           else if (c.operator === "<=") condition = field <= val;
+  //           else if (c.operator === "!=") condition = field !== val;
+  //         }
+  //       } else {
+  //         let field;
+  //         if (c.column === "status")
+  //           field = patch.status === 1 ? "approved" : "not approved";
+  //         else if (c.column === "severity") {
+  //           const derivedSeverity = getDerivedSeverity(patch).toLowerCase();
+  //           field = derivedSeverity;
+  //         } else field = String(patch[c.column] || "").toLowerCase();
+
+  //         if (c.column === "patch_id") field = field.replace(/^bigfix-/, "");
+
+  //         if (c.operator === "contains") condition = field.includes(search);
+  //         else if (c.operator === "=") condition = field === search;
+  //         else if (c.operator === "!=") condition = field !== search;
+  //       }
+  //       blockMatch = blockMatch && condition;
+  //     }
+  //     if (validConds > 0)
+  //       globalMatch =
+  //         parentLogic === "OR"
+  //           ? globalMatch || blockMatch
+  //           : globalMatch && blockMatch;
+  //   }
+  //   return globalMatch;
+  // };
+
   const applyFilters = (patch) => {
     if (!parentFilters.length) return true;
     let globalMatch = parentLogic === "OR" ? false : true;
@@ -166,10 +241,12 @@ export default function PatchTab({
         validConds++;
         let condition = true;
         const search = String(c.value).toLowerCase();
+        
         if (c.column === "cve_id") {
           const list = patchCveMap[getPatchKey(patch)] || [];
           condition = list.some((cve) => cve.toLowerCase().includes(search));
-        } else if (c.column === "final_score") {
+        } 
+        else if (c.column === "final_score") {
           const field = Number(patch.final_score || 0);
           const val = Number(c.value);
           if (!isNaN(val)) {
@@ -180,7 +257,25 @@ export default function PatchTab({
             else if (c.operator === "<=") condition = field <= val;
             else if (c.operator === "!=") condition = field !== val;
           }
-        } else {
+        } 
+        // ADDED: Natively handle Device Name filtering
+        else if (c.column === "device_name" || c.column === "device") {
+          condition = (patch.applicable_computers || []).some(comp => String(comp).toLowerCase().includes(search));
+        } 
+        // ADDED: Natively handle Baseline Name filtering
+        else if (c.column === "baseline_name") {
+          const bl = baselines.find(x => String(x.baseline_name || x.name || "").toLowerCase() === search);
+          if (!bl) {
+             condition = false;
+          } else {
+             let rP = Array.isArray(bl.patches) ? bl.patches : [];
+             if (typeof bl.patches === 'string') { try { rP = JSON.parse(bl.patches); } catch(e){} }
+             const allBlPatches = rP.map(p => String(p.patch_id || p.id || p).replace(/^BIGFIX-/i, "").trim().toLowerCase());
+             const cleanPatchId = String(patch.patch_id).replace(/^BIGFIX-/i, "").trim().toLowerCase();
+             condition = allBlPatches.includes(cleanPatchId);
+          }
+        } 
+        else {
           let field;
           if (c.column === "status")
             field = patch.status === 1 ? "approved" : "not approved";
@@ -198,10 +293,7 @@ export default function PatchTab({
         blockMatch = blockMatch && condition;
       }
       if (validConds > 0)
-        globalMatch =
-          parentLogic === "OR"
-            ? globalMatch || blockMatch
-            : globalMatch && blockMatch;
+        globalMatch = parentLogic === "OR" ? globalMatch || blockMatch : globalMatch && blockMatch;
     }
     return globalMatch;
   };

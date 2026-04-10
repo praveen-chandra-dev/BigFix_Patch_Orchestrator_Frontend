@@ -137,7 +137,7 @@ export default function CVEDashboard({
         };
       }
 
-      // ✅ FIXED: use cveKey (NOT cve_id)
+      //  FIXED: use cveKey (NOT cve_id)
       map[cveKey].patches.add(patchKey);
 
       const devices = patchDeviceMap[patchKey] || [];

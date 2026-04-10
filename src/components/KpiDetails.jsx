@@ -37,8 +37,7 @@ async function postJSON(url, body) {
   if (!r.ok || j?.ok === false) throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
   return j;
 }
-
-// 🚀 FIXED: Imported the exact buckets used in PilotSandboxResult
+//  FIXED: Imported the exact buckets used in PilotSandboxResult
 const BUCKETS = [
   "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
   "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login", 
@@ -48,7 +47,7 @@ const BUCKETS = [
   "Not Relevant", "Not Reported"
 ];
 
-// 🚀 FIXED: Replaced lazy classify function with the comprehensive one
+//  FIXED: Replaced lazy classify function with the comprehensive one
 function classify(raw) {
   const s = String(raw || "").trim();
   if (!s) return "Not Reported";
@@ -189,108 +188,6 @@ export default function KpiDetails({ context, activeTab }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-//   const fetchData = async () => {
-//       setLoading(true); 
-//       setError(""); 
-//       setSelectedReboots(new Set());
-//       setSelectedHealth(new Set());
-      
-//       try {
-//           const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
-//           let fetchedData = [];
-
-//           if (type === 'success') {
-//               if (!actionId) {
-//                   setError("No Action ID was pinned for the previous deployment.");
-//                   setLoading(false);
-//                   return;
-//               }
-//               const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`);
-//               if (Array.isArray(res?.rows)) {
-//                   const map = new Map();
-//                   for (const r of res.rows) {
-//                       if (r.server && !map.has(r.server)) { map.set(r.server, r); }
-//                   }
-//                   fetchedData = Array.from(map.values());
-//               }
-//           } else if (type === 'health') {
-//               const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
-//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
-//           } else if (type === 'reboot') {
-//               const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
-//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
-//           }
-
-//           setData(fetchedData);
-//           setLastUpdated(new Date().toLocaleString());
-//       } catch (e) {
-//           setError(e.message || "Failed to fetch KPI data.");
-//       } finally {
-//           setLoading(false);
-//       }
-//   };
-
-
-//     const fetchData = async () => {
-//       setLoading(true); 
-//       setError(""); 
-//       setSelectedReboots(new Set());
-//       setSelectedHealth(new Set());
-      
-//       try {
-//           const groupQuery = groupName ? `?group=${encodeURIComponent(groupName)}` : "";
-//           let fetchedData = [];
-
-//           if (type === 'success') {
-//               if (!actionId) {
-//                   setError("No Action ID was pinned for the previous deployment.");
-//                   setLoading(false);
-//                   return;
-//               }
-              
-//               // 🚀 NEW: Split comma-separated IDs into an array and fetch all of them concurrently
-//               const idArray = String(actionId).split(",").map(id => id.trim()).filter(Boolean);
-              
-//               const allResults = await Promise.all(idArray.map(async (id) => {
-//                   try {
-//                       return await getJson(`${API_BASE}/api/actions/${id}/results`);
-//                   } catch (e) {
-//                       console.warn(`Failed to fetch KPI details for action ${id}:`, e);
-//                       return { rows: [] };
-//                   }
-//               }));
-
-//               // Merge all rows from all actions
-//               let combinedRows = [];
-//               allResults.forEach(res => {
-//                   if (Array.isArray(res?.rows)) {
-//                       combinedRows = combinedRows.concat(res.rows);
-//                   }
-//               });
-
-//               // Deduplicate by server name
-//               const map = new Map();
-//               for (const r of combinedRows) {
-//                   if (r.server && !map.has(r.server)) { map.set(r.server, r); }
-//               }
-//               fetchedData = Array.from(map.values());
-              
-//           } else if (type === 'health') {
-//               const data = await getJson(`${API_BASE}/api/health/critical${groupQuery}`);
-//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
-//           } else if (type === 'reboot') {
-//               const data = await getJson(`${API_BASE}/api/health/reboot-pending${groupQuery}`);
-//               fetchedData = Array.isArray(data?.rows) ? data.rows : [];
-//           }
-
-//           setData(fetchedData);
-//           setLastUpdated(new Date().toLocaleString());
-//       } catch (e) {
-//           setError(e.message || "Failed to fetch KPI data.");
-//       } finally {
-//           setLoading(false);
-//       }
-//   };
 
     const fetchData = async () => {
       setLoading(true); 
@@ -313,23 +210,19 @@ export default function KpiDetails({ context, activeTab }) {
                   try { return await getJson(`${API_BASE}/api/actions/${id}/results`); } 
                   catch (e) { return { rows: [] }; }
               }));
-            //   let combinedRows = [];
-            //   allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
-            //   const map = new Map();
-            //   for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-            //   fetchedData = Array.from(map.values());
+            
             let combinedRows = [];
               allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
               
               const map = new Map();
               for (const r of combinedRows) { 
-                  const key = `${r.server}_${r.patch}`; // 🚀 FIX: Deduplicate by Server AND Patch
+                  const key = `${r.server}_${r.patch}`; //  FIX: Deduplicate by Server AND Patch
                   if (r.server && !map.has(key)) map.set(key, r); 
               }
               fetchedData = Array.from(map.values());
               
           } else if (type === 'health') {
-              // 🚀 FIX: If no group is passed (Sidebar click), fetch full infrastructure (Backend will still enforce RBAC!)
+              //  FIX: If no group is passed (Sidebar click), fetch full infrastructure (Backend will still enforce RBAC!)
               if (groupNamesArray.length === 0) {
                   const data = await getJson(`${API_BASE}/api/health/critical`);
                   fetchedData = Array.isArray(data?.rows) ? data.rows : [];
@@ -345,7 +238,7 @@ export default function KpiDetails({ context, activeTab }) {
               }
               
           } else if (type === 'reboot') {
-              // 🚀 FIX: If no group is passed, fetch full infrastructure
+              //  FIX: If no group is passed, fetch full infrastructure
               if (groupNamesArray.length === 0) {
                   const data = await getJson(`${API_BASE}/api/health/reboot-pending`);
                   fetchedData = Array.isArray(data?.rows) ? data.rows : [];
@@ -753,29 +646,12 @@ export default function KpiDetails({ context, activeTab }) {
                                                 )}
                                             </td>
                                         )}
-                                        {/* {cols.map(c => {
-                                            if (!c.show) return null;
-                                            let val = row[c.id];
-                                            
-                                            if (type === 'success' && c.id === 'status') {
-                                                const s = classify(row.status);
-                                                const isSuccess = s === 'Fixed' || s === 'Completed'; 
-                                                const isFail = s === 'Failed' || s === 'error' || s === 'Download Failed'; 
-                                                const isRunning = s === 'Running' || s === 'Evaluating'; 
-                                                const cls = isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber';
-                                                return <td key={c.id}><span className={cls}>{s}</span></td>;
-                                            }
-
-                                            if (c.id === 'issues') return <td key={c.id}>{(row.issues || []).map((issue, idx) => (<span key={idx} className="pill red mr-10 text-11">{issue}</span>))}</td>;
-                                            if (c.id === 'serviceStatus' && type === 'health') { const isWindows = String(row.os || "").toLowerCase().includes("win"); return <td key={c.id}>{isWindows ? (row.serviceStatus || "N/A") : "—"}</td>; }
-                                            if (c.id === 'pendingRestart') return <td key={c.id}>{String(row.pendingRestart ?? row.pending ?? row.restart ?? "N/A")}</td>;
-                                            return <td key={c.id}>{val || "N/A"}</td>;
-                                        })} */}
+                                        
                                         {cols.map(c => {
                                             if (!c.show) return null;
                                             let val = row[c.id];
                                             
-                                            // 🚀 FIX: Handle the status column styling
+                                            //  FIX: Handle the status column styling
                                             if (type === 'success' && c.id === 'status') {
                                                 const s = classify(row.status);
                                                 const isSuccess = s === 'Fixed' || s === 'Completed'; 
