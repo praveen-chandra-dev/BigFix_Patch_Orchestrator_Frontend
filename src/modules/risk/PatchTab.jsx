@@ -5,8 +5,6 @@ import { performExport } from "../../utils/exportUtils";
 import { useToast } from "../../components/common/CustomToast";
 import Paginator from "../../components/common/Paginator";
 import SidePanel from "../../components/common/SidePanel";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCircleInfo, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { parseDescription } from "../../utils/descriptionParser";
 
 const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
@@ -870,12 +868,16 @@ export default function PatchTab({
                               openPatchDetails(p);
                             }}
                           >
-                            <FontAwesomeIcon
-                              icon={faCircleInfo}
+                            {/* Replaced FontAwesome component with native, safe SVG path */}
+                            <svg
+                              xmlns="https://www.w3.org/2000/svg"
+                              viewBox="0 0 512 512"
+                              width="14"
+                              height="14"
+                              fill="currentColor"
                               style={{
                                 cursor: "pointer",
                                 color: "var(--primary)",
-                                fontSize: "14px",
                                 flexShrink: 0,
                               }}
                               title="View Description"
@@ -883,7 +885,9 @@ export default function PatchTab({
                                 e.stopPropagation();
                                 openPatchDetails(p);
                               }}
-                            />
+                            >
+                              <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM216 336h24V272H216c-13.3 0-24-10.7-24-24s10.7-24 24-24h48c13.3 0 24 10.7 24 24v88h8c13.3 0 24 10.7 24 24s-10.7 24-24 24H216c-13.3 0-24-10.7-24-24s10.7-24 24-24zm40-208a32 32 0 1 1 0 64 32 32 0 1 1 0-64z" />
+                            </svg>
                           </span>
                         </div>
                       </td>
