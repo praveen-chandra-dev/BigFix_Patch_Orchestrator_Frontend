@@ -1,0 +1,63 @@
+/* BACKDROP */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+}
+
+/* CARD */
+.modal-card {
+  width: 420px;
+  max-width: 90%;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  overflow: hidden;
+  animation: modalFade 0.2s ease;
+}
+
+/* HEADER */
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* BODY */
+.modal-body {
+  padding: 20px;
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+/* FOOTER */
+.modal-footer {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid #eee;
+}
+
+/* ANIMATION */
+@keyframes modalFade {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

@@ -5,8 +5,8 @@
   --severity-critical: #dc2626;
   --severity-high: #ea580c;
   --severity-important: #d97706;
-  --severity-moderate: #16a34a;
-  --severity-low: #2563eb;
+  --severity-moderate: #facc15;
+  --severity-low: #16a34a;
 }
 
 .severity-critical { 
@@ -29,7 +29,13 @@
 
 .severity-moderate { 
   background: color-mix(in srgb, var(--severity-moderate) 15%, transparent); 
-  color: var(--severity-moderate); 
+  color: #a16207; 
+  border: 1px solid var(--severity-moderate); 
+}
+
+.severity-medium { 
+  background: color-mix(in srgb, var(--severity-moderate) 15%, transparent); 
+  color: #a16207; 
   border: 1px solid var(--severity-moderate); 
 }
 
@@ -37,6 +43,18 @@
   background: color-mix(in srgb, var(--severity-low) 15%, transparent); 
   color: var(--severity-low); 
   border: 1px solid var(--severity-low); 
+}
+
+.severity-unspecified {
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  color: var(--muted);
+  border: 1px solid var(--muted);
+}
+
+.severity-unknown {
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
 }
 
 .risk-container {
@@ -303,6 +321,24 @@ tbody tr.selected-row td {
   background: color-mix(in srgb, var(--success) 15%, transparent);
   color: var(--success);
   border: 1px solid var(--success);
+}
+
+.status-approved {
+  background: #e6f4ea;
+  color: #1e7e34;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-pending {
+  background: #fff4e5;
+  color: #b26a00;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* =====================================================
@@ -620,6 +656,12 @@ tbody tr.selected-row td {
   background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
+.baseline-details .patch-order-item {
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: left;
+}
 /* =====================================================
    CVE TABLE
 ===================================================== */
@@ -729,24 +771,23 @@ tbody tr.selected-row td {
 }
 
 .risk-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  width: 100%;
+  position: sticky; 
+    top: -24px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 0 16px;
+    z-index: 50;
+    border-bottom: 1px solid var(--border);
+    margin-top: -24px;
+    margin-bottom: 24px;
 }
 
-.btn { 
-  margin-bottom: 10px;
-  position: relative; overflow: hidden; border: 1px solid var(--border); background: var(--info); 
-  color: var(--panel); padding: 0 16px; height: 34px; border-radius: var(--radius-sm); 
-  font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s ease; 
-  display: inline-flex; gap: 8px; align-items: center; justify-content: center; 
-  white-space: nowrap; font-family: "Inter", sans-serif;
-}
+
 
 .risk-reset-btn {
-  position: relative; overflow: hidden; border: 1px solid var(--border); background: var(--info); 
+  position: relative; overflow: hidden; border: 1px solid var(--border); 
   color: var(--panel); padding: 0 16px; height: 34px; border-radius: var(--radius-sm); 
   font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.2s ease; 
   display: inline-flex; gap: 8px; align-items: center; justify-content: center; 
@@ -787,3 +828,111 @@ margin:20px auto;
 0%{transform:rotate(0deg);}
 100%{transform:rotate(360deg);}
 }
+
+/* clickable values in tables */
+.cell-link {
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cell-link:hover {
+  text-decoration: underline;
+  color: #2563eb;
+}
+
+.custom-toast {
+  position: fixed;
+  bottom: 20px;   /* ⬅️ moved from top → bottom */
+  right: 24px;
+
+  min-width: 320px;
+  max-width: 420px;
+
+  background: #1f2937;
+  color: white;
+
+  padding: 16px 18px;
+  border-radius: 8px;
+
+  font-size: 14px;
+  font-weight: 500;
+
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+
+  z-index: 999999;
+
+  opacity: 0;
+  transform: translateY(20px) scale(0.98); /* animate from bottom */
+  transition: all 0.25s ease;
+}
+
+.custom-toast.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.custom-toast.error {
+  background: #dc2626;
+}
+
+.custom-toast.success {
+  background: #16a34a;
+}
+
+
+.custom-toast.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* content layout */
+.toast-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+/* close button */
+.toast-close {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+/* variants */
+.custom-toast.error {
+  background: #dc2626;
+}
+
+.custom-toast.success {
+  background: #16a34a;
+}
+
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 3px solid rgba(255, 255, 255, 0.4);
+  border-top: 3px solid #ffffff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+

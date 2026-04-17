@@ -1,87 +1,115 @@
-import { useState, useMemo } from "react";
+// src/modules/risk/PatchTab.jsx
+import { useState, useMemo, useRef, useEffect } from "react";
 import api from "../../api/api";
+import { performExport } from "../../utils/exportUtils";
+import { useToast } from "../../components/common/CustomToast";
+import Paginator from "../../components/common/Paginator";
+import SidePanel from "../../components/common/SidePanel";
+import { parseDescription } from "../../utils/descriptionParser";
 
 const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
 
-export default function PatchTab({ patches, patchLoading, addBaseline }) {
+export default function PatchTab({
+  patches = [],
+  patchLoading,
+  addBaseline,
+  baselines = [], 
+  selectedMap,
+  setSelectedMap,
+  parentFilters = [],
+  parentLogic = "AND",
+  isEditingBaseline,
+  navigate,
+}) {
   const [cves, setCves] = useState([]);
-  const [modalData, setModalData] = useState(null);
-
-  const [selectedMap, setSelectedMap] = useState({});
 
   const [cveLoading, setCveLoading] = useState(false);
 
-  const [sortConfig, setSortConfig] = useState({
-    key: null,
-    direction: "asc",
-  });
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
 
-  const [filters, setFilters] = useState([
-    { column: "patch_id", operator: "contains", value: "", logic: "AND" },
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  const [showColDrop, setShowColDrop] = useState(false);
+  const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState("CSV");
+  const colRef = useRef(null);
+  const expRef = useRef(null);
+  const headerCheckboxRef = useRef(null);
+  const [isMaster, setIsMaster] = useState(false);
+  const [selectedPatch, setSelectedPatch] = useState(null);
+  const [showPanel, setShowPanel] = useState(false);
+
+  const { showToast } = useToast();
+
+  const [cols, setCols] = useState([
+    { id: "patch_id", label: "Patch ID", show: true, width: "140px" },
+    { id: "patch_name", label: "Name", show: true, width: "auto" },
+    { id: "site_name", label: "Site", show: true, width: "160px" },
+    { id: "applicable_count", label: "Applicable", show: true, width: "100px" },
+    { id: "cve_count", label: "CVEs", show: true, width: "70px" },
+    { id: "severity", label: "Severity", show: true, width: "120px" },
+    { id: "final_score", label: "Score", show: true, width: "80px" },
+    { id: "status", label: "Status", show: true, width: "110px" },
   ]);
 
-  /* =======================================================
-     PATCH → CVE MAP
-  ======================================================= */
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (colRef.current && !colRef.current.contains(e.target))
+        setShowColDrop(false);
+      if (expRef.current && !expRef.current.contains(e.target))
+        setShowExpDrop(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
 
   const patchCveMap = useMemo(() => {
     const map = {};
-
     cves.forEach((c) => {
       const key = `${c.patch_id}-${c.site_name}`;
-
       if (!map[key]) map[key] = [];
-
       map[key].push(c.cve_id);
     });
-
     return map;
   }, [cves]);
 
-  if (patchLoading) return <div>Loading patches...</div>;
-
-  /* =======================================================
-     LAZY CVE LOADER
-  ======================================================= */
-
-  const loadPatchCves = async (patch) => {
-    const key = getPatchKey(patch);
-
-    if (patchCveMap[key]) return;
-
-    setCveLoading(true);
-
-    try {
-      const res = await api.post("/cves/by-patches", {
-        patches: [
-          {
-            patch_id: patch.patch_id,
-            site_name: patch.site_name,
-          },
-        ],
-      });
-
-      const data = res.data?.data || [];
-
-      setCves((prev) => [...prev, ...data]);
-    } catch (err) {
-      console.error("CVE fetch failed", err);
-    } finally {
-      setCveLoading(false);
+  useEffect(() => {
+    async function checkRole() {
+      try {
+        const res = await api.get("/sites");
+        if (res.data?.isMaster) setIsMaster(true);
+        else setIsMaster(false);
+      } catch (e) {
+        setIsMaster(false);
+      }
     }
-  };
+    checkRole();
+  }, []);
 
-  /* =======================================================
-     SEVERITY & SCORE HELPERS
-  ======================================================= */
+  // FIX: Fetch CVEs so PatchTab can map cve_id filters to patches!
+  useEffect(() => {
+    const fetchCvesForPatches = async () => {
+      if (!patches || patches.length === 0) return;
+      
+      setCveLoading(true);
+      try {
+        const payload = patches.map((p) => ({
+          patch_id: p.patch_id,
+          site_name: p.site_name,
+        }));
+        
+        const res = await api.post("/cves/by-patches", { patches: payload });
+        setCves(res.data?.data || []);
+      } catch (err) {
+        console.error("Failed to load CVEs in PatchTab:", err);
+      } finally {
+        setCveLoading(false);
+      }
+    };
 
-  const getSeverityFromScore = (score) => {
-    if (score >= 90) return "CRITICAL";
-    if (score >= 75) return "HIGH";
-    if (score >= 60) return "IMPORTANT";
-    if (score >= 40) return "MODERATE";
-    return "LOW";
-  };
+    fetchCvesForPatches();
+  }, [patches]);
 
   const getScoreColorClass = (score) => {
     if (score >= 90) return "score-critical";
@@ -91,18 +119,46 @@ export default function PatchTab({ patches, patchLoading, addBaseline }) {
     return "score-low";
   };
 
-  /* =======================================================
-     SELECTION
-  ======================================================= */
+  const getDerivedSeverity = (patch) => {
+    const score = Number(patch.final_score || 0);
+    const cveCount = Number(patch.cve_count || 0);
+    const sevRaw = String(patch.severity || patch.source_severity || "")
+      .toUpperCase()
+      .trim();
+
+    let derivedSeverity = "UNSPECIFIED";
+
+    if (cveCount === 0) {
+      if (
+        ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
+      ) {
+        derivedSeverity = sevRaw;
+      }
+    }
+    // RULE 2: Score overrides
+    else if (score > 0) {
+      if (score >= 90) derivedSeverity = "CRITICAL";
+      else if (score >= 75) derivedSeverity = "HIGH";
+      else if (score >= 60) derivedSeverity = "IMPORTANT";
+      else if (score >= 40) derivedSeverity = "MODERATE";
+      else derivedSeverity = "LOW";
+    }
+    // RULE 3: fallback
+    else if (
+      ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
+    ) {
+      derivedSeverity = sevRaw;
+    }
+
+    return derivedSeverity;
+  };
 
   const toggleSelect = (patch) => {
     setSelectedMap((prev) => {
-      const updated = { ...prev };
-      const key = getPatchKey(patch);
-
+      const updated = { ...prev },
+        key = getPatchKey(patch);
       if (updated[key]) delete updated[key];
       else updated[key] = patch;
-
       return updated;
     });
   };
@@ -110,476 +166,1018 @@ export default function PatchTab({ patches, patchLoading, addBaseline }) {
   const toggleSelectAll = (visible) => {
     setSelectedMap((prev) => {
       const updated = { ...prev };
-
       const allSelected = visible.every((p) => updated[getPatchKey(p)]);
-
-      if (allSelected) {
-        visible.forEach((p) => delete updated[getPatchKey(p)]);
-      } else {
-        visible.forEach((p) => (updated[getPatchKey(p)] = p));
-      }
-
+      if (allSelected) visible.forEach((p) => delete updated[getPatchKey(p)]);
+      else visible.forEach((p) => (updated[getPatchKey(p)] = p));
       return updated;
     });
   };
-
-  const selectedCount = Object.keys(selectedMap).length;
-
-  /* =======================================================
-     FILTERS
-  ======================================================= */
-
-  const updateFilter = (index, key, value) => {
-    const updated = [...filters];
-    updated[index][key] = value;
-
-    if (key === "column" && value === "final_score") {
-      updated[index].operator = ">";
-    }
-
-    if (key === "column" && value !== "final_score") {
-      updated[index].operator = "contains";
-    }
-
-    setFilters(updated);
+  const openPatchDetails = (p) => {
+    setSelectedPatch(p);
+    setShowPanel(true);
   };
 
-  const addFilterRow = () => {
-    setFilters((prev) => [
-      ...prev,
-      { column: "patch_id", operator: "contains", value: "", logic: "AND" },
-    ]);
-  };
+  // const applyFilters = (patch) => {
+  //   if (!parentFilters.length) return true;
+  //   let globalMatch = parentLogic === "OR" ? false : true;
+  //   for (let b of parentFilters) {
+  //     let blockMatch = true;
+  //     let validConds = 0;
+  //     for (let c of b.conds) {
+  //       if (!c.value) continue;
+  //       validConds++;
+  //       let condition = true;
+  //       const search = String(c.value).toLowerCase();
+  //       if (c.column === "cve_id") {
+  //         const list = patchCveMap[getPatchKey(patch)] || [];
+  //         condition = list.some((cve) => cve.toLowerCase().includes(search));
+  //       } else if (c.column === "final_score") {
+  //         const field = Number(patch.final_score || 0);
+  //         const val = Number(c.value);
+  //         if (!isNaN(val)) {
+  //           if (c.operator === ">") condition = field > val;
+  //           else if (c.operator === "<") condition = field < val;
+  //           else if (c.operator === "=") condition = field === val;
+  //           else if (c.operator === ">=") condition = field >= val;
+  //           else if (c.operator === "<=") condition = field <= val;
+  //           else if (c.operator === "!=") condition = field !== val;
+  //         }
+  //       } else {
+  //         let field;
+  //         if (c.column === "status")
+  //           field = patch.status === 1 ? "approved" : "not approved";
+  //         else if (c.column === "severity") {
+  //           const derivedSeverity = getDerivedSeverity(patch).toLowerCase();
+  //           field = derivedSeverity;
+  //         } else field = String(patch[c.column] || "").toLowerCase();
 
-  const removeFilterRow = (index) => {
-    if (filters.length === 1) return;
+  //         if (c.column === "patch_id") field = field.replace(/^bigfix-/, "");
 
-    setFilters(filters.filter((_, i) => i !== index));
-  };
-
-  const resetFilters = () => {
-    setFilters([
-      { column: "patch_id", operator: "contains", value: "", logic: "AND" },
-    ]);
-  };
+  //         if (c.operator === "contains") condition = field.includes(search);
+  //         else if (c.operator === "=") condition = field === search;
+  //         else if (c.operator === "!=") condition = field !== search;
+  //       }
+  //       blockMatch = blockMatch && condition;
+  //     }
+  //     if (validConds > 0)
+  //       globalMatch =
+  //         parentLogic === "OR"
+  //           ? globalMatch || blockMatch
+  //           : globalMatch && blockMatch;
+  //   }
+  //   return globalMatch;
+  // };
 
   const applyFilters = (patch) => {
-    return filters.reduce((result, filter, index) => {
-      let condition = true;
-
-      if (filter.column === "cve_id") {
-        const list = patchCveMap[getPatchKey(patch)] || [];
-        const val = filter.value.toLowerCase();
-
-        condition = list.some((cve) => cve.toLowerCase().includes(val));
-      } else if (filter.column === "final_score") {
-        const field = Number(patch.final_score || 0);
-        const val = Number(filter.value);
-
-        if (isNaN(val)) return result;
-
-        if (filter.operator === ">") condition = field > val;
-        else if (filter.operator === "<") condition = field < val;
-        else if (filter.operator === "=") condition = field === val;
-        else if (filter.operator === ">=") condition = field >= val;
-        else if (filter.operator === "<=") condition = field <= val;
-      } else {
-        let field = String(patch[filter.column] || "").toLowerCase();
-        let val = filter.value.toLowerCase();
-
-        /* PATCH ID NORMALIZATION */
-        if (filter.column === "patch_id") {
-          field = field.replace(/^bigfix-/, "");
-
-          if (!val.startsWith("bigfix-")) {
-            val = val;
+    if (!parentFilters.length) return true;
+    let globalMatch = parentLogic === "OR" ? false : true;
+    for (let b of parentFilters) {
+      let blockMatch = true;
+      let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase();
+        
+        if (c.column === "cve_id") {
+          const list = patchCveMap[getPatchKey(patch)] || [];
+          condition = list.some((cve) => cve.toLowerCase().includes(search));
+        } 
+        else if (c.column === "final_score") {
+          const field = Number(patch.final_score || 0);
+          const val = Number(c.value);
+          if (!isNaN(val)) {
+            if (c.operator === ">") condition = field > val;
+            else if (c.operator === "<") condition = field < val;
+            else if (c.operator === "=") condition = field === val;
+            else if (c.operator === ">=") condition = field >= val;
+            else if (c.operator === "<=") condition = field <= val;
+            else if (c.operator === "!=") condition = field !== val;
           }
+        } 
+        // ADDED: Natively handle Device Name filtering
+        else if (c.column === "device_name" || c.column === "device") {
+          condition = (patch.applicable_computers || []).some(comp => String(comp).toLowerCase().includes(search));
+        } 
+        // ADDED: Natively handle Baseline Name filtering
+        else if (c.column === "baseline_name") {
+          const bl = baselines.find(x => String(x.baseline_name || x.name || "").toLowerCase() === search);
+          if (!bl) {
+             condition = false;
+          } else {
+             let rP = Array.isArray(bl.patches) ? bl.patches : [];
+             if (typeof bl.patches === 'string') { try { rP = JSON.parse(bl.patches); } catch(e){} }
+             const allBlPatches = rP.map(p => String(p.patch_id || p.id || p).replace(/^BIGFIX-/i, "").trim().toLowerCase());
+             const cleanPatchId = String(patch.patch_id).replace(/^BIGFIX-/i, "").trim().toLowerCase();
+             condition = allBlPatches.includes(cleanPatchId);
+          }
+        } 
+        else {
+          let field;
+          if (c.column === "status")
+            field = patch.status === 1 ? "approved" : "not approved";
+          else if (c.column === "severity") {
+            const derivedSeverity = getDerivedSeverity(patch).toLowerCase();
+            field = derivedSeverity;
+          } else field = String(patch[c.column] || "").toLowerCase();
+
+          if (c.column === "patch_id") field = field.replace(/^bigfix-/, "");
+
+          if (c.operator === "contains") condition = field.includes(search);
+          else if (c.operator === "=") condition = field === search;
+          else if (c.operator === "!=") condition = field !== search;
         }
-
-        if (filter.operator === "contains") condition = field.includes(val);
-        else if (filter.operator === "=") condition = field === val;
-        else if (filter.operator === "does not contain")
-          condition = !field.includes(val);
+        blockMatch = blockMatch && condition;
       }
-
-      if (index === 0) return condition;
-
-      if (filter.logic === "AND") return result && condition;
-      if (filter.logic === "OR") return result || condition;
-
-      return result;
-    }, true);
+      if (validConds > 0)
+        globalMatch = parentLogic === "OR" ? globalMatch || blockMatch : globalMatch && blockMatch;
+    }
+    return globalMatch;
   };
 
-  /* =======================================================
-     SORT
-  ======================================================= */
-
-  const handleSort = (key) => {
+  const handleSort = (key) =>
     setSortConfig((prev) => ({
       key,
       direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
     }));
+
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key)
+      return <span className="muted-text ml-6">↕</span>;
+    return (
+      <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>
+    );
   };
 
-  const getSortArrow = (key) => {
-    if (sortConfig.key !== key) return "";
-    return sortConfig.direction === "asc" ? " ↑" : " ↓";
+  const filteredPatches = [...(patches || [])]
+    .filter(applyFilters)
+    .sort((a, b) => {
+      if (!sortConfig.key) return 0;
+      let aVal, bVal;
+      if (sortConfig.key === "patch_id") {
+        aVal = String(a.patch_id || "")
+          .replace(/^BIGFIX-/, "")
+          .toLowerCase();
+        bVal = String(b.patch_id || "")
+          .replace(/^BIGFIX-/, "")
+          .toLowerCase();
+      } else if (sortConfig.key === "final_score") {
+        aVal = Number(a.final_score || 0);
+        bVal = Number(b.final_score || 0);
+      } else if (sortConfig.key === "applicable_count") {
+        aVal = Number(a.applicable_count || 0);
+        bVal = Number(b.applicable_count || 0);
+      } else if (sortConfig.key === "cve_count") {
+        const keyA = getPatchKey(a);
+        const keyB = getPatchKey(b);
+        aVal = a.cve_count ?? (patchCveMap[keyA]?.length || 0);
+        bVal = b.cve_count ?? (patchCveMap[keyB]?.length || 0);
+      } else if (sortConfig.key === "status") {
+        aVal = Number(a.status || 0);
+        bVal = Number(b.status || 0);
+      } else {
+        aVal = String(a[sortConfig.key] || "").toLowerCase();
+        bVal = String(b[sortConfig.key] || "").toLowerCase();
+      }
+      if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+
+  const allSelected =
+    filteredPatches.length > 0 &&
+    filteredPatches.every((p) => selectedMap[getPatchKey(p)]);
+  const someSelected =
+    filteredPatches.some((p) => selectedMap[getPatchKey(p)]) && !allSelected;
+
+  const paginatedPatches = filteredPatches.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage,
+  );
+  const selectedCount = Object.keys(selectedMap).length;
+
+  const hasApprovable = Object.values(selectedMap).some((p) => p.status !== 1);
+  const hasUnapprovable = Object.values(selectedMap).some(
+    (p) => p.status !== 0,
+  );
+
+  useEffect(() => {
+    if (headerCheckboxRef.current)
+      headerCheckboxRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  const handleExport = (scope) => {
+    setShowExpDrop(false);
+    let dataToExport = [];
+    if (scope === "page") dataToExport = paginatedPatches;
+    else if (scope === "filtered") dataToExport = filteredPatches;
+    else dataToExport = patches;
+
+    performExport(
+      dataToExport,
+      cols,
+      exportFormat,
+      "patches_export",
+      (p, cId) => {
+        if (cId === "severity") {
+          return getDerivedSeverity(p);
+        }
+        if (cId === "cve_count")
+          return patchCveMap[getPatchKey(p)]?.length || 0;
+        if (cId === "status")
+          return p.status === 1 ? "Approved" : "Not Approved";
+        return p[cId];
+      },
+    );
   };
-
-  const filteredPatches = [...patches].filter(applyFilters).sort((a, b) => {
-    if (!sortConfig.key) return 0;
-
-    let aVal;
-    let bVal;
-
-    /* PATCH ID SORT */
-    if (sortConfig.key === "patch_id") {
-      aVal = String(a.patch_id || "")
-        .replace(/^BIGFIX-/, "")
-        .toLowerCase();
-      bVal = String(b.patch_id || "")
-        .replace(/^BIGFIX-/, "")
-        .toLowerCase();
-    } else if (sortConfig.key === "final_score") {
-      /* SCORE SORT */
-      aVal = Number(a.final_score || 0);
-      bVal = Number(b.final_score || 0);
-    } else if (sortConfig.key === "applicable_count") {
-      /* APPLICABLE COMPUTERS SORT */
-      aVal = Number(a.applicable_count || 0);
-      bVal = Number(b.applicable_count || 0);
-    } else if (sortConfig.key === "cve_count") {
-      /* CVE COUNT SORT */
-      const keyA = getPatchKey(a);
-      const keyB = getPatchKey(b);
-
-      aVal = a.cve_count ?? (patchCveMap[keyA]?.length || 0);
-      bVal = b.cve_count ?? (patchCveMap[keyB]?.length || 0);
-    } else {
-      /* DEFAULT STRING SORT */
-      aVal = String(a[sortConfig.key] || "").toLowerCase();
-      bVal = String(b[sortConfig.key] || "").toLowerCase();
-    }
-
-    if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-    if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-
-    return 0;
-  });
-
-  const totalCount = patches.length;
-
-  /* =======================================================
-     BASELINE
-  ======================================================= */
 
   const approvePatches = () => {
     if (selectedCount === 0) return;
-
-    addBaseline({
-      patches: Object.values(selectedMap),
-    });
-
+    const hasUnapproved = Object.values(selectedMap).some(
+      (p) => p.status !== 1,
+    );
+    if (hasUnapproved) {
+      showToast(
+        "Only approved patches can be used to create baseline",
+        "error",
+      );
+      return;
+    }
+    addBaseline({ patches: Object.values(selectedMap) });
     setSelectedMap({});
   };
 
-  /* =======================================================
-     RENDER
-  ======================================================= */
+  const handleApprovePatches = async (approve = true) => {
+    if (selectedCount === 0) return;
+    const filtered = Object.values(selectedMap).filter((p) =>
+      approve ? p.status !== 1 : p.status !== 0,
+    );
+    if (filtered.length === 0) return;
+    try {
+      const payload = filtered.map((p) => ({
+        patch_id: p.patch_id,
+        site_name: p.site_name,
+      }));
+      await api.post("/patches/approve", { patches: payload, approve });
+      filtered.forEach((p) => {
+        p.status = approve ? 1 : 0;
+      });
+      setSelectedMap({});
+    } catch (err) {
+      console.error("Approve patches failed:", err);
+    }
+  };
+
+  if (patchLoading)
+    return <div className="app-loading-content">Loading patches...</div>;
 
   return (
-    <div>
-      {/* FILTERS */}
+    <div
+      style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}
+    >
+      {/* TOOLBAR */}
+      <div
+        className="grid-toolbar"
+        style={{ margin: "0 0 16px 0", padding: 0 }}
+      >
+        <div
+          className="grid-toolbar-right"
+          style={{ display: "flex", gap: "12px", marginLeft: "auto" }}
+        >
+          <button
+            className="btn outline sec small"
+            disabled={!isMaster || !hasApprovable}
+            onClick={() => handleApprovePatches(true)}
+            style={{
+              color: selectedCount === 0 ? "var(--muted)" : "var(--text)",
+              borderColor: "var(--border)",
+            }}
+          >
+            Approve Patches
+          </button>
+          <button
+            className="btn outline sec small"
+            disabled={!isMaster || !hasUnapprovable}
+            onClick={() => handleApprovePatches(false)}
+          >
+            Unapprove
+          </button>
+          <button
+            className="btn outline sec small"
+            disabled={selectedCount === 0}
+            onClick={approvePatches}
+            style={{
+              color: selectedCount === 0 ? "var(--muted)" : "var(--text)",
+              borderColor: "var(--border)",
+            }}
+          >
+            {isEditingBaseline ? "Add Patches" : "Create Baseline"}
+          </button>
 
-      <div className="risk-filter-container">
-        {filters.map((filter, index) => (
-          <div key={index} className="risk-filter-row">
-            {index > 0 && (
-              <select
-                value={filter.logic}
-                onChange={(e) => updateFilter(index, "logic", e.target.value)}
+          {/* Columns Dropdown */}
+          <div className="dropdown" ref={colRef}>
+            <button
+              className="btn outline sec small"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowColDrop(!showColDrop);
+                setShowExpDrop(false);
+              }}
+              title="Columns"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                width="16"
+                height="16"
               >
-                <option value="AND">AND</option>
-                <option value="OR">OR</option>
-              </select>
-            )}
-
-            <select
-              value={filter.column}
-              onChange={(e) => updateFilter(index, "column", e.target.value)}
-            >
-              <option value="patch_id">Patch ID</option>
-              <option value="patch_name">Patch Name</option>
-              <option value="severity">Severity</option>
-              <option value="vendor">Vendor</option>
-              <option value="final_score">Score</option>
-              <option value="cve_id">CVE ID</option>
-            </select>
-
-            <select
-              value={filter.operator}
-              onChange={(e) => updateFilter(index, "operator", e.target.value)}
-            >
-              {filter.column === "final_score" ? (
-                <>
-                  <option value=">">greater than</option>
-                  <option value="<">less than</option>
-                  <option value="=">equals</option>
-                  <option value=">=">greater or equal</option>
-                  <option value="<=">less or equal</option>
-                </>
-              ) : (
-                <>
-                  <option value="contains">contains</option>
-                  <option value="=">equals</option>
-                  <option value="does not contain">does not contain</option>
-                </>
-              )}
-            </select>
-
-            <input
-              value={filter.value}
-              onChange={(e) => updateFilter(index, "value", e.target.value)}
-              placeholder="Enter value"
-            />
-
-            {index === filters.length - 1 && (
-              <button onClick={addFilterRow}>+</button>
-            )}
-
-            {filters.length > 1 && (
-              <button onClick={() => removeFilterRow(index)}>−</button>
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+              </svg>
+              &nbsp; Columns
+            </button>
+            {showColDrop && (
+              <div
+                className="dropdown-menu show"
+                style={{
+                  minWidth: "220px",
+                  padding: "12px",
+                  right: 0,
+                  zIndex: 10,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
+                  {cols.map((col, i) => (
+                    <label
+                      key={col.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        cursor: "pointer",
+                        padding: "6px 12px",
+                        borderRadius: "4px",
+                        transition: "0.2s",
+                      }}
+                      onMouseOver={(e) =>
+                        (e.currentTarget.style.background = "#f8fafc")
+                      }
+                      onMouseOut={(e) =>
+                        (e.currentTarget.style.background = "transparent")
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        className="custom-checkbox"
+                        checked={col.show}
+                        onChange={(e) => {
+                          const newCols = [...cols];
+                          newCols[i].show = e.target.checked;
+                          setCols(newCols);
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          color: "var(--text)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {col.label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-        ))}
 
-        <button className="risk-reset-btn" onClick={resetFilters}>
-          Reset Filters
-        </button>
+          {/* Export Dropdown */}
+          <div className="dropdown" ref={expRef}>
+            <button
+              className="btn outline small"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowExpDrop(!showExpDrop);
+                setShowColDrop(false);
+              }}
+              title="Export"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                width="16"
+                height="16"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+              </svg>
+              &nbsp; Export
+            </button>
+            {showExpDrop && (
+              <div
+                className="dropdown-menu show"
+                style={{
+                  width: "280px",
+                  padding: "16px",
+                  right: 0,
+                  zIndex: 10,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    marginBottom: "12px",
+                    letterSpacing: "0.05em",
+                  }}
+                >
+                  Format
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr",
+                    gap: "8px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
+                    <button
+                      key={fmt}
+                      className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
+                      style={{ fontSize: "11px", height: "32px", padding: 0 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExportFormat(fmt);
+                      }}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
+                </div>
+                <div
+                  style={{
+                    height: "1px",
+                    background: "var(--border)",
+                    marginBottom: "16px",
+                  }}
+                ></div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    marginBottom: "12px",
+                    letterSpacing: "0.05em",
+                  }}
+                >
+                  Scope
+                </div>
+                <button className="item" onClick={() => handleExport("page")}>
+                  Current Page
+                </button>
+                <button
+                  className="item"
+                  onClick={() => handleExport("filtered")}
+                >
+                  Filtered Data
+                </button>
+                <button className="item" onClick={() => handleExport("all")}>
+                  All Data
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* APPROVE */}
-
-      <div className="risk-header-info">
-        Selected: {selectedCount} / {totalCount} Total Patches
-      </div>
-
-      <div className="risk-approve-container">
-        <button
-          className="btn"
-          disabled={selectedCount === 0}
-          onClick={approvePatches}
+      {/* FIXED TABLE LAYOUT */}
+      <div
+        className="tableWrap border-top"
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          overflowX: "hidden",
+          margin: "0 -32px",
+          width: "calc(100% + 64px)",
+          borderLeft: "none",
+          borderRight: "none",
+          borderRadius: 0,
+        }}
+      >
+        <table
+          style={{ tableLayout: "fixed", width: "100%", minWidth: "800px" }}
         >
-          Approve Patches ({selectedCount})
-        </button>
-      </div>
-
-      {/* TABLE */}
-
-      <div className="risk-table">
-        <table>
-          <thead>
+          <thead className="kpi-th-sticky">
             <tr>
-              <th style={{ width: 40 }}>
+              <th style={{ width: "40px", textAlign: "center" }}>
                 <input
+                  ref={headerCheckboxRef}
                   type="checkbox"
+                  className="custom-checkbox"
+                  checked={allSelected}
                   onChange={() => toggleSelectAll(filteredPatches)}
                 />
               </th>
-
-              <th onClick={() => handleSort("patch_id")}>
-                <span className="risk-th-content">
-                  Patch ID
-                  <span className="risk-sort-arrow">
-                    {getSortArrow("patch_id")}
-                  </span>
-                </span>
-              </th>
-
-              <th onClick={() => handleSort("patch_name")}>
-                <span className="risk-th-content">
-                  Name
-                  <span className="risk-sort-arrow">
-                    {getSortArrow("patch_name")}
-                  </span>
-                </span>
-              </th>
-
-              <th onClick={() => handleSort("applicable_count")}>
-                <span className="risk-th-content">
-                  Applicable Computers
-                  <span className="risk-sort-arrow">
-                    {getSortArrow("applicable_count")}
-                  </span>
-                </span>
-              </th>
-
-              <th onClick={() => handleSort("cve_count")}>
-                <span className="risk-th-content">
-                  Associated CVE IDs
-                  <span className="risk-sort-arrow">
-                    {getSortArrow("cve_count")}
-                  </span>
-                </span>
-              </th>
-
-              <th>Vulnerability Severity</th>
-
-              <th onClick={() => handleSort("final_score")}>
-                <span className="risk-th-content">
-                  Vulnerability Score
-                  <span className="risk-sort-arrow">
-                    {getSortArrow("final_score")}
-                  </span>
-                </span>
-              </th>
+              {cols.find((c) => c.id === "patch_id")?.show && (
+                <th
+                  style={{ width: cols.find((c) => c.id === "patch_id").width }}
+                  onClick={() => handleSort("patch_id")}
+                  className="cursor-pointer"
+                >
+                  Patch ID{getSortIcon("patch_id")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "patch_name")?.show && (
+                <th
+                  style={{
+                    width: cols.find((c) => c.id === "patch_name").width,
+                  }}
+                  onClick={() => handleSort("patch_name")}
+                  className="cursor-pointer"
+                >
+                  Name{getSortIcon("patch_name")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "site_name")?.show && (
+                <th
+                  style={{
+                    width: cols.find((c) => c.id === "site_name").width,
+                  }}
+                  onClick={() => handleSort("site_name")}
+                  className="cursor-pointer"
+                >
+                  Site{getSortIcon("site_name")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "applicable_count")?.show && (
+                <th
+                  style={{
+                    width: cols.find((c) => c.id === "applicable_count").width,
+                    textAlign: "center",
+                  }}
+                  onClick={() => handleSort("applicable_count")}
+                  className="cursor-pointer"
+                >
+                  Applicable{getSortIcon("applicable_count")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "cve_count")?.show && (
+                <th
+                  style={{
+                    width: cols.find((c) => c.id === "cve_count").width,
+                    textAlign: "center",
+                  }}
+                  onClick={() => handleSort("cve_count")}
+                  className="cursor-pointer"
+                >
+                  CVEs{getSortIcon("cve_count")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "severity")?.show && (
+                <th
+                  style={{ width: cols.find((c) => c.id === "severity").width }}
+                >
+                  Severity
+                </th>
+              )}
+              {cols.find((c) => c.id === "final_score")?.show && (
+                <th
+                  style={{
+                    width: cols.find((c) => c.id === "final_score").width,
+                    textAlign: "center",
+                  }}
+                  onClick={() => handleSort("final_score")}
+                  className="cursor-pointer"
+                >
+                  Score{getSortIcon("final_score")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "status")?.show && (
+                <th
+                  style={{ width: cols.find((c) => c.id === "status").width }}
+                  onClick={() => handleSort("status")}
+                  className="cursor-pointer"
+                >
+                  Status{getSortIcon("status")}
+                </th>
+              )}
             </tr>
           </thead>
-
           <tbody>
-            {filteredPatches.map((p) => {
-              const isSelected = !!selectedMap[getPatchKey(p)];
-              const score = Number(p.final_score || 0);
-              const derivedSeverity = getSeverityFromScore(score);
-
-              return (
-                <tr
-                  key={getPatchKey(p)}
-                  className={isSelected ? "selected-row" : ""}
-                  onClick={() => toggleSelect(p)}
+            {paginatedPatches.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={cols.filter((c) => c.show).length + 1}
+                  style={{
+                    textAlign: "center",
+                    padding: "40px",
+                    color: "var(--muted)",
+                  }}
                 >
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => toggleSelect(p)}
-                    />
-                  </td>
+                  No patches found.
+                </td>
+              </tr>
+            ) : (
+              paginatedPatches.map((p) => {
+                const isSelected = !!selectedMap[getPatchKey(p)];
+                const score = Number(p.final_score || 0);
+                const cveCount = Number(p.cve_count || 0);
+                const sevRaw = String(p.severity || p.source_severity || "")
+                  .toUpperCase()
+                  .trim();
 
-                  <td>
-                    {p.patch_id?.replace(/^BIGFIX-/, "")}
+                const derivedSeverity = getDerivedSeverity(p);
 
-                    {p.has_kev && <span className="kev-badge">KEV</span>}
-                  </td>
+                return (
+                  <tr
+                    key={getPatchKey(p)}
+                    className={isSelected ? "selected-row" : ""}
+                    onClick={(e) => {
+                      if (e.target.type === "checkbox") return;
+                      toggleSelect(p);
+                    }}
+                  >
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        className="custom-checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(p)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </td>
+                    {cols.find((c) => c.id === "patch_id")?.show && (
+                      <td>
+                        {p.patch_id?.replace(/^BIGFIX-/, "")}{" "}
+                        {p.has_kev && <span className="kev-badge">KEV</span>}
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "patch_name")?.show && (
+                      <td
+                        style={{
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {p.patch_name}
+                          </span>
 
-                  <td>{p.patch_name}</td>
-
-                  <td>
-                    <span
-                      style={{ cursor: "pointer", color: "#3b82f6" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-
-                        setModalData({
-                          title: "Applicable Computers",
-                          items: p.applicable_computers || [],
-                        });
-                      }}
-                    >
-                      {p.applicable_count || 0}
-                    </span>
-                  </td>
-
-                  <td>
-                    <span
-                      style={{ cursor: "pointer", color: "#3b82f6" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-
-                        setCveLoading(true);
-
-                        const key = getPatchKey(p);
-
-                        setModalData({
-                          title: "CVE IDs",
-                          key: key,
-                        });
-
-                        loadPatchCves(p);
-                      }}
-                    >
-                      {p.cve_count ?? patchCveMap[getPatchKey(p)]?.length ?? 0}
-                    </span>
-                  </td>
-
-                  <td>
-                    <span
-                      className={`severity-badge severity-${derivedSeverity.toLowerCase()}`}
-                    >
-                      {derivedSeverity}
-                    </span>
-                  </td>
-
-                  <td style={{ textAlign: "right" }}>
-                    {/* APPLIED SCORE COLOR HIGHLIGHT HERE */}
-                    <span className={`score-badge ${getScoreColorClass(score)}`}>
-                      {score.toFixed(2)}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
+                          <span
+                            style={{
+                              cursor: "pointer",
+                              color: "var(--primary)",
+                              flexShrink: 0,
+                            }}
+                            title="View Description"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPatchDetails(p);
+                            }}
+                          >
+                            {/* Replaced FontAwesome component with native, safe SVG path */}
+                            <svg
+                              xmlns="https://www.w3.org/2000/svg"
+                              viewBox="0 0 512 512"
+                              width="14"
+                              height="14"
+                              fill="currentColor"
+                              style={{
+                                cursor: "pointer",
+                                color: "var(--primary)",
+                                flexShrink: 0,
+                              }}
+                              title="View Description"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPatchDetails(p);
+                              }}
+                            >
+                              <path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM216 336h24V272H216c-13.3 0-24-10.7-24-24s10.7-24 24-24h48c13.3 0 24 10.7 24 24v88h8c13.3 0 24 10.7 24 24s-10.7 24-24 24H216c-13.3 0-24-10.7-24-24s10.7-24 24-24zm40-208a32 32 0 1 1 0 64 32 32 0 1 1 0-64z" />
+                            </svg>
+                          </span>
+                        </div>
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "site_name")?.show && (
+                      <td
+                        style={{
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={p.site_name}
+                      >
+                        {p.site_name}
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "applicable_count")?.show && (
+                      <td style={{ textAlign: "center" }}>
+                        <span
+                          className="cell-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(
+                              "computer",
+                              [
+                                {
+                                  conds: [
+                                    {
+                                      column: "patch_id",
+                                      operator: "=",
+                                      value: String(p.patch_id).replace(
+                                        /^BIGFIX-/,
+                                        "",
+                                      ),
+                                    },
+                                  ],
+                                },
+                              ],
+                              "AND",
+                            );
+                          }}
+                        >
+                          {p.applicable_count || 0}
+                        </span>
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "cve_count")?.show && (
+                      <td style={{ textAlign: "center" }}>
+                        <span
+                          className="cell-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(
+                              "cve",
+                              [
+                                {
+                                  conds: [
+                                    {
+                                      column: "patch_id",
+                                      operator: "=",
+                                      value: String(p.patch_id).replace(
+                                        /^BIGFIX-/,
+                                        "",
+                                      ),
+                                    },
+                                    {
+                                      column: "site_name",
+                                      operator: "=",
+                                      value: p.site_name,
+                                    },
+                                  ],
+                                },
+                              ],
+                              "AND",
+                            );
+                          }}
+                        >
+                          {p.cve_count || 0}
+                        </span>
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "severity")?.show && (
+                      <td>
+                        <span
+                          className={`severity-badge severity-${derivedSeverity.toLowerCase()}`}
+                        >
+                          {derivedSeverity}
+                        </span>
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "final_score")?.show && (
+                      <td style={{ textAlign: "center" }}>
+                        {cveCount === 0 || derivedSeverity === "UNSPECIFIED" ? (
+                          <span className="score-badge score-unspecified">
+                            --
+                          </span>
+                        ) : (
+                          <span
+                            className={`score-badge ${getScoreColorClass(score)}`}
+                          >
+                            {score.toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {cols.find((c) => c.id === "status")?.show && (
+                      <td>
+                        {p.status === 1 ? (
+                          <span className="status-approved">Approved</span>
+                        ) : (
+                          <span className="status-pending">Not Approved</span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* MODAL */}
+      <Paginator
+        total={filteredPatches.length}
+        rpp={rowsPerPage}
+        setRpp={setRowsPerPage}
+        page={currentPage}
+        setPage={setCurrentPage}
+        edgeToEdge={true}
+      />
 
-      {modalData && (
-        <div className="risk-modal-overlay" onClick={() => setModalData(null)}>
-          <div className="risk-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="risk-modal-header">
-              <h3>{modalData.title}</h3>
-
-              <button
-                className="risk-modal-close"
-                onClick={() => setModalData(null)}
-              >
-                ✕
-              </button>
+      <SidePanel
+        open={showPanel}
+        onClose={() => setShowPanel(false)}
+        title="Patch Details"
+      >
+        {selectedPatch && (
+          <>
+            <div style={{ marginBottom: "12px" }}>
+              <strong>ID:</strong>{" "}
+              {selectedPatch.patch_id?.replace(/^BIGFIX-/, "")}
             </div>
 
-            <div className="risk-modal-body">
-              {/* CVE MODAL */}
-              {modalData.key ? (
-                (() => {
-                  const cveList = patchCveMap[modalData.key] || [];
-
-                  if (cveLoading && cveList.length === 0) {
-                    return <div className="risk-spinner"></div>;
-                  }
-
-                  if (cveList.length === 0) {
-                    return (
-                      <div className="risk-modal-empty">No CVEs found</div>
-                    );
-                  }
-
-                  return (
-                    <ul>
-                      {cveList.map((cve, i) => (
-                        <li key={i}>{cve}</li>
-                      ))}
-                    </ul>
-                  );
-                })()
-              ) : /* APPLICABLE COMPUTERS MODAL */
-
-              !modalData.items || modalData.items.length === 0 ? (
-                <div className="risk-modal-empty">No data available</div>
-              ) : (
-                <ul>
-                  {modalData.items.map((item, i) => (
-                    <li key={i}>{item}</li>
-                  ))}
-                </ul>
-              )}
+            <div style={{ marginBottom: "12px" }}>
+              <strong>Name:</strong> {selectedPatch.patch_name}
             </div>
-          </div>
-        </div>
-      )}
+
+            <div style={{ marginBottom: "12px" }}>
+              <strong>Site:</strong> {selectedPatch.site_name}
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <strong>Score:</strong> {selectedPatch.final_score?.toFixed(2)}
+            </div>
+
+            <div>
+              <strong>Description:</strong>
+              {(() => {
+                const { summary, packages, meta, notes, stats } =
+                  parseDescription(selectedPatch.description);
+
+                const isKBOnly =
+                  packages.length > 0 &&
+                  packages.every((p) => p.startsWith("KB"));
+
+                return (
+                  <div style={{ fontSize: "13px", lineHeight: "1.7" }}>
+                    {/* SUMMARY */}
+                    {summary && (
+                      <div style={{ marginBottom: "16px" }}>{summary}</div>
+                    )}
+
+                    {/* PACKAGES (ONLY WHEN MEANINGFUL) */}
+                    {packages.length > 0 && !isKBOnly && (
+                      <div style={{ marginBottom: "20px" }}>
+                        <div style={{ fontWeight: 600, marginBottom: "8px" }}>
+                          Target Packages
+                        </div>
+
+                        <div
+                          style={{
+                            maxHeight: "320px",
+                            overflowY: "auto",
+                            padding: "12px",
+                            background: "#f8fafc",
+                            borderRadius: "8px",
+                            fontFamily: "monospace",
+                            fontSize: "12px",
+                            border: "1px solid var(--border)",
+                          }}
+                        >
+                          {packages.map((pkg, i) => (
+                            <div key={i}>{pkg}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* META */}
+                    {meta && meta.length > 0 && (
+                      <div
+                        style={{ marginBottom: "16px", color: "var(--muted)" }}
+                      >
+                        {meta.map((line, i) => (
+                          <div key={i} style={{ marginBottom: "8px" }}>
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* STATS */}
+                    {stats &&
+                      (stats.fileCount ||
+                        stats.fileSize ||
+                        stats.cves.length > 0) && (
+                        <div
+                          style={{
+                            marginBottom: "16px",
+                            padding: "10px",
+                            background: "#f1f5f9",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                          }}
+                        >
+                          {stats.fileCount && (
+                            <div>
+                              <strong>Target Files:</strong> {stats.fileCount}
+                            </div>
+                          )}
+
+                          {stats.fileSize && (
+                            <div>
+                              <strong>Download Size:</strong> {stats.fileSize}
+                            </div>
+                          )}
+
+                          {stats.cves.length > 0 && (
+                            <div style={{ marginTop: "6px" }}>
+                              <strong>CVEs:</strong>
+                              <div style={{ marginTop: "4px" }}>
+                                {stats.cves.map((cve, i) => (
+                                  <span
+                                    key={i}
+                                    style={{
+                                      display: "inline-block",
+                                      padding: "2px 6px",
+                                      margin: "2px",
+                                      background: "#e2e8f0",
+                                      borderRadius: "4px",
+                                      fontSize: "11px",
+                                    }}
+                                  >
+                                    {cve}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* NOTES */}
+                    {notes.length > 0 && (
+                      <div
+                        style={{
+                          padding: "12px",
+                          background: "#fff7ed",
+                          border: "1px solid #fdba74",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, marginBottom: "8px" }}>
+                          Notes
+                        </div>
+                        {notes.map((n, i) => (
+                          <div key={i} style={{ marginBottom: "10px" }}>
+                            {n}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        )}
+      </SidePanel>
     </div>
   );
 }

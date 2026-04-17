@@ -1,5 +1,6 @@
 // frontend/src/components/pilot/PilotKPI.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEnvironment } from "../Environment.jsx"; 
 
 const API_BASE = window.env.VITE_API_BASE;
 
@@ -229,7 +230,6 @@ function EnhancedModal({ open, onClose, title, rows, loading, error, renderRows,
 }
 
 function MetricTile({ label, value, tone, delay = 0, onClick }) {
-  // We keep animation delay inline as it's dynamic based on props
   return (
     <div className={`kpi kpi-metric-tile ${onClick ? "clickable" : ""}`} onClick={onClick} style={{ animationDelay: `${delay}ms` }}>
       <span className="label fw-800">{label}</span>
@@ -256,49 +256,65 @@ function arcPath(cx, cy, r, startDeg, endDeg, innerR = 0) {
   const eiy = cy + innerR * Math.sin(toRad(startDeg));
   return [`M ${sx} ${sy}`, `A ${r} ${r} 0 ${large} 1 ${ex} ${ey}`, `L ${six} ${siy}`, `A ${innerR} ${innerR} 0 ${large} 0 ${eix} ${eiy}`, "Z"].join(" ");
 }
+
 function fullRingPaths(cx, cy, r, innerR) {
   const p1 = arcPath(cx, cy, r, 0, 180, innerR);
   const p2 = arcPath(cx, cy, r, 180, 360, innerR);
   return [p1, p2];
 }
 
-function DonutChart({ donut, center, hoverKey, setHoverKey }) {
+function DonutChart({ donut, center, hoverKey, setHoverKey, onClickMap }) {
+  const handleSliceClick = (e, key) => {
+      e.stopPropagation();
+      const lowerKey = String(key).toLowerCase();
+      if (lowerKey === 'success' && onClickMap.success) onClickMap.success();
+      else if (lowerKey === 'health failures' && onClickMap.health) onClickMap.health();
+      else if (lowerKey === 'reboot pending' && onClickMap.reboot) onClickMap.reboot();
+  };
+
+  const getVal = (key) => donut.find(d => d.key === key)?.val || 0;
+
   return (
     <div className="chart">
       <svg viewBox="0 0 120 64" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Pilot distribution">
         <g transform="translate(0,0)">
-          {donut.map((s, i) => {
-            const mid = (s.start + s.end) / 2;
-            const rad = ((mid - 90) * Math.PI) / 180;
-            const explode = hoverKey === s.key ? 3 : 0;
-            const dx = explode * Math.cos(rad);
-            const dy = explode * Math.sin(rad);
-            const d = arcPath(30, 32, 26, s.start, s.end, 16);
-            
-            // We keep the dynamic translation and filter inline
-            const activeStyle = { cursor: "pointer", transition: "transform 180ms ease, filter 180ms ease", filter: hoverKey === s.key ? "brightness(1.05)" : "none" };
-            
-            if (d === null) {
-                return (
-                    <g key={i} transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} style={activeStyle}>
-                       {fullRingPaths(30, 32, 26, 16).map((path, idx) => (
-                           <path key={idx} d={path} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
-                       ))}
-                    </g>
-                );
-            }
-            return (
-              <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} style={activeStyle} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} />
-            );
-          })}
-          <text x="30" y="29" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text)">{center.pct}%</text>
-          <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)">{center.label}</text>
+          {donut.length === 0 ? (
+            fullRingPaths(30, 32, 26, 16).map((path, idx) => (
+                <path key={idx} d={path} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" />
+            ))
+          ) : (
+            donut.map((s, i) => {
+              const mid = (s.start + s.end) / 2;
+              const rad = ((mid - 90) * Math.PI) / 180;
+              const explode = hoverKey === s.key ? 3 : 0;
+              const dx = explode * Math.cos(rad);
+              const dy = explode * Math.sin(rad);
+              const d = arcPath(30, 32, 26, s.start, s.end, 16);
+              
+              const activeStyle = { cursor: "pointer", transition: "transform 180ms ease, filter 180ms ease", filter: hoverKey === s.key ? "brightness(1.05)" : "none" };
+              
+              if (d === null) {
+                  return (
+                      <g key={i} transform={`translate(${dx},${dy})`} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} onClick={(e) => handleSliceClick(e, s.key)} style={activeStyle}>
+                         {fullRingPaths(30, 32, 26, 16).map((path, idx) => (
+                             <path key={idx} d={path} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
+                         ))}
+                      </g>
+                  );
+              }
+              return (
+                <path key={i} d={d} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" transform={`translate(${dx},${dy})`} style={activeStyle} onClick={(e) => handleSliceClick(e, s.key)} onMouseEnter={() => setHoverKey(s.key)} onMouseLeave={() => setHoverKey(null)} />
+              );
+            })
+          )}
+          <text x="30" y="29" textAnchor="middle" fontSize="7" fontWeight="600" fill="var(--text)" style={{ pointerEvents: 'none' }}>{center.pct}%</text>
+          <text x="30" y="38" textAnchor="middle" fontSize="5" fill="var(--muted)" style={{ pointerEvents: 'none' }}>{center.label}</text>
         </g>
         <g transform="translate(64,10)" fontSize="6">
-          {[{ key: "Success", fill: "var(--success)", y: 7 }, { key: "Reboot", fill: "var(--warn)", y: 18 }, { key: "Health", fill: "var(--danger)", y: 30 }].map((l) => (
-            <g key={l.key} transform={`translate(6,${l.y})`} onMouseEnter={() => setHoverKey(l.key)} onMouseLeave={() => setHoverKey(null)} className="cursor-pointer" style={{ opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
+          {[{ key: "Success", fill: "var(--success)", y: 7 }, { key: "Reboot Pending", fill: "var(--warn)", y: 18 }, { key: "Health Failures", fill: "var(--danger)", y: 30 }].map((l) => (
+            <g key={l.key} transform={`translate(6,${l.y})`} onClick={(e) => handleSliceClick(e, l.key)} onMouseEnter={() => setHoverKey(l.key)} onMouseLeave={() => setHoverKey(null)} className="cursor-pointer" style={{ opacity: hoverKey && hoverKey !== l.key ? 0.7 : 1, transition: "opacity 160ms ease" }}>
               <circle cx="4" cy="4" r="3" fill={l.fill} />
-              <text x="12" y="6">{l.key}</text>
+              <text x="12" y="6">{l.key} ({getVal(l.key)})</text> 
             </g>
           ))}
         </g>
@@ -323,20 +339,46 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
   );
 }
 
-export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
+export default function PilotKPI({ title = "Pilot KPI", lastActions = {}, onKpiClick }) {
   const mode = /production/i.test(title) ? "production" : "pilot";
+  
+
   const getPinnedActionId = useCallback(() => {
     try {
       const la = lastActions || {};
-      if (mode === "production") return la?.PILOT?.id ?? null;
-      return la?.SANDBOX?.id ?? null;
+      const stageData = mode === "production" ? la?.PILOT : la?.SANDBOX;
+      
+      // Extract comma-separated IDs from the new array
+      if (stageData?.actions && Array.isArray(stageData.actions)) {
+          return stageData.actions.map(a => a.actionId).join(",");
+      }
+      return stageData?.id ?? null; // Fallback for older single deployments
     } catch {
       return null;
     }
   }, [lastActions, mode]);
 
+  const scopeGroup = useMemo(() => {
+    try {
+      const la = lastActions || {};
+      const stageData = mode === "production" ? la?.PILOT : la?.SANDBOX;
+      
+      //  Extract comma-separated Group Names from the new array
+      if (stageData?.actions && Array.isArray(stageData.actions)) {
+          // Use a Set to avoid duplicating group names if multiple baselines target the same group
+          return [...new Set(stageData.actions.map(a => a.group))].join(", ");
+      }
+      return stageData?.group ?? null;
+    } catch {
+      return null;
+    }
+  }, [lastActions, mode]);
+
+  const [activeActionId, setActiveActionId] = useState(null);
+  const [isActionStopped, setIsActionStopped] = useState(false);
+  const actionDeadRef = useRef(false); // 🚀 ADD THIS
+
   const [kpi, setKpi] = useState({ rebootPending: 0, critHealthFails: 0, successRate: 0, successCount: 0, totalCount: 0 });
-  const [totalComputers, setTotalComputers] = useState(0);
   
   const [rebootRows, setRebootRows] = useState([]);
   const [openReboot, setOpenReboot] = useState(false);
@@ -361,42 +403,24 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
   const userRole = sessionStorage.getItem("user_role") || "Admin";
   const isEUC = userRole === "EUC";
 
-   useEffect(() => {
-    function onSandbox(e) {
-      const { success = 0, total = 0 } = e.detail || {};
-      const rate = total > 0 ? Math.round((Number(success) / Number(total)) * 100) : 0;
-      setKpi((p) => ({ ...p, successRate: rate, successCount: Number(success) || 0, totalCount: Number(total) || 0 }));
+  // Track the pinned ID from props
+  useEffect(() => {
+    const id = getPinnedActionId();
+    if (id) {
+       setActiveActionId(id);
+       setIsActionStopped(false); 
+       actionDeadRef.current = false; // Reset the wall
     }
-    function onHealth(e) {
-      const { count = 0 } = e.detail || {};
-      setKpi((p) => ({ ...p, critHealthFails: Number(count || 0) }));
-    }
-    function onTotals(e) {
-      const { totalComputers: tc = 0 } = e.detail || {};
-      setTotalComputers(Number(tc) || 0);
-    }
+  }, [getPinnedActionId()]);
 
-    window.addEventListener("pilot:sandboxResultsUpdated", onSandbox);
-    window.addEventListener("pilot:criticalHealthUpdated", onHealth);
-    window.addEventListener("pilot:totalsUpdated", onTotals);
-
-    if (window.__pilotCache?.sandboxResults) onSandbox({ detail: window.__pilotCache.sandboxResults });
-    if (window.__pilotCache?.criticalHealth) onHealth({ detail: window.__pilotCache.criticalHealth });
-    if (window.__pilotCache?.totals?.computers) setTotalComputers(Number(window.__pilotCache.totals.computers) || 0);
-
-    (async () => {
-      try {
-        const data = await getJson(`${API_BASE}/api/infra/total-computers`);
-        if (typeof data?.total === "number") setTotalComputers(Number(data.total) || 0);
-      } catch {}
-    })();
-
-    return () => {
-      window.removeEventListener("pilot:sandboxResultsUpdated", onSandbox);
-      window.removeEventListener("pilot:criticalHealthUpdated", onHealth);
-      window.removeEventListener("pilot:totalsUpdated", onTotals);
-    };
-  }, []);
+  function classify(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "Not Reported";
+    const L = s.toLowerCase();
+    if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
+    if (/^completed$/i.test(s)) return "Completed";
+    return s;
+  }
 
   const rootRef = useRef(null);
   useInView(rootRef);
@@ -405,13 +429,11 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
     const R = kpi.rebootPending || 0;
     const H = kpi.critHealthFails || 0;
     const S_action = kpi.successCount || 0;
-    const T_action = kpi.totalCount || 0;
-    const O_action = Math.max(0, T_action - S_action);
 
     const partsCombined = [
       { key: "Success", val: S_action, fill: "var(--success)" },
-      { key: "Reboot", val: R, fill: "var(--warn)" },
-      { key: "Health", val: H + O_action, fill: "var(--danger)" },
+      { key: "Reboot Pending", val: R, fill: "var(--warn)" },
+      { key: "Health Failures", val: H, fill: "var(--danger)" },
     ];
     const total = partsCombined.reduce((a, b) => a + b.val, 0) || 1;
     let acc = 0;
@@ -421,85 +443,101 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
       acc += p.val;
       return { ...p, start, end, pct: Math.round((p.val / total) * 100) };
     });
-  }, [kpi.rebootPending, kpi.critHealthFails, kpi.successCount, kpi.totalCount]);
+  }, [kpi.rebootPending, kpi.critHealthFails, kpi.successCount]);
 
   const [hoverKey, setHoverKey] = useState(null);
   const center = useMemo(() => {
-    const R = kpi.rebootPending || 0;
-    const H = kpi.critHealthFails || 0;
-    const S_action = kpi.successCount || 0;
-    const T_action = kpi.totalCount || 0;
-    const O_action = Math.max(0, T_action - S_action);
-    const T_donut = S_action + R + H + O_action;
-    const asPct = (val, total) => clamp(Math.round((val / (total > 0 ? total : 1)) * 100), 0, 100);
+    let lbl = "Success";
+    let pt = kpi.totalCount > 0 ? Math.round((kpi.successCount / kpi.totalCount) * 100) : 0;
+    
+    if (hoverKey) {
+      lbl = hoverKey;
+      const targetData = donut.find(d => d.key === hoverKey);
+      pt = targetData ? targetData.pct : 0;
+    }
 
-    const pctFor = (key) => {
-      switch (key) {
-        case "Success": return asPct(S_action, T_donut);
-        case "Reboot": return asPct(R, T_donut);
-        case "Health": return asPct(H + O_action, T_donut);
-        default: return asPct(S_action, T_donut);
+    const shortLabel = lbl.length > 10 ? lbl.substring(0, 8) + '..' : lbl;
+    return { pct: pt, label: shortLabel, fullLabel: lbl };
+  }, [hoverKey, donut, kpi.successCount, kpi.totalCount]);
+
+  const handleKpiClick = (type) => {
+      if (onKpiClick) {
+          onKpiClick({ type, group: scopeGroup, id: activeActionId });
+      } else {
+          if (type === 'success') openSuccessModal();
+          else if (type === 'health') openHealthModal();
+          else if (type === 'reboot') openRebootModal();
       }
-    };
-    const key = hoverKey || "Success";
-    if (key === "Success") return { pct: kpi.successRate || 0, label: "success" };
-    return { pct: pctFor(key), label: key.toLowerCase() };
-  }, [hoverKey, kpi.successRate, kpi.rebootPending, kpi.critHealthFails, kpi.successCount, kpi.totalCount]);
+  };
 
   async function openSuccessModal() {
     setOpenSuccess(true);
-    const id = getPinnedActionId();
+    const id = activeActionId;
     if (!id) { setSuccessRows([]); setSuccessLoading(false); return; }
     try {
       setSuccessLoading(true);
       const res = await getJson(`${API_BASE}/api/actions/${id}/results`);
-      const allRows = Array.isArray(res?.rows) ? res.rows : [];
-      setSuccessRows(allRows.filter((r) => /success/i.test(r?.status || "")));
+      let uniqueRows = [];
+      if (Array.isArray(res?.rows)) {
+          const map = new Map();
+          for (const r of res.rows) {
+              if (r.server && !map.has(r.server)) { map.set(r.server, r); }
+          }
+          uniqueRows = Array.from(map.values());
+      }
+      setSuccessRows(uniqueRows.filter((r) => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }));
     } catch { setSuccessRows([]); } finally { setSuccessLoading(false); }
   }
 
+
   async function openHealthModal() {
-    setOpenHealth(true);
-    setGlobalError("");
+    setOpenHealth(true); setGlobalError("");
     try {
       setHealthLoading(true);
-      const data = await getJson(`${API_BASE}/api/health/critical`);
-      setHealthRows(Array.isArray(data?.rows) ? data.rows : []);
+      const groupNamesArray = scopeGroup ? scopeGroup.split(",").map(g => g.trim()).filter(Boolean) : [];
+      const results = await Promise.all(groupNamesArray.map(async (g) => {
+          return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`).catch(() => null);
+      }));
+      const allRows = [];
+      results.forEach(res => { if (Array.isArray(res?.rows)) allRows.push(...res.rows); });
+      const map = new Map();
+      allRows.forEach(r => { if (r.server && !map.has(r.server)) map.set(r.server, r); });
+      setHealthRows(Array.from(map.values()));
     } catch { setHealthRows([]); } finally { setHealthLoading(false); }
   }
 
   async function openRebootModal() {
-    setOpenReboot(true);
-    setGlobalError("");
-    setSelectedReboots(new Set()); 
+    setOpenReboot(true); setGlobalError(""); setSelectedReboots(new Set()); 
     try {
       setRebootLoading(true);
-      const data = await getJson(`${API_BASE}/api/health/reboot-pending`);
-      setRebootRows(Array.isArray(data?.rows) ? data.rows : []);
+      const groupNamesArray = scopeGroup ? scopeGroup.split(",").map(g => g.trim()).filter(Boolean) : [];
+      const results = await Promise.all(groupNamesArray.map(async (g) => {
+          return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`).catch(() => null);
+      }));
+      const allRows = [];
+      results.forEach(res => { if (Array.isArray(res?.rows)) allRows.push(...res.rows); });
+      const map = new Map();
+      allRows.forEach(r => { if (r.server && !map.has(r.server)) map.set(r.server, r); });
+      setRebootRows(Array.from(map.values()));
     } catch { setRebootRows([]); } finally { setRebootLoading(false); }
   }
 
   const toggleRebootSelection = (serverName) => {
     const next = new Set(selectedReboots);
-    if (next.has(serverName)) next.delete(serverName);
-    else next.add(serverName);
+    if (next.has(serverName)) next.delete(serverName); else next.add(serverName);
     setSelectedReboots(next);
   };
 
   const toggleAllReboots = () => {
-    if (selectedReboots.size === rebootRows.length) {
-      setSelectedReboots(new Set());
-    } else {
-      setSelectedReboots(new Set(rebootRows.map(r => r.server)));
-    }
+    if (selectedReboots.size === rebootRows.length) setSelectedReboots(new Set());
+    else setSelectedReboots(new Set(rebootRows.map(r => r.server)));
   };
 
   async function executeRestart() {
     const serverName = confirmRestart;
     if (!serverName) return;
     setActionStatus((p) => ({ ...p, [serverName]: "loading" }));
-    setConfirmRestart(null);
-    setGlobalError("");
+    setConfirmRestart(null); setGlobalError("");
     try {
       const result = await postJSON(`${API_BASE}/api/actions/restart`, { computerName: serverName });
       setActionStatus((p) => ({ ...p, [serverName]: "success", [`__id_${serverName}`]: result.actionId }));
@@ -512,23 +550,15 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
 
   async function executeBulkRestart() {
     if (selectedReboots.size === 0) return;
-    setBulkRebootStatus("Triggering...");
-    setConfirmBulkReboot(false);
-    
+    setBulkRebootStatus("Triggering..."); setConfirmBulkReboot(false);
     try {
       const names = Array.from(selectedReboots);
       const result = await postJSON(`${API_BASE}/api/actions/restart-bulk`, { computerNames: names });
-      
       const newStatus = { ...actionStatus };
-      names.forEach(name => {
-          newStatus[name] = "success";
-          newStatus[`__id_${name}`] = result.actionId;
-      });
+      names.forEach(name => { newStatus[name] = "success"; newStatus[`__id_${name}`] = result.actionId; });
       setActionStatus(newStatus);
-      
       setBulkRebootStatus(`Success! Action ID: ${result.actionId}`);
       setSelectedReboots(new Set()); 
-      
     } catch (e) {
       setBulkRebootStatus("Failed.");
       setGlobalError(`Bulk restart failed: ${e.message}`);
@@ -540,8 +570,7 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
     if (!serverName) return;
     const key = `svc_${serverName}`;
     setActionStatus((p) => ({ ...p, [key]: "loading" }));
-    setConfirmService(null);
-    setGlobalError("");
+    setConfirmService(null); setGlobalError("");
     try {
       const result = await postJSON(`${API_BASE}/api/actions/service-restart`, { computerName: serverName });
       setActionStatus((p) => ({ ...p, [key]: "success", [`__id_${key}`]: result.actionId }));
@@ -552,73 +581,234 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
     }
   }
 
-  useEffect(() => {
-    let timer;
-    const ab = new AbortController();
+useEffect(() => {
+    let timer; const ab = new AbortController();
+    
     async function tick() {
       try {
-        let actionId = getPinnedActionId();
-        if (actionId) {
-          const res = await getJson(`${API_BASE}/api/actions/${actionId}/results`, ab.signal);
-          const rows = Array.isArray(res?.rows) ? res.rows : [];
-          const success = Number(res?.success ?? rows.filter((r) => /success/i.test(r?.status || "")).length);
-          const total = Number(res?.total ?? rows.length);
-          const rate = total > 0 ? Math.round((success / total) * 100) : 0;
-          setKpi((p) => ({ ...p, successRate: rate, successCount: success, totalCount: total }));
-          const payload = { actionId, success, total, rows };
-          window.__pilotCache = window.__pilotCache || {};
-          window.__pilotCache.sandboxResults = payload;
-          window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: payload }));
-        } else {
-          setKpi((p) => ({ ...p, successRate: 0, successCount: 0, totalCount: 0 }));
-          window.dispatchEvent(new CustomEvent("pilot:sandboxResultsUpdated", { detail: { actionId: null, success: 0, total: 0, rows: [] } }));
-        }
+      
 
-        const ch = await getJson(`${API_BASE}/api/health/critical`, ab.signal);
-        const healthPayload = { count: Number(ch?.count || 0), rows: Array.isArray(ch?.rows) ? ch.rows : [] };
-        setKpi((p) => ({ ...p, critHealthFails: healthPayload.count }));
-        window.dispatchEvent(new CustomEvent("pilot:criticalHealthUpdated", { detail: healthPayload }));
+        const groupNamesArray = scopeGroup ? scopeGroup.split(",").map(g => g.trim()).filter(Boolean) : [];
 
-        try {
-          const rp = await getJson(`${API_BASE}/api/health/reboot-pending`, ab.signal);
-          const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
-          const rpCount = Number(rp?.count ?? (rpRows.length || 0));
-          setKpi((p) => ({ ...p, rebootPending: rpCount }));
-          setRebootRows(rpRows);
-          window.dispatchEvent(new CustomEvent("pilot:rebootPendingUpdated", { detail: { count: rpCount, rows: rpRows } }));
-        } catch (e) {}
+        // NEW: Fetch Critical Health for multiple groups concurrently and deduplicate
+        const pHealth = (async () => {
+            if (groupNamesArray.length === 0) return { count: 0, rows: [] };
+            const results = await Promise.all(groupNamesArray.map(async (g) => {
+                return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`, ab.signal).catch(() => null);
+            }));
+            const allRows = [];
+            results.forEach(res => { if (Array.isArray(res?.rows)) allRows.push(...res.rows); });
+            const map = new Map();
+            allRows.forEach(r => { if (r.server && !map.has(r.server)) map.set(r.server, r); });
+            const uRows = Array.from(map.values());
+            return { count: uRows.length, rows: uRows };
+        })();
 
-        try {
-          const tot = await getJson(`${API_BASE}/api/infra/total-computers`, ab.signal);
-          if (typeof tot?.total === "number") {
-            setTotalComputers(Number(tot.total) || 0);
-            window.dispatchEvent(new CustomEvent("pilot:totalsUpdated", { detail: { totalComputers: Number(tot.total) || 0 } }));
+        // NEW: Fetch Reboot Pending for multiple groups concurrently and deduplicate
+        const pReboot = (async () => {
+            if (groupNamesArray.length === 0) return { count: 0, rows: [] };
+            const results = await Promise.all(groupNamesArray.map(async (g) => {
+                return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`, ab.signal).catch(() => null);
+            }));
+            const allRows = [];
+            results.forEach(res => { if (Array.isArray(res?.rows)) allRows.push(...res.rows); });
+            const map = new Map();
+            allRows.forEach(r => { if (r.server && !map.has(r.server)) map.set(r.server, r); });
+            const uRows = Array.from(map.values());
+            return { count: uRows.length, rows: uRows };
+        })();
+
+        // NEW: Aggregate Success Across All Actions in the Payload
+        const pSuccess = (async () => {
+          let actionsArray = [];
+          
+          // Try to safely extract the array of actions from the stage payload
+          try {
+             const la = lastActions || {};
+             const stageData = mode === "production" ? la?.PILOT : la?.SANDBOX;
+             if (stageData?.actions && Array.isArray(stageData.actions)) {
+                 actionsArray = stageData.actions;
+             } else if (activeActionId) {
+                 // Fallback if somehow it's still a single string ID
+                 actionsArray = [{ actionId: activeActionId }];
+             }
+          } catch(e) {}
+
+          if (actionsArray.length === 0) return { rate: 0, success: 0, total: 0 };
+
+          // If the entire stage is marked as dead, skip fetching
+          if (actionDeadRef.current) return null;
+
+          let globalSuccess = 0;
+          let globalTotal = 0;
+          let allStopped = true;
+
+          // Fetch results for EVERY action concurrently
+          await Promise.all(actionsArray.map(async (act) => {
+              const idToUse = act.actionId;
+              if (!idToUse) return;
+
+              try {
+                  const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, ab.signal).catch(()=>({}));
+                  const st = String(statusRes?.state || "").toLowerCase();
+                  const isDone = st === 'stopped' || st === 'expired';
+                  if (!isDone) allStopped = false; // If even ONE is still running, the stage is alive
+
+                  const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, ab.signal).catch(()=>null);
+                  let uniqueRows = [];
+                  if (Array.isArray(res?.rows)) {
+                      const map = new Map();
+                      for (const r of res.rows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+                      uniqueRows = Array.from(map.values());
+                  }
+                  
+                  const success = uniqueRows.length > 0 
+                      ? uniqueRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
+                      : Number(res?.success ?? 0);
+                  
+                  const total = uniqueRows.length > 0 ? uniqueRows.length : Number(res?.total ?? 0);
+
+                  globalSuccess += success;
+                  globalTotal += total;
+              } catch (e) {}
+          }));
+
+          const rate = globalTotal > 0 ? Math.round((globalSuccess / globalTotal) * 100) : 0;
+
+          if (allStopped) {
+              actionDeadRef.current = true;
+              setIsActionStopped(true);
           }
-        } catch {}
-        window.dispatchEvent(new CustomEvent("pilot:kpiRefreshed", { detail: { ts: Date.now() } }));
+
+          return { rate, success: globalSuccess, total: globalTotal };
+        })();
+
+        // Wait for health, reboot, and the aggregated success block to finish
+        const [ch, rp, successData] = await Promise.all([pHealth, pReboot, pSuccess]);
+
+        // Update UI
+        setKpi((p) => {
+          const nextKpi = { ...p };
+          
+          if (ch !== null) nextKpi.critHealthFails = Number(ch?.count || 0);
+          if (rp !== null) {
+              const rpRows = Array.isArray(rp?.rows) ? rp.rows : [];
+              nextKpi.rebootPending = Number(rp?.count ?? (rpRows.length || 0));
+              setRebootRows(rpRows); 
+          }
+          if (successData !== null) {
+              nextKpi.successRate = successData.rate;
+              nextKpi.successCount = successData.success;
+              nextKpi.totalCount = successData.total;
+          }
+          
+          return nextKpi;
+        });
+
       } catch (err) {
         if (err.name !== "AbortError") console.warn("PilotKPI refresh failed:", err?.message || err);
       }
     }
-    tick();
-    timer = setInterval(tick, 10000);
+    
+    tick(); 
+    timer = setInterval(tick, 15000); 
     return () => { clearInterval(timer); ab.abort(); };
-  }, [mode, getPinnedActionId]);
+  }, [mode, scopeGroup, activeActionId, isActionStopped, lastActions]);
+
 
   return (
     <section ref={rootRef} className="card reveal" data-reveal>
       <h2>{title}</h2>
-      <div className="kpi-row-wrap">
+      <div className="kpi-row-wrap" style={{ marginBottom: 0 }}>
         <div className="flex-1 min-w-220">
           <div className="kpis kpi-row-wrap">
             {!isEUC && (
-              <MetricTile label="Success Rate" value={`${kpi.successRate}%`} tone={toneForSuccess(kpi.successRate)} onClick={openSuccessModal} />
+              <MetricTile 
+                 label="Success Rate" 
+                 value={kpi.totalCount > 0 ? `${kpi.successRate}% (${kpi.successCount}/${kpi.totalCount})` : `${kpi.successRate}%`} 
+                 tone={toneForSuccess(kpi.successRate)} 
+                 onClick={() => handleKpiClick('success')} 
+              />
             )}
-            <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={openHealthModal} />
-            <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={openRebootModal} />
+            <MetricTile label="Critical Health Failures" value={kpi.critHealthFails} tone={toneForCHF(kpi.critHealthFails)} delay={80} onClick={() => handleKpiClick('health')} />
+            <MetricTile label="Reboot Pending" value={kpi.rebootPending} tone={rebootTone(kpi.rebootPending)} delay={140} onClick={() => handleKpiClick('reboot')} />
           </div>
-          <div className="sep"></div>
-          <DonutChart donut={donut} center={center} hoverKey={hoverKey} setHoverKey={setHoverKey} />
+          
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '32px', marginTop: '16px' }}>
+  {/* Donut SVG – same dimensions as PilotSandboxResult */}
+  <div style={{ width: '160px', flexShrink: 0, display: 'flex', justifyContent: 'center', marginLeft: '50px' }}>
+    <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={() => handleKpiClick('success')} style={{ cursor: 'pointer', width: '100%', height: 'auto' }}>
+      <g transform="translate(60,60)">
+        {donut.length === 0 ? (
+          fullRingPaths(0, 0, 48, 30).map((pd, idx) => (
+            <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" />
+          ))
+        ) : (
+          donut.map((s, i) => {
+            const mid = (s.start + s.end) / 2;
+            const rad = ((mid - 90) * Math.PI) / 180;
+            const explode = hoverKey === s.key ? 3 : 0;
+            const dx = explode * Math.cos(rad);
+            const dy = explode * Math.sin(rad);
+            const d = arcPath(0, 0, 48, s.start, s.end, 30);
+            const isFull = d === null;
+            
+            const activeStyle = { transition: "transform 0.2s, filter 0.2s", filter: hoverKey === s.key ? "brightness(1.06)" : "none", cursor: 'pointer' };
+            
+            if (isFull) {
+              return (
+                <g key={i} transform={`translate(${dx},${dy})`} style={activeStyle} onClick={() => handleKpiClick(s.key === 'Success' ? 'success' : s.key === 'Health Failures' ? 'health' : 'reboot')}>
+                  {fullRingPaths(0, 0, 48, 30).map((pd, idx) => (
+                    <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" />
+                  ))}
+                </g>
+              );
+            }
+            return (
+              <path
+                key={i}
+                d={d}
+                fill={s.fill}
+                stroke="var(--panel-1)"
+                strokeWidth="0.2"
+                transform={`translate(${dx},${dy})`}
+                onMouseEnter={() => setHoverKey(s.key)}
+                onMouseLeave={() => setHoverKey(null)}
+                onClick={() => handleKpiClick(s.key === 'Success' ? 'success' : s.key === 'Health Failures' ? 'health' : 'reboot')}
+                style={activeStyle}
+              />
+            );
+          })
+        )}
+        <text x="0" y="-2" textAnchor="middle" fontSize="14" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>
+          {center.pct}%
+        </text>
+        <text x="0" y="12" textAnchor="middle" fontSize="7" fill="var(--muted)" style={{ pointerEvents: 'none' }}>
+          {center.label}
+        </text>
+      </g>
+    </svg>
+  </div>
+
+  {/* External legend – vertical list */}
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto', paddingRight: '8px' }} className="custom-scrollbar" onMouseLeave={() => setHoverKey(null)}>
+    {donut.length === 0 && <div className="muted-text text-12">No Data</div>}
+    {donut.map(l => (
+      <div
+        key={l.key}
+        onClick={() => handleKpiClick(l.key === 'Success' ? 'success' : l.key === 'Health Failures' ? 'health' : 'reboot')}
+        onMouseEnter={() => setHoverKey(l.key)}
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', opacity: hoverKey && hoverKey !== l.key ? 0.4 : 1, transition: '0.2s' }}
+        title={l.key === 'Success' ? 'Action executed successfully' : l.key === 'Reboot Pending' ? 'Computers waiting for reboot' : 'Critical health failures'}
+      >
+        <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: l.fill, flexShrink: 0 }}></span>
+        <span style={{ fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {l.key} ({l.val})
+        </span>
+      </div>
+    ))}
+  </div>
+</div>
         </div>
       </div>
 
@@ -630,11 +820,18 @@ export default function PilotKPI({ title = "Pilot KPI", lastActions = {} }) {
             <thead className="kpi-th-sticky">
               <tr>
                 <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {sortConfig.key==='server'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
+                <th className="cursor-pointer" onClick={() => handleSort('patch')}>Patch Name {sortConfig.key==='patch'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
                 <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {sortConfig.key==='status'? (sortConfig.dir==='asc'?'↑':'↓') : ''}</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (<tr><td colSpan={2} className="sub">No success rows.</td></tr>) : (rows.map((r, i) => (<tr key={i}><td>{r.server || "—"}</td><td>Success</td></tr>)))}
+              {rows.length === 0 ? (<tr><td colSpan={3} className="sub">No success rows.</td></tr>) : (rows.map((r, i) => (
+                  <tr key={i}>
+                      <td>{r.server || "—"}</td>
+                      <td>{r.patch || "—"}</td>
+                      <td><span className="pill green">Success</span></td>
+                  </tr>
+              )))}
             </tbody>
           </>
         )}

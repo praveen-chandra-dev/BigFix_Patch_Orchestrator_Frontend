@@ -1,547 +1,18 @@
-
-// import { useState, useEffect } from "react";
-
-// const getPatchKey = (p) => `${p.patch_id}-${p.site_name}`;
-
-// export default function BaselineTab({ baselines = [], pendingPatches = [] }) {
-
-//   const [patches, setPatches] = useState([]);
-//   const [baselineName, setBaselineName] = useState("");
-//   const [siteType, setSiteType] = useState("Master");
-//   const [selectedSite, setSelectedSite] = useState("");
-
-//   const [baselineList, setBaselineList] = useState([]);
-//   const [allSites, setAllSites] = useState([]);
-
-//   const [showCVE, setShowCVE] = useState(false);
-//   const [cveData, setCveData] = useState([]);
-
-//   const [selectedBaselineId, setSelectedBaselineId] = useState(null);
-//   const [baselineDetails, setBaselineDetails] = useState(null);
-
-//   const [creatingBaseline, setCreatingBaseline] = useState(false);
-
-//   const filteredSites = allSites.filter((s) => s.type === siteType);
-
-//   /* =============================
-//      Receive patches from PatchTab
-//   ============================= */
-
-//   useEffect(() => {
-//     if (pendingPatches.length) {
-//       setPatches(pendingPatches);
-//     }
-//   }, [pendingPatches]);
-
-//   /* =============================
-//      Load Baselines
-//   ============================= */
-
-//   useEffect(() => {
-
-//     fetch("/api/baselines")
-//       .then((res) => res.json())
-//       .then((data) => {
-
-//         const rows = Array.isArray(data) ? data : data?.data || [];
-
-//         const formatted = rows.map((b) => ({
-//           id: b.id,
-//           name: b.baseline_name,
-//           status: (b.status || "CREATED").toUpperCase(),
-//           patches: b.patch_ids || []
-//         }));
-
-//         setBaselineList(formatted);
-
-//       })
-//       .catch((err) => {
-//         console.error("BASELINE LOAD ERROR:", err);
-//         alert("Failed to load baselines");
-//       });
-
-//   }, []);
-
-//   /* =============================
-//      Load Sites
-//   ============================= */
-
-//   useEffect(() => {
-
-//     fetch("/api/sites")
-//       .then((res) => res.json())
-//       .then((data) => setAllSites(data || []))
-//       .catch(() => alert("Failed to load sites"));
-
-//   }, []);
-
-//   /* =============================
-//      Patch reorder
-//   ============================= */
-
-//   const movePatch = (index, direction) => {
-
-//     const newPatches = [...patches];
-//     const newIndex = index + direction;
-
-//     if (newIndex < 0 || newIndex >= newPatches.length) return;
-
-//     [newPatches[index], newPatches[newIndex]] =
-//     [newPatches[newIndex], newPatches[index]];
-
-//     setPatches(newPatches);
-//   };
-
-//   /* =============================
-//      Remove patch
-//   ============================= */
-
-//   const removePatch = (index) => {
-//     const updated = patches.filter((_, i) => i !== index);
-//     setPatches(updated);
-//   };
-
-//   /* =============================
-//      Fetch CVE
-//   ============================= */
-
-//   const fetchCVE = async () => {
-
-//     if (!patches.length) {
-//       alert("No patches selected");
-//       return;
-//     }
-
-//     try {
-
-//       const res = await fetch("/api/cves/by-patches?page=1&limit=50", {
-
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-
-//         body: JSON.stringify({
-//           patches: patches.map((p) => ({
-//             patch_id: p.patch_id,
-//             site_name: p.site_name
-//           }))
-//         })
-
-//       });
-
-//       const data = await res.json();
-
-//       if (!res.ok) {
-//         alert(data.error || "Failed to fetch CVE");
-//         return;
-//       }
-
-//       setCveData(data.data || []);
-//       setShowCVE(true);
-
-//     } catch (err) {
-
-//       console.error(err);
-//       alert("Failed to fetch CVE");
-
-//     }
-//   };
-
-//   /* =============================
-//      Create baseline
-//   ============================= */
-
-//   const createBaseline = async () => {
-
-//     if (creatingBaseline) return;
-
-//     if (!baselineName.trim()) {
-//       alert("Baseline name required");
-//       return;
-//     }
-
-//     if (!patches.length) {
-//       alert("No patches selected");
-//       return;
-//     }
-
-//     if (siteType === "Custom" && !selectedSite) {
-//       alert("Select site");
-//       return;
-//     }
-
-//     try {
-
-//       setCreatingBaseline(true);
-
-//       const res = await fetch("/api/baselines/create", {
-
-//         method: "POST",
-//         headers: { "Content-Type": "application/json" },
-
-//         body: JSON.stringify({
-
-//           name: baselineName,
-//           siteType,
-//           site: selectedSite,
-
-//           patches: patches.map((p) => ({
-//             patch_id: p.patch_id,
-//             site_name: p.site_name
-//           }))
-
-//         })
-//       });
-
-//       const data = await res.json();
-
-//       if (!res.ok) {
-//         alert(data.error || "Baseline creation failed");
-//         return;
-//       }
-
-//       alert("Baseline created successfully");
-
-//       setBaselineName("");
-//       setPatches([]);
-
-//     } catch (err) {
-
-//       console.error(err);
-//       alert("Baseline creation failed");
-
-//     } finally {
-
-//       setCreatingBaseline(false);
-
-//     }
-//   };
-
-//   /* =============================
-//      Fetch Baseline Details
-//   ============================= */
-
-//   const fetchBaselineDetails = async (id) => {
-
-//     try {
-
-//       const res = await fetch(`/api/baselines/${id}`);
-//       const data = await res.json();
-
-//       if (!res.ok) {
-//         alert("Failed to fetch baseline details");
-//         return;
-//       }
-
-//       setBaselineDetails(data.data?.[0] || null);
-//       setSelectedBaselineId(id);
-
-//     } catch (err) {
-
-//       console.error(err);
-
-//     }
-//   };
-
-//   /* =============================
-//      Delete baseline
-//   ============================= */
-
-//   const deleteBaseline = async () => {
-
-//     if (!selectedBaselineId) {
-//       alert("Select a baseline first");
-//       return;
-//     }
-
-//     if (!window.confirm("Delete this baseline?")) return;
-
-//     try {
-
-//       const res = await fetch(`/api/baselines/${selectedBaselineId}`, {
-//         method: "DELETE"
-//       });
-
-//       if (!res.ok) {
-//         alert("Failed to delete baseline");
-//         return;
-//       }
-
-//       setBaselineDetails(null);
-//       setSelectedBaselineId(null);
-
-//       setBaselineList((prev) =>
-//         prev.filter((b) => b.id !== selectedBaselineId)
-//       );
-
-//     } catch (err) {
-
-//       console.error(err);
-//       alert("Delete failed");
-
-//     }
-//   };
-
-//   return (
-//     <div className="baseline-layout">
-
-//       {/* LEFT PANEL */}
-
-//       <div className="baseline-sidebar">
-
-//         <div className="baseline-sidebar-header">Baselines</div>
-
-//         <table className="baseline-list-table">
-
-//           <thead>
-//             <tr>
-//               <th>Name</th>
-//               <th>Patches</th>
-//               <th>Status</th>
-//             </tr>
-//           </thead>
-
-//           <tbody>
-
-//             {baselineList.map((b) => (
-
-//               <tr
-//                 key={b.id}
-//                 onClick={() => fetchBaselineDetails(b.id)}
-//                 className={
-//                   b.id === selectedBaselineId
-//                     ? "baseline-row-selected"
-//                     : ""
-//                 }
-//               >
-
-//                 <td>{b.name}</td>
-//                 <td>{b.patches?.length || 0}</td>
-
-//                 <td>
-//                   <span className="status-draft">{b.status}</span>
-//                 </td>
-
-//               </tr>
-
-//             ))}
-
-//           </tbody>
-
-//         </table>
-
-//         <div className="baseline-sidebar-actions">
-//           <button
-//             className="danger-btn"
-//             disabled={!selectedBaselineId}
-//             onClick={deleteBaseline}
-//           >
-//             Delete Baseline
-//           </button>
-//         </div>
-
-//       </div>
-
-//       {/* RIGHT PANEL */}
-
-//       <div className="baseline-editor">
-
-//         {patches.length > 0 && (
-
-//           <div>
-
-//             {/* BASELINE CONFIG */}
-
-//             <div className="baseline-config">
-
-//               <div className="baseline-field">
-//                 <label>Baseline Name</label>
-
-//                 <input
-//                   value={baselineName}
-//                   onChange={(e) => setBaselineName(e.target.value)}
-//                 />
-//               </div>
-
-//               <div className="baseline-field">
-//                 <label>Site Type</label>
-
-//                 <select
-//                   value={siteType}
-//                   onChange={(e) => setSiteType(e.target.value)}
-//                 >
-//                   <option value="Master">Master</option>
-//                   <option value="Custom">Custom</option>
-//                 </select>
-//               </div>
-
-//               {siteType === "Custom" && (
-
-//                 <div className="baseline-field">
-
-//                   <label>Site</label>
-
-//                   <select
-//                     value={selectedSite}
-//                     onChange={(e) => setSelectedSite(e.target.value)}
-//                   >
-
-//                     <option value="">Select Site</option>
-
-//                     {filteredSites.map((site) => (
-//                       <option key={site.name} value={site.name}>
-//                         {site.name}
-//                       </option>
-//                     ))}
-
-//                   </select>
-
-//                 </div>
-
-//               )}
-
-//             </div>
-
-//             {/* PATCH ORDER TABLE */}
-
-//             <div className="patch-order-section">
-
-//               <div className="section-title">Patch Order</div>
-
-//               <div className="patch-order-container">
-
-//                 {patches.map((p, index) => (
-
-//                   <div key={getPatchKey(p)} className="patch-order-item">
-
-//                     <div>
-
-//                       <strong>
-//                         {index + 1}. {p.patch_id}
-//                       </strong>
-
-//                       <div className="patch-order-name">
-//                         {p.patch_name}
-//                       </div>
-
-//                     </div>
-
-//                     <div>
-
-//                       <button
-//                         className="small-btn"
-//                         onClick={() => movePatch(index, -1)}
-//                       >
-//                         ↑
-//                       </button>
-
-//                       <button
-//                         className="small-btn"
-//                         onClick={() => movePatch(index, 1)}
-//                       >
-//                         ↓
-//                       </button>
-
-//                       <button
-//                         className="small-btn danger"
-//                         onClick={() => removePatch(index)}
-//                       >
-//                         ✕
-//                       </button>
-
-//                     </div>
-
-//                   </div>
-
-//                 ))}
-
-//               </div>
-
-//             </div>
-
-//             {/* CVE SECTION */}
-
-//             <div className="baseline-cve-section">
-
-//               {!showCVE && (
-//                 <button className="primary-btn" onClick={fetchCVE}>
-//                   View CVE Details
-//                 </button>
-//               )}
-
-//               {showCVE && (
-
-//                 <div className="cve-table-container">
-
-//                   <table>
-
-//                     <thead>
-//                       <tr>
-//                         <th>CVE</th>
-//                         <th>Severity</th>
-//                         <th>CVSS</th>
-//                         <th>EPSS</th>
-//                         <th>KEV</th>
-//                       </tr>
-//                     </thead>
-
-//                     <tbody>
-
-//                       {cveData.map((cve) => (
-
-//                         <tr key={cve.cve_id}>
-
-//                           <td>{cve.cve_id}</td>
-//                           <td>{cve.cvss_severity}</td>
-//                           <td>{cve.cvss_base_score}</td>
-//                           <td>{cve.epss_score}</td>
-
-//                           <td>
-//                             {cve.is_kev ? "Yes" : "No"}
-//                           </td>
-
-//                         </tr>
-
-//                       ))}
-
-//                     </tbody>
-
-//                   </table>
-
-//                 </div>
-
-//               )}
-
-//             </div>
-
-//             <div className="baseline-actions">
-
-//               <button
-//                 className="primary-btn"
-//                 onClick={createBaseline}
-//                 disabled={creatingBaseline}
-//               >
-//                 {creatingBaseline
-//                   ? "Creating Baseline..."
-//                   : "Create Baseline"}
-//               </button>
-
-//             </div>
-
-//           </div>
-
-//         )}
-
-//       </div>
-
-//     </div>
-//   );
-// }
-
-
-import { useState, useEffect, useRef } from "react";
+// src/modules/risk/BaselineTab.jsx
+import { useState, useEffect, useRef, useMemo } from "react";
 import api from "../../api/api";
+import { useToast } from "../../components/common/CustomToast";
+import { getErrorMessage } from "../../utils/errorHandler";
+import InlineSpinner from "../../components/common/InlineSpinner";
+import ConfirmModal from "../../components/common/ConfirmModal";
 
-const RiskDropdown = ({ options, value, onChange, width = "160px" }) => {
+const RiskDropdown = ({
+  options,
+  value,
+  onChange,
+  width = "100%",
+  disabled = false,
+}) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -556,23 +27,41 @@ const RiskDropdown = ({ options, value, onChange, width = "160px" }) => {
   const selectedOpt = options.find((o) => o.value === value);
 
   return (
-    <div className={`fx-wrap ${open ? "fx-open" : ""}`} ref={ref} style={{ width, flexShrink: 0 }}>
-      <button type="button" className="fx-trigger" onClick={() => setOpen(!open)}>
-        <span className="fx-value">{selectedOpt ? selectedOpt.label : value}</span>
+    <div
+      className={`fx-wrap ${open ? "fx-open" : ""} ${disabled ? "disabled" : ""}`}
+      ref={ref}
+      style={{ width, flexShrink: 0 }}
+    >
+      <button
+        type="button"
+        className="fx-trigger"
+        onClick={() => !disabled && setOpen(!open)}
+        disabled={disabled}
+      >
+        <span className="fx-value">
+          {selectedOpt ? selectedOpt.label : value || "Select Option"}
+        </span>
         <span className="fx-chevron">▾</span>
       </button>
       {open && (
         <div className="fx-menu">
           <div className="fx-menu-inner">
             {options.map((opt) => (
-              <div 
-                key={opt.value} 
-                className={`fx-item ${value === opt.value ? "active" : ""}`} 
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
-                onClick={() => { onChange(opt.value); setOpen(false); }}
+              <div
+                key={opt.value}
+                className={`fx-item ${value === opt.value ? "active" : ""}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
               >
                 <span className="fx-label">{opt.label}</span>
-                {value === opt.value && <span className="fx-tick">✓</span>}
+                {value === opt.value}
               </div>
             ))}
           </div>
@@ -582,420 +71,1397 @@ const RiskDropdown = ({ options, value, onChange, width = "160px" }) => {
   );
 };
 
-export default function BaselineTab({ baselines = [], pendingPatches = [] }) {
+export default function BaselineTab({
+  pendingPatches = [],
+  clearPendingPatches,
+  setEditingBaseline,
+  onGoToPatches,
+  refreshTrigger,
+  parentFilters = [],
+  parentLogic = "AND",
+}) {
   const [patches, setPatches] = useState([]);
   const [baselineName, setBaselineName] = useState("");
-  const [siteType, setSiteType] = useState("Master");
+  const [description, setDescription] = useState("");
+  const [siteType, setSiteType] = useState("Custom");
   const [selectedSite, setSelectedSite] = useState("");
+  const [isExternal, setIsExternal] = useState(false);
 
-  const [baselineList, setBaselineList] = useState([]); 
+  const [baselineList, setBaselineList] = useState([]);
   const [allSites, setAllSites] = useState([]);
+  const [isMaster, setIsMaster] = useState(null);
 
   const [showCVE, setShowCVE] = useState(false);
   const [cveData, setCveData] = useState([]);
-
+  const { showToast } = useToast();
   const [selectedBaselineId, setSelectedBaselineId] = useState(null);
-  const [creatingBaseline, setCreatingBaseline] = useState(false); 
+  const selectedBaselineIdRef = useRef(selectedBaselineId);
+  useEffect(() => {
+    selectedBaselineIdRef.current = selectedBaselineId;
+  }, [selectedBaselineId]);
 
-  // SAFEGUARD: Ensure allSites is an array before filtering
-  const filteredSites = Array.isArray(allSites) 
-    ? allSites.filter((site) => site.type === siteType) 
-    : [];
+  const [creatingBaseline, setCreatingBaseline] = useState(false);
+  const [deletingBaseline, setDeletingBaseline] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [patchLookup, setPatchLookup] = useState({});
 
   const [baselineDetails, setBaselineDetails] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
-  // Load patches from PatchTab
   useEffect(() => {
-    if (pendingPatches.length) {
-      setPatches(pendingPatches);
+    if (setEditingBaseline)
+      setEditingBaseline(!!selectedBaselineId && !isExternal);
+  }, [selectedBaselineId, isExternal, setEditingBaseline]);
+
+  useEffect(() => {
+    if (pendingPatches.length > 0) {
+      if (selectedBaselineIdRef.current || patches.length > 0) {
+        setPatches((prev) => {
+          const existingIds = new Set(prev.map((p) => p.patch_id));
+          const newP = pendingPatches.filter(
+            (p) => !existingIds.has(p.patch_id),
+          );
+          return [...prev, ...newP];
+        });
+      } else {
+        setPatches(pendingPatches);
+      }
+      if (clearPendingPatches) clearPendingPatches();
     }
-  }, [pendingPatches]);
+  }, [pendingPatches, clearPendingPatches, patches.length]);
 
-  // Load baselines
+  const refreshList = async () => {
+    try {
+      const res = await api.get("/baselines/list");
+      const rawArray = Array.isArray(res.data?.baselines)
+        ? res.data.baselines
+        : [];
+      const formatted = rawArray.map((b) => ({
+        id: b.id,
+        name: b.name || "Unnamed Baseline",
+        siteType: String(b.siteType || "").toLowerCase(),
+        siteName: b.siteName,
+        componentCount: b.component_count ?? 0,
+      }));
+      setBaselineList(formatted);
+    } catch (e) {
+      console.warn("Failed to load baselines:", e.message);
+      setBaselineList([]);
+    }
+  };
+
   useEffect(() => {
-    api.get("/baselines")
+    refreshList();
+  }, [refreshTrigger]);
+
+  useEffect(() => {
+    api
+      .get("/baselines/risk-sites")
       .then((res) => {
         const data = res.data;
-        const formatted = (data.data || []).map((b) => ({
-          id: b.id,
-          name: b.baseline_name,
-          status: b.status.toUpperCase(),
-          patches: b.patch_ids.map((id) => ({
-            patch_id: `BIGFIX-${id}`,
-          })),
-        }));
-        setBaselineList(formatted);
-      })
-      .catch(() => alert("Failed to load baselines"));
-  }, []);
+        const moStatus = !!data.isMaster;
 
-  // Load sites safely
-  useEffect(() => {
-    api.get("/sites")
-      .then((res) => {
-        const data = res.data;
-        if (Array.isArray(data)) {
-          setAllSites(data);
-        } else if (data && Array.isArray(data.data)) {
-          setAllSites(data.data);
-        } else {
-          setAllSites([]); // Fallback to empty array if response is strange
+        let initialSiteType = "Custom";
+        if (moStatus) initialSiteType = "Master";
+
+        let initialSelectedSite = "";
+        let formattedSites = [];
+
+        if (Array.isArray(data.sites)) {
+          const validSites = data.sites.filter(
+            (s) => s.type === "Custom" || s.type === "Master",
+          );
+          formattedSites = validSites.map((s) => ({
+            value: s.name,
+            label: s.displayName || s.name,
+            type: s.type,
+          }));
+
+          if (!moStatus && formattedSites.length > 0) {
+            const customSites = formattedSites.filter(
+              (s) => s.type === "Custom",
+            );
+            if (customSites.length > 0)
+              initialSelectedSite = customSites[0].value;
+          }
         }
+
+        setAllSites(formattedSites);
+        setSiteType(initialSiteType);
+        setSelectedSite(initialSelectedSite);
+        setIsMaster(moStatus);
+      })
+      .catch(() => {
+        setAllSites([]);
+        setIsMaster(false);
+      });
+  }, [refreshTrigger]);
+
+  const filteredSites = useMemo(() => {
+    return allSites.filter((site) => site.type === siteType);
+  }, [allSites, siteType]);
+
+  useEffect(() => {
+    if (
+      filteredSites.length > 0 &&
+      (!selectedSite || !filteredSites.some((s) => s.value === selectedSite))
+    ) {
+      setSelectedSite(filteredSites[0].value);
+    }
+  }, [filteredSites, siteType, selectedSite]);
+
+  useEffect(() => {
+    api
+      .get("/patches")
+      .then((res) => {
+        const map = {};
+        const patchData = Array.isArray(res.data)
+          ? res.data
+          : res.data?.data || [];
+        patchData.forEach((p) => {
+          const id = String(p.patch_id).replace(/^BIGFIX-/, "");
+          map[id] = { name: p.patch_name, site: p.site_name };
+        });
+        setPatchLookup(map);
       })
       .catch((err) => {
-        console.error("Failed to load sites:", err);
-        setAllSites([]);
+        console.error("Failed to load patches for lookup", err);
       });
-  }, []);
+  }, [refreshTrigger]);
 
-  // =============================
-  // Patch reorder
-  // =============================
   const movePatch = (index, direction) => {
+    if (isExternal) return;
     const newPatches = [...patches];
     const newIndex = index + direction;
-
     if (newIndex < 0 || newIndex >= newPatches.length) return;
-
     [newPatches[index], newPatches[newIndex]] = [
       newPatches[newIndex],
       newPatches[index],
     ];
-
     setPatches(newPatches);
   };
 
-  // =============================
-  // Remove patch
-  // =============================
   const removePatch = (index) => {
+    if (isExternal) return;
     const updated = patches.filter((_, i) => i !== index);
     setPatches(updated);
   };
 
-  // =============================
-  // Fetch CVE
-  // =============================
   const fetchCVE = async () => {
     if (!patches.length) {
-      alert("No patches selected");
+      showToast("No patches selected", "error");
       return;
     }
-
     try {
+      const payloadPatches = patches.map((p) => {
+        const rawId = String(p.patch_id).replace(/^BIGFIX-/, "");
+        const sName =
+          p.site_name || patchLookup[rawId]?.site || selectedSite || "Unknown";
+        return { patch_id: rawId, site_name: sName };
+      });
+
       const res = await api.post("/cves/by-patches?page=1&limit=50", {
-        patches: patches.map((p) => ({
-          patch_id: p.patch_id,
-          site_name: p.site_name,
-        })),
+        patches: payloadPatches,
       });
 
       setCveData(res.data?.data || []);
       setShowCVE(true);
     } catch (err) {
-      console.error(err);
-      alert(err.response?.data?.error || "Failed to fetch CVE");
+      showToast(getErrorMessage(err, "Failed to fetch CVE"), "error");
     }
   };
 
-  // =============================
-  // Create baseline
-  // =============================
+  const clearEditor = (clearPatches = true) => {
+    setBaselineDetails(null);
+    setSelectedBaselineId(null);
+    setBaselineName("");
+    setDescription("");
+    setShowCVE(false);
+    setIsExternal(false);
+    if (clearPatches) setPatches([]);
+    if (setEditingBaseline) setEditingBaseline(false);
+  };
+
   const createBaseline = async () => {
-    if (creatingBaseline) return;
-
+    if (creatingBaseline || isExternal) return;
     if (!baselineName.trim()) {
-      alert("Baseline name required");
+      showToast("Baseline name required", "error");
       return;
     }
-
     if (!patches.length) {
-      alert("No patches selected");
+      showToast("No patches selected", "error");
       return;
     }
-
     if (siteType === "Custom" && !selectedSite) {
-      alert("Select site");
+      showToast("Select site", "error");
       return;
     }
 
     try {
       setCreatingBaseline(true);
-
       await api.post("/baselines/create", {
         name: baselineName,
+        description: description,
         siteType,
         site: selectedSite,
         patches: patches.map((p) => ({
-          patch_id: p.patch_id,
-          site_name: p.site_name,
+          patch_id: String(p.patch_id).replace(/^BIGFIX-/, ""),
+          patch_name: p.patch_name,
+          site_name:
+            p.site_name ||
+            patchLookup[String(p.patch_id).replace(/^BIGFIX-/, "")]?.site,
+          site_url: p.site_url,
         })),
       });
 
-      alert("Baseline created successfully");
-      setBaselineName("");
-      setPatches([]);
-      
-      // Refresh baseline list
-      const res = await api.get("/baselines");
-      const formatted = (res.data?.data || []).map((b) => ({
-        id: b.id,
-        name: b.baseline_name,
-        status: b.status.toUpperCase(),
-        patches: b.patch_ids.map((id) => ({
-          patch_id: `BIGFIX-${id}`,
-        })),
-      }));
-      setBaselineList(formatted);
-      
+      showToast("Baseline created successfully!", "success");
+      clearEditor();
+      refreshList();
     } catch (err) {
-      console.error(err);
-      alert(err.response?.data?.error || "Baseline creation failed");
+      showToast(getErrorMessage(err, "Baseline creation failed"), "error");
     } finally {
       setCreatingBaseline(false);
     }
   };
 
-  // =============================
-  // Fetch baseline details
-  // =============================
-  const fetchBaselineDetails = async (id) => {
-    try {
-      const res = await api.get(`/baselines/${id}`);
-      setBaselineDetails(res.data?.data?.[0]);
-      setSelectedBaselineId(id);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to fetch baseline details");
+  const updateBaseline = async () => {
+    if (creatingBaseline || isExternal) return;
+    if (!baselineName.trim()) {
+      showToast("Baseline name required", "error");
+      return;
     }
-  };
-
-  // =============================
-  // Delete baseline
-  // =============================
-  const deleteBaseline = async () => {
-    if (!selectedBaselineId) {
-      alert("Select a baseline first");
+    if (!patches.length) {
+      showToast("No patches selected", "error");
       return;
     }
 
-    if (!window.confirm("Delete this baseline?")) return;
-
     try {
-      await api.delete(`/baselines/${selectedBaselineId}`);
+      setCreatingBaseline(true);
+      const b = baselineList.find((x) => x.id === selectedBaselineId);
+      await api.put(
+        `/baselines/${selectedBaselineId}?siteType=${b?.siteType}&siteName=${b?.siteName}`,
+        {
+          name: baselineName,
+          description: description,
+          patches: patches.map((p) => ({
+            patch_id: String(p.patch_id).replace(/^BIGFIX-/, ""),
+            patch_name: p.patch_name,
+            site_name:
+              p.site_name ||
+              patchLookup[String(p.patch_id).replace(/^BIGFIX-/, "")]?.site,
+            site_url: p.site_url,
+          })),
+        },
+      );
 
-      setBaselineDetails(null);
-      setSelectedBaselineId(null);
-
-      const updated = baselineList.filter((b) => b.id !== selectedBaselineId);
-      setBaselineList(updated);
-    } catch (err) {
-      console.error(err);
-      alert("Delete failed");
+      clearEditor();
+      showToast(
+        "Baseline updated successfully! It may take 10-15 seconds to reflect.",
+        "success",
+      );
+      refreshList();
+    } catch (e) {
+      showToast(getErrorMessage(e, "Update failed"), "error");
+    } finally {
+      setCreatingBaseline(false);
     }
   };
 
-  // =============================
-  // UI
-  // =============================
+  const fetchBaselineDetails = async (b) => {
+    try {
+      setLoadingDetails(true);
+      setPatches([]);
+
+      const res = await api.get(
+        `/baselines/${b.id}?siteType=${b.siteType}&siteName=${b.siteName}`,
+      );
+      const data = res.data?.data?.[0] || res.data;
+
+      setBaselineDetails(data);
+      setSelectedBaselineId(b.id);
+      setBaselineName(data.baseline_name || data.name || "");
+      setDescription(data.description || "");
+      setShowCVE(false);
+
+      const extCheck = b.siteType === "external";
+      setIsExternal(extCheck);
+
+      if (b.siteType) {
+        const capitalizedType =
+          b.siteType.charAt(0).toUpperCase() + b.siteType.slice(1);
+        setSiteType(capitalizedType);
+      }
+      setSelectedSite(data.site_name || b.siteName || "");
+
+      const loadedPatches = (data.patches || data.patch_ids || []).map((p) => {
+        const isObj = typeof p === "object";
+        const rawId = isObj
+          ? String(p.patch_id).replace(/^BIGFIX-/, "")
+          : String(p).replace(/^BIGFIX-/, "");
+        const info = patchLookup[rawId] || {};
+
+        let pName =
+          isObj && p.patch_name && p.patch_name !== "Unknown Patch"
+            ? p.patch_name
+            : info.name || "Unknown Patch";
+        let sName =
+          isObj && p.site_name && p.site_name !== "Unknown Site"
+            ? p.site_name
+            : info.site || "";
+        let sUrl = isObj && p.site_url ? p.site_url : "";
+
+        return {
+          patch_id: `BIGFIX-${rawId}`,
+          patch_name: pName,
+          site_name: sName,
+          site_url: sUrl,
+        };
+      });
+      setPatches(loadedPatches);
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to fetch baseline details", "error");
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  useEffect(() => {
+    const unknownIds = patches
+      .filter((p) => p.patch_name === "Unknown Patch")
+      .map((p) => String(p.patch_id).replace(/^BIGFIX-/, ""));
+    if (unknownIds.length > 0 && baselineDetails) {
+      api
+        .post("/baselines/resolve-names", { ids: unknownIds })
+        .then((res) => {
+          if (res.data?.ok && res.data.resolved) {
+            const resolvedMap = {};
+            res.data.resolved.forEach((r) => (resolvedMap[r.id] = r));
+
+            setPatches((prev) =>
+              prev.map((p) => {
+                const cleanId = String(p.patch_id).replace(/^BIGFIX-/, "");
+                if (p.patch_name === "Unknown Patch" && resolvedMap[cleanId]) {
+                  return {
+                    ...p,
+                    patch_name: resolvedMap[cleanId].name,
+                    site_name:
+                      p.site_name === "Unknown Site" || !p.site_name
+                        ? resolvedMap[cleanId].site
+                        : p.site_name,
+                  };
+                }
+                return p;
+              }),
+            );
+          }
+        })
+        .catch((err) =>
+          console.warn("Failed to resolve missing patch names", err),
+        );
+    }
+  }, [patches, baselineDetails]);
+
+  const deleteBaseline = () => {
+    if (!selectedBaselineId || isExternal) {
+      showToast("Cannot delete this baseline", "error");
+      return;
+    }
+
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteBaseline = async () => {
+    try {
+      setDeletingBaseline(true);
+
+      const b = baselineList.find((x) => x.id === selectedBaselineId);
+
+      await api.delete(
+        `/baselines/${selectedBaselineId}?siteType=${b?.siteType}&siteName=${b?.siteName}`,
+      );
+
+      showToast("Baseline deleted successfully", "success");
+
+      setShowDeleteModal(false);
+      clearEditor();
+      refreshList();
+    } catch (err) {
+      showToast(getErrorMessage(err, "Delete failed"), "error");
+    } finally {
+      setDeletingBaseline(false);
+    }
+  };
+  /* ADDED: Sorting and Filtering logic */
+  const [sortConfig, setSortConfig] = useState({
+    key: "name",
+    direction: "asc",
+  });
+
+  const handleSort = (key) => {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key)
+      return (
+        <span style={{ opacity: 0.4, marginLeft: "4px", cursor: "pointer" }}>
+          ↕
+        </span>
+      );
+    return (
+      <span style={{ marginLeft: "4px", cursor: "pointer" }}>
+        {sortConfig.direction === "asc" ? "↑" : "↓"}
+      </span>
+    );
+  };
+
+  const applyFilters = (baseline) => {
+    if (!parentFilters || !parentFilters.length) return true;
+    let globalMatch = parentLogic === "OR" ? false : true;
+    for (let b of parentFilters) {
+      let blockMatch = true;
+      let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase();
+
+        let field = "";
+        if (c.column === "baseline_name") {
+          field = String(baseline.name || "").toLowerCase();
+        } else {
+          field = String(baseline.name || "").toLowerCase();
+        }
+
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) {
+        globalMatch =
+          parentLogic === "OR"
+            ? globalMatch || blockMatch
+            : globalMatch && blockMatch;
+      }
+    }
+    return globalMatch;
+  };
+
+  const filteredBaselines = useMemo(() => {
+    return baselineList.filter(applyFilters);
+  }, [baselineList, parentFilters, parentLogic]);
+
+  const sortedBaselines = useMemo(() => {
+    let sortable = [...filteredBaselines];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aVal = String(a[sortConfig.key] || "").toLowerCase();
+        let bVal = String(b[sortConfig.key] || "").toLowerCase();
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortable;
+  }, [filteredBaselines, sortConfig]);
+
+  if (isMaster === null)
+    return <div className="app-loading-content">Loading Permissions...</div>;
+
   return (
-    <div className="baseline-layout">
-      {/* LEFT PANEL */}
-      <div className="baseline-sidebar">
-        <div className="baseline-sidebar-header">Baselines</div>
-
-        <table className="baseline-list-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Patches</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {baselineList.map((b) => (
-              <tr
-                key={b.id}
-                onClick={() => fetchBaselineDetails(b.id)}
-                className={b.id === selectedBaselineId ? "baseline-row-selected" : ""}
-              >
-                <td>{b.name}</td>
-                <td>{b.patches?.length || 0}</td>
-                <td>
-                  <span className={b.status === "APPROVED" ? "status-approved" : "status-draft"}>
-                    {b.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        <div className="baseline-sidebar-actions" style={{ padding: "16px", marginTop: "auto", borderTop: "1px solid var(--border)" }}>
-          <button className="btn danger" disabled={!selectedBaselineId} onClick={deleteBaseline} style={{ width: "100%" }}>
-            Delete Baseline
-          </button>
+    <div
+      className="baseline-tab-container"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(300px, 380px) 1fr",
+        gap: "24px",
+        height: "calc(100vh - 140px)",
+        minHeight: "500px",
+        padding: "0 0 8px 0",
+      }}
+    >
+      {/* LEFT PANEL: BASELINE LIST */}
+      <div
+        className="baseline-list-panel"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--panel)",
+          border: "1px solid var(--border)",
+          borderRadius: "12px",
+          overflow: "hidden",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+        }}
+      >
+        <div
+          style={{
+            padding: "18px 20px",
+            background: "var(--panel-2)",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{ fontSize: "16px", fontWeight: 600, color: "var(--text)" }}
+          >
+            Baselines
+          </span>
         </div>
-      </div>
 
-      {/* RIGHT PANEL */}
-      <div className="baseline-editor">
-        {baselineDetails && (
-          <div className="baseline-details" style={{ marginBottom: "24px" }}>
-            <div className="baseline-details-header">
-              <h3 style={{ margin: 0, fontSize: "18px", color: "var(--text)" }}>{baselineDetails.baseline_name}</h3>
-              <button className="close-btn" onClick={() => setBaselineDetails(null)}>✕</button>
-            </div>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <table
+            className="baseline-list-table"
+            style={{ width: "100%", borderCollapse: "collapse" }}
+          >
+            <thead
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 1,
+                background: "var(--panel-2)",
+              }}
+            >
+              <tr>
+                <th
+                  onClick={() => handleSort("name")}
+                  style={{
+                    cursor: "pointer",
+                    padding: "12px 20px",
+                    textAlign: "left",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  NAME {getSortIcon("name")}
+                </th>
+                <th
+                  onClick={() => handleSort("componentCount")}
+                  style={{
+                    cursor: "pointer",
+                    padding: "12px 20px",
+                    textAlign: "center",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--muted)",
+                    borderBottom: "1px solid var(--border)",
+                    width: "100px",
+                  }}
+                >
+                  COMPONENTS {getSortIcon("componentCount")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedBaselines.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan="2"
+                    style={{
+                      textAlign: "center",
+                      padding: "40px",
+                      color: "var(--muted)",
+                    }}
+                  >
+                    No baselines found.
+                  </td>
+                </tr>
+              ) : (
+                sortedBaselines.map((b) => (
+                  <tr
+                    key={b.id}
+                    onClick={() => fetchBaselineDetails(b)}
+                    style={{
+                      cursor: "pointer",
+                      borderBottom: "1px solid var(--border)",
+                      background:
+                        b.id === selectedBaselineId
+                          ? "rgba(var(--primary-rgb), 0.08)"
+                          : "transparent",
+                      transition: "background 0.15s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (b.id !== selectedBaselineId)
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (b.id !== selectedBaselineId)
+                        e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: "14px 20px",
+                        wordBreak: "break-word",
+                        fontWeight: 500,
+                        color: "var(--primary)",
+                      }}
+                    >
+                      {b.name}
+                    </td>
+                    <td
+                      style={{
+                        padding: "14px 20px",
+                        textAlign: "center",
+                        color: "var(--text)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {b.componentCount}
+                    </td>
+                    <td style={{ padding: "14px 20px" }}></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
 
-            <p style={{ margin: "4px 0", color: "var(--muted)", fontSize: "14px" }}>BigFix ID: {baselineDetails.bigfix_baseline_id}</p>
-            <p style={{ margin: "4px 0", color: "var(--muted)", fontSize: "14px" }}>Patches: {baselineDetails.patch_ids.length}</p>
+        {!isExternal && selectedBaselineId && (
+          <div
+            style={{
+              padding: "16px 20px",
+              borderTop: "1px solid var(--border)",
+              background: "var(--panel-2)",
+            }}
+          >
+            <button
+              className="btn danger"
+              onClick={deleteBaseline}
+              disabled={deletingBaseline}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: "1px solid var(--danger)",
+                color: "var(--danger)",
+                borderRadius: "8px",
+                padding: "8px 12px",
+                fontWeight: 500,
+                transition: "all 0.2s",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                opacity: deletingBaseline ? 0.7 : 1,
+              }}
+            >
+              {deletingBaseline && <InlineSpinner size={16} variant="danger" />}
 
-            <div className="patch-order-container" style={{ marginTop: "12px" }}>
-              {baselineDetails.patch_ids.map((p, i) => (
-                <div key={p} className="patch-order-item" style={{ fontSize: "14px" }}>
-                  {i + 1}. BIGFIX-{p}
-                </div>
-              ))}
-            </div>
+              {deletingBaseline ? "Deleting Baseline..." : "Delete Baseline"}
+            </button>
           </div>
         )}
+      </div>
 
-        {patches.length > 0 && (
-          <div>
-            <div className="baseline-config">
-              <div className="baseline-field">
-                <label>Baseline Name</label>
-                <input
-                  className="control"
-                  value={baselineName}
-                  onChange={(e) => setBaselineName(e.target.value)}
-                  placeholder="Enter Baseline Name"
-                />
-              </div>
-
-              <div className="baseline-field">
-                <label>Site Type</label>
-                <RiskDropdown
-                  width="100%"
-                  value={siteType}
-                  onChange={(val) => {
-                    setSiteType(val);
-                    setSelectedSite(""); // Reset site when changing type
+      {/* RIGHT PANEL: EDITOR */}
+      <div
+        className="baseline-editor-panel"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--panel)",
+          border: "1px solid var(--border)",
+          borderRadius: "12px",
+          overflow: "hidden",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+        }}
+      >
+        {loadingDetails ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "var(--muted)",
+              gap: "16px",
+            }}
+          >
+            <div
+              className="spinner"
+              style={{
+                width: "40px",
+                height: "40px",
+                border: "3px solid rgba(var(--primary-rgb), 0.2)",
+                borderTopColor: "var(--primary)",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite",
+              }}
+            />
+            <div style={{ fontSize: "15px", fontWeight: 500 }}>
+              Loading Baseline Data...
+            </div>
+          </div>
+        ) : patches.length > 0 || baselineName ? (
+          <div
+            style={{ display: "flex", flexDirection: "column", height: "100%" }}
+          >
+            {/* Editor Header */}
+            <div
+              style={{
+                padding: "16px 24px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                background: "var(--panel-2)",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: "18px",
+                    fontWeight: 600,
+                    color: "var(--primary)",
                   }}
-                  options={[
-                    { value: "Master", label: "Master" },
-                    { value: "Custom", label: "Custom" }
-                  ]}
-                />
+                >
+                  {selectedBaselineId
+                    ? `Editing: ${baselineDetails?.baseline_name || baselineName}`
+                    : "Create New Baseline"}
+                </h3>
+                {selectedBaselineId && (
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--muted)",
+                      marginTop: "4px",
+                    }}
+                  >
+                    BigFix ID: {selectedBaselineId}
+                  </div>
+                )}
               </div>
+              <button
+                className="close-btn"
+                onClick={() => clearEditor()}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: "20px",
+                  cursor: "pointer",
+                  color: "var(--muted)",
+                  padding: "4px",
+                  borderRadius: "4px",
+                  transition: "color 0.2s",
+                }}
+              >
+                ✕
+              </button>
+            </div>
 
-              {siteType === "Custom" && (
-                <div className="baseline-field">
-                  <label>Site</label>
-                  <RiskDropdown
-                    width="100%"
-                    value={selectedSite}
-                    onChange={(val) => setSelectedSite(val)}
-                    options={[
-                      { value: "", label: "Select Site" },
-                      ...filteredSites.map((site) => ({ value: site.name, label: site.name }))
-                    ]}
-                  />
+            {/* Scrollable Body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+              {isExternal && (
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    background: "#eef2ff",
+                    color: "#1e40af",
+                    borderRadius: "10px",
+                    border: "1px solid #c7d2fe",
+                    marginBottom: "24px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    display: "flex",
+                    gap: "10px",
+                    alignItems: "center",
+                  }}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                  <span>
+                    This baseline belongs to an External Site. It is read-only
+                    and cannot be modified or deleted.
+                  </span>
                 </div>
               )}
-            </div>
 
-            {/* PATCH ORDER */}
-            <div className="patch-order-section">
-              <div className="section-title" style={{ fontWeight: 600, color: "var(--text)", marginBottom: "8px" }}>Patch Order</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "24px",
+                  marginBottom: "16px",
+                }}
+              >
+                <div className="field m-0">
+                  <label
+                    className="label"
+                    style={{
+                      fontWeight: 500,
+                      marginBottom: "6px",
+                      display: "block",
+                    }}
+                  >
+                    Baseline Name
+                  </label>
+                  <input
+                    className="control"
+                    value={baselineName}
+                    onChange={(e) => setBaselineName(e.target.value)}
+                    placeholder="Enter Baseline Name"
+                    disabled={isExternal}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                      background: isExternal ? "var(--bg)" : "var(--panel)",
+                      transition: "border-color 0.2s",
+                    }}
+                  />
+                </div>
 
-              <div className="patch-order-container">
-                {patches.map((p, index) => (
-                  <div key={p.patch_id} className="patch-order-item">
-                    <div>
-                      <strong style={{ display: "block", marginBottom: "4px", color: "var(--primary)" }}>
-                        {index + 1}. {p.patch_id}
-                      </strong>
-                      <div className="patch-order-name" style={{ color: "var(--muted)", fontSize: "13px" }}>{p.patch_name}</div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: isMaster ? "1fr 1fr" : "1fr",
+                    gap: "16px",
+                  }}
+                >
+                  {isMaster && (
+                    <div className="field m-0">
+                      <label
+                        className="label"
+                        style={{
+                          fontWeight: 500,
+                          marginBottom: "6px",
+                          display: "block",
+                        }}
+                      >
+                        Site Type
+                      </label>
+                      <RiskDropdown
+                        value={isExternal ? "External" : siteType}
+                        disabled={!!selectedBaselineId || isExternal}
+                        onChange={(val) => {
+                          setSiteType(val);
+                          setSelectedSite("");
+                        }}
+                        options={
+                          isExternal
+                            ? [{ value: "External", label: "External" }]
+                            : [
+                                { value: "Master", label: "Master" },
+                                { value: "Custom", label: "Custom" },
+                              ]
+                        }
+                      />
                     </div>
+                  )}
 
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button className="btn ghost small" style={{ padding: "0 8px", height: "28px" }} onClick={() => movePatch(index, -1)}>↑</button>
-                      <button className="btn ghost small" style={{ padding: "0 8px", height: "28px" }} onClick={() => movePatch(index, 1)}>↓</button>
-                      <button className="btn danger small" style={{ padding: "0 8px", height: "28px" }} onClick={() => removePatch(index)}>✕</button>
+                  {(siteType === "Custom" || !isMaster || isExternal) && (
+                    <div className="field m-0">
+                      <label
+                        className="label"
+                        style={{
+                          fontWeight: 500,
+                          marginBottom: "6px",
+                          display: "block",
+                        }}
+                      >
+                        Target Site
+                      </label>
+                      <RiskDropdown
+                        value={
+                          isExternal ? baselineDetails?.site_name : selectedSite
+                        }
+                        disabled={!!selectedBaselineId || isExternal}
+                        onChange={(val) => setSelectedSite(val)}
+                        options={
+                          isExternal
+                            ? [
+                                {
+                                  value: baselineDetails?.site_name,
+                                  label: baselineDetails?.site_name,
+                                },
+                              ]
+                            : [
+                                { value: "", label: "Select Site" },
+                                ...filteredSites,
+                              ]
+                        }
+                      />
                     </div>
-                  </div>
-                ))}
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* CVE */}
-            <div className="baseline-cve-section">
-              {!showCVE && (
-                <button className="btn pri" onClick={fetchCVE}>
-                  View CVE Details
-                </button>
-              )}
+              <div className="field m-0" style={{ marginBottom: "28px" }}>
+                <label
+                  className="label"
+                  style={{
+                    fontWeight: 500,
+                    marginBottom: "6px",
+                    display: "block",
+                  }}
+                >
+                  Description
+                </label>
+                <textarea
+                  className="control"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Enter Baseline Description (Optional)"
+                  disabled={isExternal}
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    background: isExternal ? "var(--bg)" : "var(--panel)",
+                    transition: "border-color 0.2s",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    fontSize: "14px",
+                  }}
+                />
+              </div>
 
+              {/* PATCH ORDER */}
+              <div style={{ marginBottom: "28px" }}>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    color: "var(--text)",
+                    marginBottom: "12px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>Patch Order ({patches.length})</span>
+                  {patches.length > 0 && onGoToPatches && !isExternal && (
+                    <button
+                      className="btn outline small"
+                      onClick={onGoToPatches}
+                      style={{
+                        height: "32px",
+                        padding: "0 14px",
+                        borderRadius: "6px",
+                        fontWeight: 500,
+                      }}
+                    >
+                      + Add Patches
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid var(--border)",
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                    background: "var(--panel)",
+                  }}
+                >
+                  {patches.map((p, index) => {
+                    const cleanId = String(p.patch_id).replace(/^BIGFIX-/, "");
+                    const patchName = p.patch_name || "Unknown Patch";
+
+                    return (
+                      <div
+                        key={`${p.patch_id}-${index}`}
+                        style={{
+                          display: "flex",
+                          alignItems: isExternal ? "flex-start" : "center",
+                          padding: "14px 20px",
+                          borderBottom:
+                            index < patches.length - 1
+                              ? "1px solid var(--border)"
+                              : "none",
+                          background:
+                            index % 2 === 0
+                              ? "transparent"
+                              : "rgba(var(--bg), 0.5)",
+                          transition: "background 0.15s",
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <strong
+                            style={{
+                              display: "block",
+                              marginBottom: "6px",
+                              color: "var(--primary)",
+                              fontSize: "14px",
+                            }}
+                          >
+                            {index + 1}. {cleanId}
+                          </strong>
+                          <div
+                            style={{
+                              color: "var(--muted)",
+                              fontSize: "13px",
+                              lineHeight: "1.4",
+                            }}
+                          >
+                            {patchName}
+                          </div>
+                        </div>
+
+                        {!isExternal && (
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <button
+                              className="btn ghost small"
+                              onClick={() => movePatch(index, -1)}
+                              disabled={index === 0}
+                              style={{
+                                padding: "0 10px",
+                                height: "30px",
+                                borderRadius: "6px",
+                                opacity: index === 0 ? 0.4 : 1,
+                                cursor: index === 0 ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              className="btn ghost small"
+                              onClick={() => movePatch(index, 1)}
+                              disabled={index === patches.length - 1}
+                              style={{
+                                padding: "0 10px",
+                                height: "30px",
+                                borderRadius: "6px",
+                                opacity: index === patches.length - 1 ? 0.4 : 1,
+                                cursor:
+                                  index === patches.length - 1
+                                    ? "not-allowed"
+                                    : "pointer",
+                              }}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              className="btn danger small"
+                              onClick={() => removePatch(index)}
+                              style={{
+                                padding: "0 10px",
+                                height: "30px",
+                                borderRadius: "6px",
+                                background: "transparent",
+                                border: "1px solid var(--danger)",
+                                color: "var(--danger)",
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* CVE SECTION */}
               {showCVE && (
-                <>
-                  <div className="cve-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <span className="section-title" style={{ fontWeight: 600, color: "var(--text)" }}>
+                <div
+                  style={{
+                    marginTop: "28px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "12px",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "14px 20px",
+                      background: "var(--panel-2)",
+                      borderBottom: "1px solid var(--border)",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: "var(--text)" }}>
                       CVE Details ({cveData.length})
                     </span>
-                    <button className="btn ghost" onClick={() => setShowCVE(false)}>
+                    <button
+                      className="btn ghost small"
+                      onClick={() => setShowCVE(false)}
+                      style={{ padding: "4px 12px", borderRadius: "6px" }}
+                    >
                       Hide
                     </button>
                   </div>
 
-                  <div className="cve-table-container">
-                    <table className="cve-table">
-                      <thead>
+                  <div style={{ overflowX: "auto" }}>
+                    <table
+                      className="cve-table"
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        textAlign: "left",
+                      }}
+                    >
+                      <thead style={{ background: "var(--bg)" }}>
                         <tr>
-                          <th>CVE</th>
-                          <th>Severity</th>
-                          <th>CVSS</th>
-                          <th>EPSS</th>
-                          <th>KEV</th>
+                          <th
+                            style={{
+                              padding: "12px 16px",
+                              borderBottom: "1px solid var(--border)",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            CVE
+                          </th>
+                          <th
+                            style={{
+                              padding: "12px 16px",
+                              borderBottom: "1px solid var(--border)",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Severity
+                          </th>
+                          <th
+                            style={{
+                              padding: "12px 16px",
+                              borderBottom: "1px solid var(--border)",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            CVSS
+                          </th>
+                          <th
+                            style={{
+                              padding: "12px 16px",
+                              borderBottom: "1px solid var(--border)",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            EPSS
+                          </th>
+                          <th
+                            style={{
+                              padding: "12px 16px",
+                              borderBottom: "1px solid var(--border)",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            KEV
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {cveData.map((cve) => {
-                          const severityClass = cve.cvss_severity?.toLowerCase() || "low";
-                          return (
-                            <tr key={cve.cve_id}>
-                              <td className="cve-id-cell">{cve.cve_id}</td>
-                              <td>
-                                <span className={`severity-badge severity-${severityClass}`}>
-                                  {cve.cvss_severity}
-                                </span>
-                              </td>
-                              <td>{cve.cvss_base_score}</td>
-                              <td>{cve.epss_score}</td>
-                              <td>
-                                <span className={cve.is_kev ? "kev-yes-badge" : "kev-no-badge"}>
-                                  {cve.is_kev ? "Yes" : "No"}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {cveData.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan="5"
+                              style={{
+                                textAlign: "center",
+                                padding: "24px",
+                                color: "var(--muted)",
+                              }}
+                            >
+                              No CVE mappings found for these patches.
+                            </td>
+                          </tr>
+                        ) : (
+                          cveData.map((cve) => {
+                            const severityClass =
+                              cve.cvss_severity?.toLowerCase() || "low";
+                            return (
+                              <tr
+                                key={cve.cve_id}
+                                style={{
+                                  borderBottom: "1px solid var(--border)",
+                                }}
+                              >
+                                <td
+                                  style={{
+                                    padding: "12px 16px",
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {cve.cve_id}
+                                </td>
+                                <td style={{ padding: "12px 16px" }}>
+                                  <span
+                                    className={`severity-badge severity-${severityClass}`}
+                                    style={{
+                                      padding: "4px 10px",
+                                      borderRadius: "20px",
+                                      fontSize: "11px",
+                                      fontWeight: 500,
+                                      background:
+                                        severityClass === "critical"
+                                          ? "#ffebee"
+                                          : severityClass === "high"
+                                            ? "#fff3e0"
+                                            : "#e8f5e9",
+                                      color:
+                                        severityClass === "critical"
+                                          ? "#c62828"
+                                          : severityClass === "high"
+                                            ? "#ed6c02"
+                                            : "#2e7d32",
+                                    }}
+                                  >
+                                    {cve.cvss_severity}
+                                  </span>
+                                </td>
+                                <td style={{ padding: "12px 16px" }}>
+                                  {cve.cvss_base_score}
+                                </td>
+                                <td style={{ padding: "12px 16px" }}>
+                                  {cve.epss_score}
+                                </td>
+                                <td style={{ padding: "12px 16px" }}>
+                                  <span
+                                    style={{
+                                      padding: "4px 10px",
+                                      borderRadius: "20px",
+                                      fontSize: "11px",
+                                      fontWeight: 500,
+                                      background: cve.is_kev
+                                        ? "#ffebee"
+                                        : "#e8f5e9",
+                                      color: cve.is_kev ? "#c62828" : "#2e7d32",
+                                    }}
+                                  >
+                                    {cve.is_kev ? "Yes" : "No"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
-                </>
+                </div>
               )}
             </div>
 
-            <div className="baseline-actions" style={{ marginTop: "24px", paddingTop: "16px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end" }}>
-              <button className="btn pri" onClick={createBaseline} disabled={creatingBaseline}>
-                {creatingBaseline ? "Creating Baseline..." : "Create Baseline"}
-              </button>
+            {/* Sticky Editor Footer */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderTop: "1px solid var(--border)",
+                background: "var(--panel-2)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "16px",
+              }}
+            >
+              {!isExternal && (
+                <button
+                  className="btn pri"
+                  onClick={selectedBaselineId ? updateBaseline : createBaseline}
+                  disabled={creatingBaseline}
+                  style={{
+                    padding: "8px 24px",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    background: "var(--primary)",
+                    color: "white",
+                    border: "none",
+                    transition: "all 0.2s",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                  }}
+                >
+                  {creatingBaseline && (
+                    <InlineSpinner size={16} variant="light" />
+                  )}
+
+                  {creatingBaseline
+                    ? selectedBaselineId
+                      ? "Updating Baseline..."
+                      : "Creating Baseline..."
+                    : selectedBaselineId
+                      ? "Update Baseline"
+                      : "Create Baseline"}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "var(--muted)",
+              textAlign: "center",
+              padding: "40px",
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              width="56"
+              height="56"
+              style={{ marginBottom: "16px", opacity: 0.4 }}
+            >
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            <div style={{ fontSize: "16px", fontWeight: 500 }}>
+              Select a Baseline to Edit
+            </div>
+            <div style={{ fontSize: "13px", marginTop: "8px" }}>
+              Or go to the Patches tab and select patches to create a new one.
             </div>
           </div>
         )}
       </div>
+      <ConfirmModal
+        open={showDeleteModal}
+        title="Delete Baseline"
+        message={
+          <>
+            <div style={{ marginBottom: "6px" }}>
+              Are you sure you want to delete this baseline?
+            </div>
+            <div style={{ color: "#dc2626", fontSize: "13px" }}>
+              This action cannot be undone.
+            </div>
+          </>
+        }
+        confirmText="Delete"
+        cancelText="Cancel"
+        loading={deletingBaseline}
+        onConfirm={confirmDeleteBaseline}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </div>
   );
 }

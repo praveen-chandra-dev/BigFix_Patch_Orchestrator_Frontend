@@ -1,100 +1,178 @@
-import { useEffect, useState, useMemo } from "react";
+// src/modules/risk/dashboard_component/PatchDashboard.jsx
+import { useEffect, useState, useMemo, useRef } from "react";
 import api from "../../../api/api";
-import "./patch.css";
+import { performExport } from "../../../utils/exportUtils";
+import Paginator from "../../../components/common/Paginator";
 
-/* ======================================
-   SCORE → SEVERITY
-====================================== */
-
-const getSeverityFromScore = (score) => {
-  if (score >= 90) return "CRITICAL";
-  if (score >= 75) return "HIGH";
-  if (score >= 60) return "IMPORTANT";
-  if (score >= 40) return "MODERATE";
-  return "LOW";
+const getScoreColorClass = (score) => {
+  if (score >= 90) return "score-critical";
+  if (score >= 75) return "score-high";
+  if (score >= 60) return "score-important";
+  if (score >= 40) return "score-moderate";
+  return "score-low";
 };
 
-export default function PatchDashboard() {
-  const [patches, setPatches] = useState([]);
-  const [cves, setCves] = useState([]);
-  const [loading, setLoading] = useState(true);
+const getDerivedSeverity = (patch) => {
+  const score = Number(patch.final_score || 0);
+  const cveCount = Number(patch.cve_count || 0);
+  const sevRaw = String(patch.severity || patch.source_severity || "")
+    .toUpperCase()
+    .trim();
 
-  const [modalData, setModalData] = useState(null);
+  let derivedSeverity = "UNSPECIFIED";
 
-  const [filters, setFilters] = useState([
-    { column: "patch_id", operator: "contains", value: "", logic: "AND" },
+  // RULE 1: No CVEs → use original severity
+  if (cveCount === 0) {
+    if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)) {
+      derivedSeverity = sevRaw;
+    }
+  }
+  // RULE 2: Score overrides
+  else if (score > 0) {
+    if (score >= 90) derivedSeverity = "CRITICAL";
+    else if (score >= 75) derivedSeverity = "HIGH";
+    else if (score >= 60) derivedSeverity = "IMPORTANT";
+    else if (score >= 40) derivedSeverity = "MODERATE";
+    else derivedSeverity = "LOW";
+  }
+  // RULE 3: fallback
+  else if (
+    ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
+  ) {
+    derivedSeverity = sevRaw;
+  }
+
+  return derivedSeverity;
+};
+
+export default function PatchDashboard({
+  patches = [],
+  cves = [],
+  baselines = [], // from parent, may be incomplete
+  parentFilters = [],
+  parentLogic = "AND",
+  onDataLoaded,
+  navigate,
+}) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+
+  const [showColDrop, setShowColDrop] = useState(false);
+  const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState("CSV");
+  const colRef = useRef(null);
+  const expRef = useRef(null);
+
+  const [cols, setCols] = useState([
+    { id: "patch_id", label: "Patch ID", show: true },
+    { id: "patch_name", label: "Name", show: true },
+    { id: "site_name", label: "Site", show: true },
+    { id: "final_score", label: "Score", show: true },
+    { id: "severity", label: "Severity", show: true },
+    { id: "cve_count", label: "CVEs", show: true },
+    { id: "device_count", label: "Devices", show: true },
   ]);
 
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10;
+  // Store baseline patch IDs for filtering
+  const [baselinePatchMap, setBaselinePatchMap] = useState(() => {
+    // Initialize from passed baselines if they already have patch_ids
+    const map = {};
+    baselines.forEach((b) => {
+      const name = (b.baseline_name || b.name || "").toLowerCase();
+      const patchIds = (b.patch_ids || []).map((id) =>
+        String(id)
+          .replace(/^BIGFIX-/i, "")
+          .trim(),
+      );
+      if (patchIds.length) map[name] = new Set(patchIds);
+    });
+    return map;
+  });
 
-  /* =============================
-     LOAD DATA
-  ============================= */
-
+  // Fetch full baseline list (with patch IDs) when needed
   useEffect(() => {
-    const load = async () => {
+    const neededBaselines = new Set();
+    for (const block of parentFilters) {
+      for (const cond of block.conds || []) {
+        if (cond.column === "baseline_name" && cond.value) {
+          const name = String(cond.value).toLowerCase().trim();
+          if (!baselinePatchMap[name]) {
+            neededBaselines.add(name);
+          }
+        }
+      }
+    }
+    if (neededBaselines.size === 0) return;
+
+    const fetchBaselines = async () => {
       try {
-        const patchRes = await api.get("/patches");
-
-        const patchData = Array.isArray(patchRes.data)
-          ? patchRes.data
-          : patchRes.data?.data || [];
-
-        setPatches(patchData);
-
-        const payload = patchData.map((p) => ({
-          patch_id: p.patch_id,
-          site_name: p.site_name,
-        }));
-
-        const cveRes = await api.post("/cves/by-patches", {
-          patches: payload,
-        });
-
-        setCves(cveRes.data?.data || []);
+        const res = await api.get("/baselines/list");
+        const raw = Array.isArray(res.data?.baselines)
+          ? res.data.baselines
+          : [];
+        const newMap = { ...baselinePatchMap };
+        for (const b of raw) {
+          const name = (b.baseline_name || b.name || "").toLowerCase();
+          const patchIds = (b.patches || [])
+            .map((p) => {
+              const id = typeof p === "object" ? p.patch_id : p;
+              return String(id)
+                .replace(/^BIGFIX-/i, "")
+                .trim();
+            })
+            .filter(Boolean);
+          newMap[name] = new Set(patchIds);
+        }
+        setBaselinePatchMap(newMap);
       } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
+        console.warn("Failed to load baselines for filtering", err);
       }
     };
+    fetchBaselines();
+  }, [parentFilters, baselinePatchMap]);
 
-    load();
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (colRef.current && !colRef.current.contains(e.target))
+        setShowColDrop(false);
+      if (expRef.current && !expRef.current.contains(e.target))
+        setShowExpDrop(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  /* =============================
-     PATCH → CVE MAP
-  ============================= */
+  useEffect(() => {
+    onDataLoaded?.();
+  }, []);
 
   const patchCveMap = useMemo(() => {
     const map = {};
-
     cves.forEach((c) => {
-      if (!map[c.patch_id]) map[c.patch_id] = [];
-      map[c.patch_id].push(c.cve_id);
+      const key = `${c.patch_id}-${c.site_name}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(c.cve_id);
     });
-
     return map;
   }, [cves]);
 
-  /* =============================
-     PATCH EXPOSURE
-  ============================= */
-
   const patchExposure = useMemo(() => {
     return patches.map((patch) => {
-      const cvesForPatch = patchCveMap[patch.patch_id] || [];
-
+      const key = `${patch.patch_id}-${patch.site_name}`;
+      const cvesForPatch = patchCveMap[key] || [];
       const devices = patch.applicable_computers || [];
-
       const score = Number(patch.final_score || 0);
 
+      const finalSev = getDerivedSeverity(patch);
+
       return {
-        // THIS LINE STRIPS "BIGFIX-" FROM THE ID
-        patch_id: patch.patch_id ? patch.patch_id.replace(/^BIGFIX-/i, "") : "", 
-        score,
-        severity: getSeverityFromScore(score),
+        patch_id: patch.patch_id ? patch.patch_id.replace(/^BIGFIX-/i, "") : "",
+        patch_name: patch.patch_name || "Unknown",
+        site_name: patch.site_name || "",
+        vendor: patch.vendor || "Unknown",
+        final_score: score,
+        severity: finalSev,
         cve_count: cvesForPatch.length,
         device_count: devices.length,
         cves: cvesForPatch,
@@ -103,299 +181,588 @@ export default function PatchDashboard() {
     });
   }, [patches, patchCveMap]);
 
-  /* =============================
-     FILTER LOGIC
-  ============================= */
-
   const applyFilters = (patch) => {
-    return filters.reduce((result, filter, index) => {
-      let condition = true;
+    if (!parentFilters.length) return true;
+    let globalMatch = parentLogic === "OR" ? false : true;
+    for (let b of parentFilters) {
+      let blockMatch = true;
+      let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase().trim();
 
-      const search = filter.value.toLowerCase();
+        if (c.column === "cve_id") {
+          condition = (patch.cves || []).some((x) =>
+            x.toLowerCase().includes(search),
+          );
+        } else if (c.column === "device") {
+          condition = (patch.devices || []).some((x) =>
+            x.toLowerCase().includes(search),
+          );
+        } else if (c.column === "final_score") {
+          const field = Number(patch.final_score);
+          const val = Number(c.value);
+          if (!isNaN(val)) {
+            if (c.operator === ">") condition = field > val;
+            else if (c.operator === "<") condition = field < val;
+            else if (c.operator === "=") condition = field === val;
+            else if (c.operator === ">=") condition = field >= val;
+            else if (c.operator === "<=") condition = field <= val;
+          }
+        } else if (c.column === "baseline_name") {
+          const baselineName = search;
+          const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
+          const baselinePatchSet = baselinePatchMap[baselineName];
+          if (!baselinePatchSet) {
+            condition = false;
+          } else {
+            condition = baselinePatchSet.has(patchId);
+          }
+        } else {
+          let field;
+          if (c.column === "severity") {
+            field = String(patch.severity || "").toLowerCase();
+          } else {
+            field = String(patch[c.column] || "").toLowerCase();
+          }
 
-      if (filter.column === "patch_id") {
-        const field = patch.patch_id.toLowerCase();
-
-        if (filter.operator === "contains") condition = field.includes(search);
-        if (filter.operator === "=") condition = field === search;
+          if (c.operator === "contains") condition = field.includes(search);
+          else if (c.operator === "=") condition = field === search;
+          else if (c.operator === "!=") condition = field !== search;
+        }
+        blockMatch = blockMatch && condition;
       }
-
-      if (filter.column === "cve_id") {
-        const list = patch.cves || [];
-
-        if (filter.operator === "contains")
-          condition = list.some((c) => c.toLowerCase().includes(search));
-
-        if (filter.operator === "=")
-          condition = list.some((c) => c.toLowerCase() === search);
-      }
-
-      if (filter.column === "device") {
-        const list = patch.devices || [];
-
-        if (filter.operator === "contains")
-          condition = list.some((d) => d.toLowerCase().includes(search));
-
-        if (filter.operator === "=")
-          condition = list.some((d) => d.toLowerCase() === search);
-      }
-
-      if (filter.column === "severity") {
-        const field = patch.severity.toLowerCase();
-
-        if (filter.operator === "contains") condition = field.includes(search);
-        if (filter.operator === "=") condition = field === search;
-      }
-
-      if (index === 0) return condition;
-
-      if (filter.logic === "AND") return result && condition;
-      if (filter.logic === "OR") return result || condition;
-
-      return result;
-    }, true);
+      if (validConds > 0)
+        globalMatch =
+          parentLogic === "OR"
+            ? globalMatch || blockMatch
+            : globalMatch && blockMatch;
+    }
+    return globalMatch;
   };
 
-  const filteredPatches = patchExposure.filter(applyFilters);
+  const normalizedFilters = useMemo(() => {
+    if (!parentFilters?.length) return [];
+    if (parentFilters[0]?.field) {
+      return [
+        {
+          conds: parentFilters.map((f) => ({
+            column: f.field,
+            operator: "=",
+            value: f.value,
+          })),
+        },
+      ];
+    }
+    return parentFilters;
+  }, [parentFilters]);
 
-  const totalPages = Math.ceil(filteredPatches.length / rowsPerPage);
+  const filteredPatches = patchExposure.filter((patch) => {
+    if (!normalizedFilters.length) return true;
+    let globalMatch = parentLogic === "OR" ? false : true;
+    for (let b of normalizedFilters) {
+      let blockMatch = true;
+      let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++;
+        let condition = true;
+        const search = String(c.value).toLowerCase().trim();
 
-  const paginatedPatches = filteredPatches.slice(
+        if (c.column === "severity") {
+          condition = String(patch.severity || "").toLowerCase() === search;
+        } else if (c.column === "patch_id") {
+          condition = String(patch.patch_id || "")
+            .toLowerCase()
+            .includes(search);
+        } else if (c.column === "patch_name") {
+          condition = String(patch.patch_name || "")
+            .toLowerCase()
+            .includes(search);
+        } else if (c.column === "baseline_name") {
+          const baselineName = search;
+          const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
+          const baselinePatchSet = baselinePatchMap[baselineName];
+          condition = baselinePatchSet ? baselinePatchSet.has(patchId) : false;
+        } else if (c.column === "cve_id") {
+          condition = (patch.cves || []).some(
+            (x) => String(x).toLowerCase() === search,
+          );
+        } else if (c.column === "device") {
+          condition = (patch.devices || []).some(
+            (x) => String(x).toLowerCase() === search,
+          );
+        }
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0)
+        globalMatch =
+          parentLogic === "OR"
+            ? globalMatch || blockMatch
+            : globalMatch && blockMatch;
+    }
+    return globalMatch;
+  });
+
+  const sortedPatches = useMemo(() => {
+    let sortable = [...filteredPatches];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        if (
+          ["final_score", "cve_count", "device_count"].includes(sortConfig.key)
+        ) {
+          aVal = Number(aVal || 0);
+          bVal = Number(bVal || 0);
+        } else {
+          aVal = String(aVal || "").toLowerCase();
+          bVal = String(bVal || "").toLowerCase();
+        }
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortable;
+  }, [filteredPatches, sortConfig]);
+
+  const paginatedPatches = sortedPatches.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage,
   );
 
-  /* =============================
-     CSV EXPORT
-  ============================= */
+  const handleSort = (key) =>
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+    }));
 
-  const exportCSV = () => {
-    const header = ["Patch ID", "Score", "Severity", "CVEs", "Devices"];
-
-    const rows = filteredPatches.map((p) => [
-      p.patch_id,
-      p.score,
-      p.severity,
-      `"${p.cves.join(",")}"`,
-      `"${p.devices.join(",")}"`,
-    ]);
-
-    const csv =
-      header.join(",") + "\n" + rows.map((r) => r.join(",")).join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv" });
-
-    const url = window.URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-
-    a.href = url;
-    a.download = "patch_exposure.csv";
-    a.click();
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key)
+      return <span className="muted-text ml-6">↕</span>;
+    return (
+      <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>
+    );
   };
 
-  /* =============================
-     FILTER FUNCTIONS
-  ============================= */
+  const handleExport = (scope) => {
+    setShowExpDrop(false);
+    let dataToExport = [];
+    if (scope === "page") dataToExport = paginatedPatches;
+    else if (scope === "filtered") dataToExport = sortedPatches;
+    else dataToExport = patchExposure;
 
-  const updateFilter = (index, key, value) => {
-    const updated = [...filters];
-    updated[index][key] = value;
-    setFilters(updated);
+    performExport(
+      dataToExport,
+      cols,
+      exportFormat,
+      "patch_exposure",
+      (p, c) => {
+        if (c === "cve_count") return p.cves.join(",");
+        if (c === "device_count") return p.devices.join(",");
+        return p[c];
+      },
+    );
   };
 
-  const addFilterRow = () => {
-    setFilters((prev) => [
-      ...prev,
-      { column: "patch_id", operator: "contains", value: "", logic: "AND" },
-    ]);
+  const handleCveRedirect = (cve) => {
+    navigate(
+      "cve",
+      [{ conds: [{ column: "cve_id", operator: "=", value: cve }] }],
+      "AND",
+    );
   };
 
-  const removeFilterRow = (index) => {
-    if (filters.length === 1) return;
-    setFilters(filters.filter((_, i) => i !== index));
+  const handleDeviceRedirect = (device) => {
+    navigate(
+      "computer",
+      [
+        {
+          conds: [
+            { column: "device_name", operator: "contains", value: device },
+          ],
+        },
+      ],
+      "AND",
+    );
   };
-
-  const resetFilters = () => {
-    setFilters([
-      { column: "patch_id", operator: "contains", value: "", logic: "AND" },
-    ]);
-  };
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filters]);
-
-  if (loading) return <div className="patch-loading">Loading patches...</div>;
 
   return (
-    <div className="patch-dashboard">
-      <h2 className="patch-dashboard-title">Patch Exposure</h2>
-
-      {/* FILTER HEADER */}
-
-      <div className="patch-filter-header">
-        <div className="patch-filter-left">
-          {filters.map((filter, index) => (
-            <div key={index} className="risk-filter-row">
-              {index > 0 && (
-                <select
-                  value={filter.logic}
-                  onChange={(e) => updateFilter(index, "logic", e.target.value)}
-                >
-                  <option value="AND">AND</option>
-                  <option value="OR">OR</option>
-                </select>
-              )}
-
-              <select
-                value={filter.column}
-                onChange={(e) => updateFilter(index, "column", e.target.value)}
+    <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+      <div
+        className="grid-toolbar"
+        style={{ margin: "0 0 16px 0", padding: 0 }}
+      >
+        <div
+          className="grid-toolbar-left"
+          style={{ fontWeight: 600, color: "var(--text)" }}
+        ></div>
+        <div
+          className="grid-toolbar-right"
+          style={{ display: "flex", gap: "12px" }}
+        >
+          <div className="dropdown" ref={colRef}>
+            <button
+              className="btn outline sec small"
+              onClick={() => {
+                setShowColDrop(!showColDrop);
+                setShowExpDrop(false);
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                width="16"
+                height="16"
               >
-                <option value="patch_id">Patch ID</option>
-                <option value="cve_id">CVE ID</option>
-                <option value="device">Device</option>
-                <option value="severity">Severity</option>
-              </select>
-
-              <select
-                value={filter.operator}
-                onChange={(e) =>
-                  updateFilter(index, "operator", e.target.value)
-                }
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+              </svg>
+              &nbsp; Columns
+            </button>
+            {showColDrop && (
+              <div
+                className="dropdown-menu show"
+                style={{ minWidth: "220px", padding: "12px", right: 0 }}
               >
-                <option value="contains">contains</option>
-                <option value="=">equals</option>
-              </select>
-
-              <input
-                value={filter.value}
-                onChange={(e) => updateFilter(index, "value", e.target.value)}
-                placeholder="Enter value"
-              />
-
-              {index === filters.length - 1 && (
-                <button onClick={addFilterRow}>+</button>
-              )}
-
-              {filters.length > 1 && (
-                <button onClick={() => removeFilterRow(index)}>−</button>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="patch-filter-right">
-          <button className="patch-export-btn" onClick={exportCSV}>
-            Export CSV
-          </button>
-        </div>
-      </div>
-
-      <button className="risk-reset-btn" onClick={resetFilters}>
-        Reset Filters
-      </button>
-
-      {/* TABLE */}
-
-      <div className="patch-table-container">
-        <table className="patch-table">
-          <thead>
-            <tr>
-              <th>Patch ID</th>
-              <th style={{ textAlign: "center" }}>Score</th>
-              <th style={{ textAlign: "center" }}>Severity</th>
-              <th style={{ textAlign: "center" }}>CVEs</th>
-              <th style={{ textAlign: "center" }}>Devices</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {paginatedPatches.map((p) => (
-              <tr key={p.patch_id}>
-                <td>{p.patch_id}</td>
-
-                <td className="patch-count">{p.score}</td>
-
-                <td className="patch-severity">{p.severity}</td>
-
-                <td
-                  className="patch-link patch-count"
-                  onClick={() =>
-                    setModalData({
-                      title: "CVEs",
-                      items: p.cves,
-                    })
-                  }
-                >
-                  {p.cve_count}
-                </td>
-
-                <td
-                  className="patch-link patch-count"
-                  onClick={() =>
-                    setModalData({
-                      title: "Devices",
-                      items: p.devices,
-                    })
-                  }
-                >
-                  {p.device_count}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="pagination-container">
-          <button
-            disabled={currentPage === 1}
-            onClick={() => setCurrentPage(currentPage - 1)}
-          >
-            Previous
-          </button>
-
-          <span className="pagination-info">
-            Page {currentPage} of {totalPages}
-          </span>
-
-          <button
-            disabled={currentPage === totalPages}
-            onClick={() => setCurrentPage(currentPage + 1)}
-          >
-            Next
-          </button>
-        </div>
-      </div>
-
-      {/* MODAL */}
-
-      {modalData && (
-        <div className="patch-modal-overlay" onClick={() => setModalData(null)}>
-          <div className="patch-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="patch-modal-header">
-              <h3>
-                {modalData.title} ({modalData.items.length})
-              </h3>
-
-              <button
-                className="patch-modal-close"
-                onClick={() => setModalData(null)}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="patch-modal-body">
-              <ul>
-                {modalData.items.map((item, i) => (
-                  <li key={i}>{item}</li>
+                {cols.map((col, i) => (
+                  <label
+                    key={col.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      cursor: "pointer",
+                      padding: "6px 12px",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      className="custom-checkbox"
+                      checked={col.show}
+                      onChange={(e) => {
+                        const next = [...cols];
+                        next[i].show = e.target.checked;
+                        setCols(next);
+                      }}
+                    />
+                    <span style={{ fontSize: "13px", fontWeight: 500 }}>
+                      {col.label}
+                    </span>
+                  </label>
                 ))}
-              </ul>
-            </div>
+              </div>
+            )}
+          </div>
+          <div className="dropdown" ref={expRef}>
+            <button
+              className="btn outline small"
+              onClick={() => {
+                setShowExpDrop(!showExpDrop);
+                setShowColDrop(false);
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                width="16"
+                height="16"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+              </svg>
+              &nbsp; Export
+            </button>
+            {showExpDrop && (
+              <div
+                className="dropdown-menu show"
+                style={{ width: "280px", padding: "16px", right: 0 }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    marginBottom: "12px",
+                    letterSpacing: "0.05em",
+                  }}
+                >
+                  Format
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr",
+                    gap: "8px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
+                    <button
+                      key={fmt}
+                      className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
+                      style={{ fontSize: "11px", height: "32px", padding: 0 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExportFormat(fmt);
+                      }}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
+                </div>
+                <div
+                  style={{
+                    height: "1px",
+                    background: "var(--border)",
+                    marginBottom: "16px",
+                  }}
+                ></div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    marginBottom: "12px",
+                    letterSpacing: "0.05em",
+                  }}
+                >
+                  Scope
+                </div>
+                <button className="item" onClick={() => handleExport("page")}>
+                  Current Page
+                </button>
+                <button
+                  className="item"
+                  onClick={() => handleExport("filtered")}
+                >
+                  Filtered Data
+                </button>
+                <button className="item" onClick={() => handleExport("all")}>
+                  All Data
+                </button>
+              </div>
+            )}
           </div>
         </div>
-      )}
+      </div>
+
+      <div
+        className="tableWrap border-top"
+        style={{
+          flex: 1,
+          overflow: "auto",
+          margin: "0 -32px",
+          width: "calc(100% + 64px)",
+          borderLeft: "none",
+          borderRight: "none",
+          borderRadius: 0,
+        }}
+      >
+        <table style={{ tableLayout: "fixed", width: "100%" }}>
+          <thead className="kpi-th-sticky">
+            <tr>
+              {cols.find((c) => c.id === "patch_id")?.show && (
+                <th
+                  className="cursor-pointer"
+                  onClick={() => handleSort("patch_id")}
+                >
+                  Patch ID{getSortIcon("patch_id")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "patch_name")?.show && (
+                <th
+                  className="cursor-pointer"
+                  onClick={() => handleSort("patch_name")}
+                >
+                  Name{getSortIcon("patch_name")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "site_name")?.show && (
+                <th
+                  className="cursor-pointer"
+                  onClick={() => handleSort("site_name")}
+                >
+                  Site{getSortIcon("site_name")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "final_score")?.show && (
+                <th
+                  className="cursor-pointer"
+                  style={{ textAlign: "center" }}
+                  onClick={() => handleSort("final_score")}
+                >
+                  Score{getSortIcon("final_score")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "severity")?.show && (
+                <th
+                  className="cursor-pointer"
+                  style={{ textAlign: "center" }}
+                  onClick={() => handleSort("severity")}
+                >
+                  Severity{getSortIcon("severity")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "cve_count")?.show && (
+                <th
+                  className="cursor-pointer"
+                  style={{ textAlign: "center" }}
+                  onClick={() => handleSort("cve_count")}
+                >
+                  CVEs{getSortIcon("cve_count")}
+                </th>
+              )}
+              {cols.find((c) => c.id === "device_count")?.show && (
+                <th
+                  className="cursor-pointer"
+                  style={{ textAlign: "center" }}
+                  onClick={() => handleSort("device_count")}
+                >
+                  Devices{getSortIcon("device_count")}
+                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {paginatedPatches.length === 0 ? (
+              <tr>
+                <td
+                  colSpan="6"
+                  style={{
+                    textAlign: "center",
+                    padding: "40px",
+                    color: "var(--muted)",
+                  }}
+                >
+                  No patches found.
+                </td>
+              </tr>
+            ) : (
+              paginatedPatches.map((p) => (
+                <tr key={p.patch_id}>
+                  {cols.find((c) => c.id === "patch_id")?.show && (
+                    <td>{p.patch_id}</td>
+                  )}
+                  {cols.find((c) => c.id === "patch_name")?.show && (
+                    <td
+                      style={{
+                        maxWidth: "300px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={p.patch_name}
+                    >
+                      {p.patch_name}
+                    </td>
+                  )}
+                  {cols.find((c) => c.id === "site_name")?.show && (
+                    <td>{p.site_name}</td>
+                  )}
+                  {cols.find((c) => c.id === "final_score")?.show && (
+                    <td style={{ textAlign: "center" }}>
+                      <span
+                        className={`score-badge ${getScoreColorClass(p.final_score)}`}
+                      >
+                        {p.final_score.toFixed(2)}
+                      </span>
+                    </td>
+                  )}
+                  {cols.find((c) => c.id === "severity")?.show && (
+                    <td style={{ textAlign: "center" }}>
+                      <span
+                        className={`severity-badge severity-${p.severity.toLowerCase()}`}
+                      >
+                        {p.severity}
+                      </span>
+                    </td>
+                  )}
+                  {cols.find((c) => c.id === "cve_count")?.show && (
+                    <td style={{ textAlign: "center" }}>
+                      <span
+                        className="cell-link"
+                        onClick={() =>
+                          navigate(
+                            "cve",
+                            [
+                              {
+                                conds: [
+                                  {
+                                    column: "patch_id",
+                                    operator: "=",
+                                    value: p.patch_id,
+                                  },
+                                  {
+                                    column: "site_name",
+                                    operator: "=",
+                                    value: p.site_name,
+                                  },
+                                ],
+                              },
+                            ],
+                            "AND",
+                          )
+                        }
+                      >
+                        {p.cve_count}
+                      </span>
+                    </td>
+                  )}
+                  {cols.find((c) => c.id === "device_count")?.show && (
+                    <td style={{ textAlign: "center" }}>
+                      <span
+                        className="cell-link"
+                        onClick={() =>
+                          navigate(
+                            "computer",
+                            [
+                              {
+                                conds: [
+                                  {
+                                    column: "patch_id",
+                                    operator: "=",
+                                    value: p.patch_id,
+                                  },
+                                ],
+                              },
+                            ],
+                            "AND",
+                          )
+                        }
+                      >
+                        {p.device_count}
+                      </span>
+                    </td>
+                  )}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <Paginator
+        total={sortedPatches.length}
+        rpp={rowsPerPage}
+        setRpp={setRowsPerPage}
+        page={currentPage}
+        setPage={setCurrentPage}
+        edgeToEdge={true}
+      />
     </div>
   );
 }

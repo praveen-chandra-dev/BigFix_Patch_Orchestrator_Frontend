@@ -1,5 +1,12 @@
 // src/components/GroupManager.jsx
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import FilterDrawer from "./FilterDrawer";
+import { performExport } from "../utils/exportUtils";
+import FancySelect from "./common/FancySelect";
+import Paginator from "./common/Paginator";
+import InlineSpinner from "./common/InlineSpinner";
+import { useToast } from "./common/CustomToast";
+import ComputerList from "./ComputerList";
 
 const API = window.env.VITE_API_BASE;
 
@@ -21,70 +28,26 @@ async function postJSON(endpoint, body) {
   return j;
 }
 
-const FancySelect = ({ label, options, value, onChange, disabled, placeholder, isLoading, multiSelect }) => {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef(null);
-
-  useEffect(() => {
-    function handleClickOutside(event) { if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setOpen(false); }
-    document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  let displayText = placeholder; let isPlaceholder = true;
-  if (multiSelect) {
-    if (Array.isArray(value) && value.length > 0) { isPlaceholder = false; displayText = value.length <= 2 ? value.join(", ") : `${value.length} selected`; }
-  } else {
-    const selectedOption = options.find(o => o === value);
-    if (selectedOption) { displayText = selectedOption; isPlaceholder = false; }
-  }
-
-  const handleOptionClick = (opt, e) => {
-    if (multiSelect) { e.stopPropagation(); const current = Array.isArray(value) ? value : []; const newSet = new Set(current); if (newSet.has(opt)) newSet.delete(opt); else newSet.add(opt); onChange(Array.from(newSet)); } 
-    else { onChange(opt); setOpen(false); }
-  };
-
-  return (
-    <div className="field flex-1">
-      <span className="label">{label}</span>
-      {isLoading && <div className="sub label-loading-sub">Loading...</div>}
-      <div className={`fx-wrap flex-1 ${open ? "fx-open" : ""} ${disabled || isLoading ? "disabled" : ""}`} ref={wrapperRef}>
-        <button type="button" className="fx-trigger" onClick={() => setOpen(!open)}>
-          <span className={`fx-value ${isPlaceholder ? "fx-placeholder" : ""}`} title={!isPlaceholder ? displayText : ""}>{displayText}</span>
-          <span className="fx-chevron">▾</span>
-        </button>
-        {open && (
-          <div className="fx-menu">
-            <div className="fx-menu-inner">
-              {options.length === 0 ? ( <div className="fx-item fx-empty">No options</div> ) : (
-                options.map((opt) => {
-                  const isSelected = multiSelect ? (value || []).includes(opt) : value === opt;
-                  return (
-                    <div key={opt} className={`fx-item ${isSelected ? "fx-active" : ""}`} onClick={(e) => handleOptionClick(opt, e)}>
-                      {multiSelect && <input type="checkbox" className="custom-checkbox mr-10 no-events" checked={isSelected} readOnly />}
-                      <span className="fx-label">{opt}</span>
-                      {!multiSelect && isSelected && <span className="fx-tick">✓</span>}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 export default function GroupManager({ onClose }) {
+  const isMO = sessionStorage.getItem("isMO") === "true";
+  const { showToast } = useToast();
+  
+  // Tab Routing ('COMPUTERS' = ComputerList, 'MANAGE' = Manage Groups, 'CREATE' = Create/Edit Form)
+  const [activeTab, setActiveTab] = useState('COMPUTERS');
+  const [targetGroupId, setTargetGroupId] = useState(null);
+  const [targetGroupName, setTargetGroupName] = useState("");
+
+  // --- EDIT STATE ---
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+
+  // --- CREATE / EDIT FORM STATE ---
   const [groupType, setGroupType] = useState("Automatic");
   const [groupName, setGroupName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
-
   const [properties, setProperties] = useState([]);
   const [selectedProperty, setSelectedProperty] = useState("");
-  const [operators] = useState(["Contains", "Equals", "Starts With"]);
+  const [operators] = useState([{value:"Contains", label:"Contains"}, {value:"Equals", label:"Equals"}, {value:"Starts With", label:"Starts With"}]);
   const [selectedOperator, setSelectedOperator] = useState("Contains");
   const [valueInput, setValueInput] = useState("");
   const [conditions, setConditions] = useState([]); 
@@ -95,112 +58,543 @@ export default function GroupManager({ onClose }) {
   const [loadingSites, setLoadingSites] = useState(false);
 
   const [allComputers, setAllComputers] = useState([]);
-  const [osList, setOsList] = useState([]); 
-  const [selectedOSs, setSelectedOSs] = useState([]); 
   const [selectedCompIds, setSelectedCompIds] = useState(new Set()); 
-  
-  const [compPage, setCompPage] = useState(1);
-  const [compSearch, setCompSearch] = useState("");
-  const [hasMoreComp, setHasMoreComp] = useState(true);
   const [fetchingComp, setFetchingComp] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState("");
 
-  useEffect(() => { setError(""); setSuccessMsg(""); }, []);
-  const clearMessages = () => { if (error) setError(""); if (successMsg) setSuccessMsg(""); };
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+  const [showColDrop, setShowColDrop] = useState(false);
+  const [showExpDrop, setShowExpDrop] = useState(false);
+  const [exportFormat, setExportFormat] = useState('CSV');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [globalLogic, setGlobalLogic] = useState("AND");
+  const [filters, setFilters] = useState([]);
+  
+  const logicOptions = useMemo(() => [{value:"All", label:"All"}, {value:"Any", label:"Any"}], []);
+const [groupLogic, setGroupLogic] = useState("All");
+
+  const colRef = useRef(null);
+  const expRef = useRef(null);
+
+  // --- MANAGE GROUPS STATES ---
+  const [manageGroups, setManageGroups] = useState([]);
+  const [fetchingManage, setFetchingManage] = useState(false);
+  const [managePage, setManagePage] = useState(1);
+  const [manageRpp, setManageRpp] = useState(10);
+  const [manageDrawerOpen, setManageDrawerOpen] = useState(false);
+  const [manageGlobalLogic, setManageGlobalLogic] = useState("AND");
+  const [manageFilters, setManageFilters] = useState([]);
+  const [manageSort, setManageSort] = useState({ key: 'site', direction: 'asc' });
+  const [manageShowCol, setManageShowCol] = useState(false);
+  const [manageShowExp, setManageShowExp] = useState(false);
+  const manageColRef = useRef(null);
+  const manageExpRef = useRef(null);
+
+  const [manageCols, setManageCols] = useState([
+    { id: 'id', label: 'ID', show: true },
+    { id: 'name', label: 'Name', show: true },
+    { id: 'type', label: 'Type', show: true },
+    { id: 'site', label: 'Site', show: true },
+    { id: 'count', label: 'Member Computer Count', show: true }
+  ]);
+
+  const managePropertyOptions = useMemo(() => [
+    { value: "name", label: "Name" },
+    { value: "type", label: "Type" },
+    { value: "site", label: "Site" },
+    { value: "id", label: "ID" },
+    { value: "count", label: "Member Count" }
+  ], []);
+
+  const fetchManageGroups = async (forceRefresh = false) => {
+    setFetchingManage(true);
+    try {
+      const data = await getJSON(`/api/groups/manage?refresh=${forceRefresh}`);
+      if (data.ok) setManageGroups(data.groups || []);
+    } catch (e) { showToast(e.message, "error"); } 
+    finally { setFetchingManage(false); }
+  };
 
   useEffect(() => {
-    clearMessages();
-    if (groupType === "Automatic") {
+    if (activeTab === 'MANAGE') fetchManageGroups(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleOutsideManage = (e) => {
+      if (manageColRef.current && !manageColRef.current.contains(e.target)) setManageShowCol(false);
+      if (manageExpRef.current && !manageExpRef.current.contains(e.target)) setManageShowExp(false);
+    };
+    document.addEventListener("mousedown", handleOutsideManage);
+    return () => document.removeEventListener("mousedown", handleOutsideManage);
+  }, []);
+
+  const applyManageFilters = (group) => {
+    if (!manageFilters.length) return true;
+    let globalMatch = manageGlobalLogic === "OR" ? false : true;
+    for (let b of manageFilters) {
+      let blockMatch = true; let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++; let condition = true;
+        const search = String(c.value).toLowerCase();
+        const field = String(group[c.column] || "").toLowerCase();
+
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+        else if (c.operator === ">") condition = Number(field) > Number(search);
+        else if (c.operator === "<") condition = Number(field) < Number(search);
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) globalMatch = manageGlobalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+    }
+    return globalMatch;
+  };
+
+  const filteredManageGroups = useMemo(() => manageGroups.filter(applyManageFilters), [manageGroups, manageFilters, manageGlobalLogic]);
+  const activeManageFilterCount = manageFilters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+
+  const sortedManageGroups = useMemo(() => {
+    let items = [...filteredManageGroups];
+    if (manageSort.key) {
+      items.sort((a, b) => {
+        let aVal = a[manageSort.key] || "";
+        let bVal = b[manageSort.key] || "";
+        if (manageSort.key === 'count' || manageSort.key === 'id') {
+           return manageSort.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
+        }
+        aVal = String(aVal).toLowerCase();
+        bVal = String(bVal).toLowerCase();
+        if (aVal < bVal) return manageSort.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return manageSort.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return items;
+  }, [filteredManageGroups, manageSort]);
+
+  const paginatedManageGroups = sortedManageGroups.slice((managePage - 1) * manageRpp, managePage * manageRpp);
+  const handleManageSort = (key) => setManageSort(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getManageSortIcon = (key) => manageSort.key === key ? <span className="ml-6">{manageSort.direction === "asc" ? "↑" : "↓"}</span> : <span className="muted-text ml-6">↕</span>;
+
+  const handleManageExport = (scope) => { 
+    setManageShowExp(false); 
+    let dataToExport = scope === 'page' ? paginatedManageGroups : scope === 'filtered' ? sortedManageGroups : manageGroups;
+    performExport(dataToExport, manageCols, exportFormat, "manage_groups_export");
+  };
+
+  // --- CREATE / EDIT LOGIC ---
+  const [cols, setCols] = useState([
+    { id: 'name', label: 'Computer Name', show: true },
+    { id: 'os', label: 'Operating System', show: true },
+    { id: 'ips', label: 'IP Address', show: true }
+  ]);
+
+  const propertyOptions = useMemo(() => [
+    { value: "name", label: "Computer Name" },
+    { value: "os", label: "Operating System" },
+    { value: "ips", label: "IP Address" }
+  ], []);
+
+  useEffect(() => {
+    const handleNav = (e) => {
+        if (typeof e.detail === 'object') {
+            setActiveTab(e.detail.tab);
+            setTargetGroupId(e.detail.groupId);
+            setTargetGroupName(e.detail.groupName);
+        } else {
+            setActiveTab(e.detail);
+            if (e.detail !== 'COMPUTERS') {
+                setTargetGroupId(null);
+                setTargetGroupName("");
+            }
+        }
+    };
+    window.addEventListener('nav:group', handleNav);
+    window.dispatchEvent(new CustomEvent('sync:group_tab', { detail: activeTab }));
+    return () => window.removeEventListener('nav:group', handleNav);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (colRef.current && !colRef.current.contains(e.target)) setShowColDrop(false);
+      if (expRef.current && !expRef.current.contains(e.target)) setShowExpDrop(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  useEffect(() => {
+    setLastUpdated(new Date().toLocaleString());
+    if (groupType === "Automatic" || groupType === "ServerBased") {
       if (properties.length === 0) {
         setLoadingProps(true);
-        getJSON("/api/groups/metadata/properties").then(data => setProperties(data.properties || [])).catch(e => setError(e.message)).finally(() => setLoadingProps(false));
+        getJSON("/api/groups/metadata/properties")
+          .then(data => setProperties(data.properties?.map(p => ({value: p, label: p})) || []))
+          .catch(e => showToast(e.message, "error")) 
+          .finally(() => setLoadingProps(false));
       }
       if (customSites.length === 0) {
         setLoadingSites(true);
-        getJSON("/api/baseline/custom-sites").then(data => { const sites = data.sites || []; setCustomSites(sites); if (sites.length > 0) setSelectedTargetSite(sites[0]); }).catch(e => console.error(e)).finally(() => setLoadingSites(false));
+        getJSON("/api/groups/metadata/role-sites").then(data => { 
+          const sites = data.sites?.map(s => ({value: s, label: s})) || []; 
+          setCustomSites(sites); 
+          if (sites.length > 0) setSelectedTargetSite(sites[0].value); 
+        }).catch(e => console.error(e)).finally(() => setLoadingSites(false));
       }
     }
   }, [groupType]);
 
-  useEffect(() => {
-    if (groupType === "Manual") fetchComputers();
-    else { setAllComputers([]); setCompPage(1); }
-  }, [groupType, compPage, compSearch]);
-
   const fetchComputers = async () => {
-    if (fetchingComp) return;
     setFetchingComp(true);
     try {
-      const url = `/api/groups/metadata/computers?page=${compPage}&limit=20&search=${encodeURIComponent(compSearch)}`;
-      const data = await getJSON(url);
+      const data = await getJSON(`/api/groups/metadata/computers?page=1&limit=10000`);
       if (data.ok) {
-        const newComps = data.computers || [];
-        if (compPage === 1) {
-          setAllComputers(newComps);
-          setOsList(Array.from(new Set(newComps.map(c => c.os).filter(o => o && o !== "Unknown"))).sort());
-        } else {
-          setAllComputers(prev => { const existingIds = new Set(prev.map(c => c.id)); const unique = newComps.filter(c => !existingIds.has(c.id)); return [...prev, ...unique]; });
-          setOsList(prev => { const next = new Set(prev); newComps.forEach(c => { if(c.os && c.os !== "Unknown") next.add(c.os); }); return Array.from(next).sort(); });
-        }
-        setHasMoreComp(compPage < data.totalPages);
+        setAllComputers(data.computers || []);
+        setLastUpdated(new Date().toLocaleString());
       }
-    } catch (e) { setError(e.message); } finally { setFetchingComp(false); }
+    } catch (e) { showToast(e.message, "error"); } 
+    finally { setFetchingComp(false); }
   };
 
-  const observer = useRef();
-  const lastCompRef = useCallback(node => {
-    if (fetchingComp) return;
-    if (observer.current) observer.current.disconnect();
-    observer.current = new IntersectionObserver(entries => { if (entries[0].isIntersecting && hasMoreComp) setCompPage(prev => prev + 1); });
-    if (node) observer.current.observe(node);
-  }, [fetchingComp, hasMoreComp]);
+  useEffect(() => {
+    if (groupType === "Manual") fetchComputers();
+    else { setAllComputers([]); setCurrentPage(1); }
+  }, [groupType]);
 
-  const visibleComputers = useMemo(() => {
-    let list = allComputers;
-    if (sessionStorage.getItem("user_role") === 'EUC') list = list.filter(c => !(c.os || "").toLowerCase().includes("server"));
-    if (selectedOSs.length > 0) list = list.filter(c => selectedOSs.includes(c.os));
-    return list;
-  }, [allComputers, selectedOSs]);
+  const applyFilters = (computer) => {
+    if (!filters.length) return true;
+    let globalMatch = globalLogic === "OR" ? false : true;
+    for (let b of filters) {
+      let blockMatch = true; let validConds = 0;
+      for (let c of b.conds) {
+        if (!c.value) continue;
+        validConds++; let condition = true;
+        const search = String(c.value).toLowerCase();
+        let field = c.column === "ips" ? (computer.ips || []).join(", ").toLowerCase() : String(computer[c.column] || "").toLowerCase();
+
+        if (c.operator === "contains") condition = field.includes(search);
+        else if (c.operator === "=") condition = field === search;
+        else if (c.operator === "!=") condition = field !== search;
+        blockMatch = blockMatch && condition;
+      }
+      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+    }
+    return globalMatch;
+  };
+
+  const visibleComputers = useMemo(() => allComputers.filter(applyFilters), [allComputers, filters, globalLogic]);
+  const sortedComputers = useMemo(() => {
+    let sortableItems = [...visibleComputers];
+    if (sortConfig.key) {
+      sortableItems.sort((a, b) => {
+        let aVal = sortConfig.key === 'ips' ? (Array.isArray(a.ips) ? a.ips.join(", ") : "") : String(a[sortConfig.key] || "").toLowerCase();
+        let bVal = sortConfig.key === 'ips' ? (Array.isArray(b.ips) ? b.ips.join(", ") : "") : String(b[sortConfig.key] || "").toLowerCase();
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [visibleComputers, sortConfig]);
+
+  const paginatedComputers = sortedComputers.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   const addCondition = () => {
-    clearMessages(); setError("");
-    if (!selectedProperty || !valueInput.trim()) { setError("Please select a property and enter a value."); return; }
+    if (!selectedProperty || !valueInput.trim()) { 
+      showToast("Please select a property and enter a value.", "error"); 
+      return; 
+    }
     setConditions([...conditions, { id: Date.now(), property: selectedProperty, operator: selectedOperator, value: valueInput }]);
     setValueInput(""); 
   };
 
-  const removeCondition = (id) => { clearMessages(); setConditions(conditions.filter(c => c.id !== id)); };
+  const removeCondition = (id) => setConditions(conditions.filter(c => c.id !== id));
+  const toggleComputer = (id) => { const next = new Set(selectedCompIds); next.has(id) ? next.delete(id) : next.add(id); setSelectedCompIds(next); };
+  const toggleAllVisible = () => { 
+      const next = new Set(selectedCompIds); 
+      const allVisibleIds = paginatedComputers.map(c => c.id); 
+      const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); 
+      allSelected ? allVisibleIds.forEach(id => next.delete(id)) : allVisibleIds.forEach(id => next.add(id)); 
+      setSelectedCompIds(next); 
+  };
 
-  const toggleComputer = (id) => { clearMessages(); const next = new Set(selectedCompIds); if (next.has(id)) next.delete(id); else next.add(id); setSelectedCompIds(next); };
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
+  const getSortIcon = (key) => sortConfig.key !== key ? <span className="muted-text ml-6">↕</span> : <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
 
-  const toggleAllVisible = () => { clearMessages(); const next = new Set(selectedCompIds); const allVisibleIds = visibleComputers.map(c => c.id); const allSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => next.has(id)); if (allSelected) allVisibleIds.forEach(id => next.delete(id)); else allVisibleIds.forEach(id => next.add(id)); setSelectedCompIds(next); };
+  // 🚀 RESET FORM LOGIC
+  const resetForm = () => {
+      setGroupName("");
+      setConditions([]);
+      setGroupLogic("All"); // <-- Reset logic
+      setSelectedCompIds(new Set());
+      setIsEditing(false);
+      setEditingGroupId(null);
+  };
+  //  HANDLE EDIT ROUTING
+  const handleEditClick = async (groupId) => {
+      try {
+          showToast("Loading group details...", "info");
+          const data = await getJSON(`/api/groups/${groupId}/details`);
+          if (data.ok) {
+              const g = data.groupData;
+              setGroupType(g.type);
+              setGroupName(g.name);
+              
+              if (g.type === "Automatic" || g.type === "ServerBased") {
+                  // <-- Set logic from backend
+                  setGroupLogic(g.logic === "Any" ? "Any" : "All"); 
+                  
+                  setConditions(g.conditions.map((c, i) => ({
+                      id: Date.now() + i,
+                      property: c.property || c.propertyId, 
+                      operator: c.operator,
+                      value: c.value
+                  })));
+                  setSelectedTargetSite(g.siteName === 'master' ? 'ActionSite' : g.siteName);
+              } else if (g.type === "Manual") {
+                  setSelectedCompIds(new Set(g.computerIds));
+                  if(allComputers.length === 0) fetchComputers();
+              }
+              
+              setIsEditing(true);
+              setEditingGroupId(groupId);
+              setActiveTab('CREATE'); 
+          }
+      } catch (e) {
+          showToast("Failed to load group details: " + e.message, "error");
+      }
+  };
 
-  const handleCreate = async () => {
-    setError(""); setSuccessMsg("");
-    if (!groupName.trim()) { setError("Group Name is required."); return; }
-    const payload = { name: groupName, type: groupType };
+  //  UNIFIED SAVE/UPDATE LOGIC
+  const handleSaveGroup = async () => {
+    if (!groupName.trim()) return showToast("Group Name is required.", "error");
+    
+    const payload = { name: groupName, type: groupType, logic: groupLogic };
 
-    if (groupType === "Automatic") {
-      if (conditions.length === 0) { setError("Please add at least one condition."); return; }
-      if (!selectedTargetSite) { setError("Please select a target site."); return; }
+    if (groupType === "Automatic" || groupType === "ServerBased") {
+      if (conditions.length === 0) return showToast("Please add at least one condition.", "error");
+      if (!selectedTargetSite) return showToast("Please select a target site.", "error");
       payload.targetSite = selectedTargetSite; payload.conditions = conditions;
     } else {
-      if (selectedCompIds.size === 0) { setError("Please select at least one computer."); return; }
+      if (selectedCompIds.size === 0) return showToast("Please select at least one computer.", "error");
       payload.computerIds = Array.from(selectedCompIds);
     }
 
     setCreating(true);
     try {
-      await postJSON("/api/groups/create", payload);
-      setSuccessMsg(`${groupType} Group "${groupName}" created successfully!`);
-      setGroupName(""); setConditions([]); setSelectedCompIds(new Set()); setSelectedOSs([]); setCompSearch(""); setCompPage(1);
-    } catch (e) { setError(e.message); } finally { setCreating(false); }
+      if (isEditing) {
+          const r = await fetch(`${API}/api/groups/${editingGroupId}`, {
+              method: "PUT",
+              headers: getHeaders(),
+              body: JSON.stringify(payload)
+          });
+          const j = await r.json();
+          if (!r.ok || j.ok === false) throw new Error(j.error || "Update failed");
+          showToast(`${groupType} Group "${groupName}" updated successfully!`, "success");
+      } else {
+          await postJSON("/api/groups/create", payload);
+          showToast(`${groupType} Group "${groupName}" created successfully!`, "success");
+      }
+      resetForm();
+      setActiveTab('MANAGE'); // Send back to the manage list
+      fetchManageGroups(true); // Auto-refresh the list
+    } catch (e) { 
+      showToast(e.message, "error"); 
+    } finally { 
+      setCreating(false); 
+    }
   };
 
+  const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
+
+  const handleExport = (scope) => { 
+    setShowExpDrop(false); 
+    let dataToExport = scope === 'page' ? paginatedComputers : scope === 'filtered' ? sortedComputers : allComputers;
+    performExport(dataToExport, cols, exportFormat, "computers_export", (r, c) => c === 'ips' ? (Array.isArray(r.ips) ? r.ips.join(", ") : "") : r[c]);
+  };
+
+  if (activeTab === 'COMPUTERS') {
+      return <ComputerList groupId={targetGroupId} groupName={targetGroupName} />;
+  }
+
+  if (activeTab === 'MANAGE') {
+    return (
+      <div className="mgmt">
+        <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+              <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>Manage Groups</h2>
+              <div className="sub mt-4 text-13 muted-text">View and edit existing groups</div>
+          </div>
+          <div className="right flex-row gap-12 items-center">
+             <div style={{ position: 'relative' }}>
+                 <button className="iconbtn" onClick={() => setManageDrawerOpen(true)} title="Filter Data">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                 </button>
+                 {activeManageFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeManageFilterCount}</span>}
+             </div>
+             <button className="iconbtn" onClick={() => fetchManageGroups(true)} title="Refresh Data">
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+             </button>
+          </div>
+        </div>
+        
+        <div className="section overflow-visible" style={{ marginTop: '20px' }}>
+          {activeManageFilterCount > 0 && (
+              <div className="p-0-20-20" style={{ paddingTop: '20px' }}>
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {manageFilters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{manageGlobalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{managePropertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn outline" onClick={() => setManageFilters([])}>Clear Filters</button>
+                  </div>
+              </div>
+          )}
+
+          <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: activeManageFilterCount > 0 ? 0 : '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="title">Group Directory</span>
+              <span className="pill soft">Total: {filteredManageGroups.length}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="dropdown" ref={manageColRef}>
+                    <button className="btn outline sec small" onClick={() => { setManageShowCol(!manageShowCol); setManageShowExp(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        &nbsp; Columns
+                    </button>
+                    {manageShowCol && (
+                        <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {manageCols.map((col, i) => (
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                            const next = [...manageCols]; next[i].show = e.target.checked; setManageCols(next);
+                                        }} />
+                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div className="dropdown" ref={manageExpRef}>
+                    <button className="btn outline small" onClick={() => { setManageShowExp(!manageShowExp); setManageShowCol(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                        &nbsp; Export
+                    </button>
+                    {manageShowExp && (
+                        <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                 <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                               ))}
+                            </div>
+                            <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                            <button className="item" onClick={() => handleManageExport('page')}>Current Page</button>
+                            <button className="item" onClick={() => handleManageExport('filtered')}>Filtered Data</button>
+                            <button className="item" onClick={() => handleManageExport('all')}>All Data</button>
+                        </div>
+                    )}
+                </div>
+            </div>
+          </div>
+          
+          <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
+            {fetchingManage ? (
+               <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading groups...</div>
+            ) : paginatedManageGroups.length === 0 ? (
+               <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No groups found matching your criteria.</div>
+            ) : (
+              <table>
+                <thead className="kpi-th-sticky">
+                  <tr>
+                    {manageCols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('id')}>ID{getManageSortIcon('id')}</th>}
+                    {manageCols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('name')}>Name{getManageSortIcon('name')}</th>}
+                    {manageCols.find(c=>c.id==='type')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('type')}>Type{getManageSortIcon('type')}</th>}
+                    {manageCols.find(c=>c.id==='site')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('site')}>Site{getManageSortIcon('site')}</th>}
+                    {manageCols.find(c=>c.id==='count')?.show && <th className="cursor-pointer" onClick={() => handleManageSort('count')}>Member Computer Count{getManageSortIcon('count')}</th>}
+                    <th className="text-center w-80">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedManageGroups.map((g) => (
+                    <tr key={g.id}>
+                      {manageCols.find(c=>c.id==='id')?.show && <td>{g.id}</td>}
+                      {manageCols.find(c=>c.id==='name')?.show && <td><strong>{g.name}</strong></td>}
+                      {manageCols.find(c=>c.id==='type')?.show && <td><span className="rowchip">{g.type}</span></td>}
+                      {manageCols.find(c=>c.id==='site')?.show && <td className="muted-text">{g.site}</td>}
+                      {manageCols.find(c=>c.id==='count')?.show && (
+                          <td className="cursor-pointer" onClick={() => window.dispatchEvent(new CustomEvent('nav:group', { detail: { tab: 'COMPUTERS', groupId: g.id, groupName: g.name } }))}>
+                              <span style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'underline' }}>{g.count}</span>
+                          </td>
+                      )}
+                      <td className="text-center">
+                         {(isMO || g.type !== 'Manual') && (
+                            <button 
+                                className="btn outline small" 
+                                style={{ height: '28px', padding: '0 12px', fontSize: '12px' }}
+                                onClick={(e) => { e.stopPropagation(); handleEditClick(g.id); }} 
+                            >
+                                Edit
+                            </button>
+                         )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <Paginator total={sortedManageGroups.length} rpp={manageRpp} setRpp={setManageRpp} page={managePage} setPage={setManagePage} edgeToEdge={false} />
+        </div>
+        
+        <FilterDrawer isOpen={manageDrawerOpen} onClose={() => setManageDrawerOpen(false)} filters={manageFilters} setFilters={setManageFilters} globalLogic={manageGlobalLogic} setGlobalLogic={setManageGlobalLogic} propertyOptions={managePropertyOptions} />
+      </div>
+    );
+  }
+
+  // --- CREATE / EDIT GROUP FALLBACK VIEW ---
   return (
     <div className="mgmt">
-      <div className="topbar">
-        <div className="left"><h2>Create Computer Group</h2></div>
-        <div className="right"><button className="btn" onClick={onClose}>Close</button></div>
+      <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div className="left" style={{ display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 600, color: "var(--text)" }}>{isEditing ? "Edit Computer Group" : "Create Computer Group"}</h2>
+            <div className="sub mt-4 text-13 muted-text">Updated: {lastUpdated || "—"}</div>
+        </div>
+        <div className="right flex-row gap-12 items-center">
+            {groupType === 'Manual' && (
+              <>
+                <div style={{ position: 'relative' }}>
+                    <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                    </button>
+                    {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
+                </div>
+                <button className="iconbtn" onClick={fetchComputers} title="Refresh Data">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                </button>
+              </>
+            )}
+        </div>
       </div>
 
       <div className="section overflow-visible">
@@ -208,84 +602,225 @@ export default function GroupManager({ onClose }) {
         <div className="controls-grid auto-1fr">
           <div className="field min-w-200">
             <span className="label">Group Type</span>
-            <div className="toggle-bg">
-              <button className={`toggle-btn ${groupType === "Automatic" ? "active" : ""}`} onClick={() => setGroupType("Automatic")}>Automatic</button>
-              <button className={`toggle-btn ${groupType === "Manual" ? "active" : ""}`} onClick={() => setGroupType("Manual")}>Manual</button>
+            <div className={`toggle-bg ${isEditing ? 'disabled' : ''}`}>
+              <button disabled={isEditing} className={`toggle-btn ${groupType === "Automatic" ? "active" : ""}`} onClick={() => setGroupType("Automatic")}>Automatic</button>
+              {isMO && <button disabled={isEditing} className={`toggle-btn ${groupType === "Manual" ? "active" : ""}`} onClick={() => setGroupType("Manual")}>Manual</button>}
+              <button disabled={isEditing} className={`toggle-btn ${groupType === "ServerBased" ? "active" : ""}`} onClick={() => setGroupType("ServerBased")}>Server Based</button>
             </div>
           </div>
           <div className="field">
             <span className="label">Group Name</span>
-            <input type="text" className="control" placeholder="e.g., Windows 10 Patch Group" value={groupName} onChange={(e) => { setGroupName(e.target.value); clearMessages(); }} disabled={creating} />
+            <div className="inputwrap">
+              <input type="text" className="control" placeholder="e.g., Windows 10 Patch Group" value={groupName} onChange={(e) => { setGroupName(e.target.value); }} disabled={creating} />
+            </div>
           </div>
         </div>
       </div>
 
-      {groupType === "Automatic" && (
+      {(groupType === "Automatic" || groupType === "ServerBased") && (
         <div className="section overflow-visible">
           <div className="section-head"><span className="title">2. Define Property Criteria</span></div>
           <div className="flex-row items-end p-20 gap-16 wrap">
-            <div className="flex-1 min-w-200"><FancySelect label="Property" options={properties} value={selectedProperty} onChange={setSelectedProperty} placeholder="— Select Property —" isLoading={loadingProps} /></div>
-            <div style={{ flex: 0.7, minWidth: 140 }}><FancySelect label="Comparison" options={operators} value={selectedOperator} onChange={setSelectedOperator} placeholder="Contains" /></div>
-            <div className="field flex-1 min-w-200"><span className="label">Search Text</span><input type="text" className="control" placeholder="e.g., rhel" value={valueInput} onChange={(e) => setValueInput(e.target.value)} /></div>
-            <div className="pb-0"><button className="btn pri btn-full-height" onClick={addCondition}>Add</button></div>
+            <div className="flex-1 min-w-200">
+              <FancySelect label="Property" options={properties} value={selectedProperty} onChange={setSelectedProperty} placeholder="— Select Property —" isLoading={loadingProps} searchable={true} />
+            </div>
+            <div style={{ flex: 0.7, minWidth: 140 }}>
+              <FancySelect label="Comparison" options={operators} value={selectedOperator} onChange={setSelectedOperator} placeholder="Contains" />
+            </div>
+            <div className="field flex-1 min-w-200">
+              <span className="label">Search Text</span>
+              <div className="inputwrap">
+                <input type="text" className="control" placeholder="e.g., rhel" value={valueInput} onChange={(e) => setValueInput(e.target.value)} />
+              </div>
+            </div>
+            <div className="pb-0"><button className="btn outline small" style={{ height: '32px' }} onClick={addCondition}>Add</button></div>
           </div>
-          <div className="flex-row p-0-20-20">
-             <div className="flex-1"><FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} /></div>
+          {/* <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
+             <div className="flex-1">
+               <FancySelect label="Target Site (Custom)" options={customSites} value={selectedTargetSite} onChange={setSelectedTargetSite} placeholder="— Select Target Site —" isLoading={loadingSites} searchable={true} />
+             </div>
+          </div> */}
+          <div className="flex-row" style={{ padding: '0 20px 20px 20px' }}>
+             <div className="flex-1">
+               <FancySelect 
+                  label="Target Site (Custom)" 
+                  options={customSites} 
+                  value={selectedTargetSite} 
+                  onChange={setSelectedTargetSite} 
+                  placeholder="— Select Target Site —" 
+                  isLoading={loadingSites} 
+                  searchable={true} 
+                  disabled={isEditing} 
+                  isDisabled={isEditing} 
+               />
+             </div>
           </div>
           {conditions.length > 0 && (
-            <div className="tableWrap border-top">
+            <>
+              {/*  ADDED: overflow: 'visible' to prevent dropdowns from getting clipped */}
+              <div className="tableWrap border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'visible' }}>
+              
+              {/*  FIX: Increased width, added flexWrap, and adjusted alignment */}
+              <div style={{ padding: '16px 20px', backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: '26px', flexWrap: 'wrap' }}>
+                 <div style={{ width: '180px', flexShrink: 0 }}>
+                    <FancySelect 
+                        label="Evaluation Logic" 
+                        options={logicOptions} 
+                        value={groupLogic} 
+                        onChange={setGroupLogic} 
+                    />
+                 </div>
+                 <div className="text-13 muted-text" style={{ flex: 1, marginTop: '28px', minWidth: '250px' }}>
+                     {groupLogic === "All" ? "Computers must match ALL of the listed conditions." : "Computers must match ANY of the listed conditions."}
+                 </div>
+              </div>
+
               <table>
                 <thead><tr><th>Property</th><th>Comparison</th><th>Value</th><th>Target Site</th><th className="right">Action</th></tr></thead>
                 <tbody>{conditions.map(c => <tr key={c.id}><td><b>{c.property}</b></td><td><span className="rowchip succ">{c.operator}</span></td><td>{c.value}</td><td className="muted-text">{selectedTargetSite || "—"}</td><td className="right"><button className="btn-icon-sm" onClick={() => removeCondition(c.id)}>✕</button></td></tr>)}</tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </div>
       )}
 
       {groupType === "Manual" && (
         <div className="section overflow-visible">
-          <div className="section-head"><span className="title">2. Select Computers</span></div>
-          <div className="flex-row items-end p-0-20-10 gap-16 wrap" style={{ paddingTop: 20 }}>
-            <div className="field flex-1"><span className="label">Search Computers</span><input type="text" className="control" placeholder="Search by Name or IP..." value={compSearch} onChange={e => { setCompSearch(e.target.value); setCompPage(1); setAllComputers([]); }} /></div>
-            <div className="flex-1"><FancySelect label="Filter Loaded OS" options={osList} value={selectedOSs} onChange={setSelectedOSs} placeholder="— Show All —" multiSelect={true} /></div>
+          {activeFilterCount > 0 && (
+              <div className="p-0-20-20">
+                  <div className="active-filter-banner active">
+                    <div className="filter-tags">
+                      {filters.map((b, bIdx) => {
+                        const validConds = b.conds.filter(c => c.value);
+                        if (!validConds.length) return null;
+                        return (
+                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                            {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
+                            {validConds.map((c, cIdx) => (
+                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                                {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
+                                <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+                  </div>
+              </div>
+          )}
+
+          <div className="section-head" style={{ paddingBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="title">2. Select Computers</span>
+              <span className="pill soft">Selected: {selectedCompIds.size}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="dropdown" ref={colRef}>
+                    <button className="btn outline sec small" onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        &nbsp; Columns
+                    </button>
+                    {showColDrop && (
+                        <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {cols.map((col, i) => (
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                            const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                        }} />
+                                        <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div className="dropdown" ref={expRef}>
+                    <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                        &nbsp; Export
+                    </button>
+                    {showExpDrop && (
+                        <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
+                                 <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                               ))}
+                            </div>
+                            <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
+                            <button className="item" onClick={() => handleExport('page')}>Current Page</button>
+                            <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                            <button className="item" onClick={() => handleExport('all')}>All Data</button>
+                        </div>
+                    )}
+                </div>
+            </div>
           </div>
-          <div className="flex-row de-header-row p-0-20-10">
-              <span className="sub">Loaded: {allComputers.length} {hasMoreComp ? "(Scroll for more)" : "(All loaded)"}</span>
-              <span className="pill green">Selected: {selectedCompIds.size}</span>
-          </div>
-          <div className="tableWrap h-400 border-top">
-            <table>
-                <thead><tr><th className="text-center w-40"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} checked={visibleComputers.length > 0 && visibleComputers.every(c => selectedCompIds.has(c.id))} /></th><th>Computer Name</th><th>Operating System</th><th>IP Address</th></tr></thead>
+          
+          <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
+            {fetchingComp ? (
+               <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading computers...</div>
+            ) : paginatedComputers.length === 0 ? (
+               <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No computers found.</div>
+            ) : (
+              <table>
+                <thead className="kpi-th-sticky">
+                  <tr>
+                    <th className="text-center w-40"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} checked={paginatedComputers.length > 0 && paginatedComputers.every(c => selectedCompIds.has(c.id))} /></th>
+                    {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Computer Name{getSortIcon('name')}</th>}
+                    {cols.find(c=>c.id==='os')?.show && <th className="cursor-pointer" onClick={() => handleSort('os')}>Operating System{getSortIcon('os')}</th>}
+                    {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortIcon('ips')}</th>}
+                  </tr>
+                </thead>
                 <tbody>
-                  {visibleComputers.map((c, index) => {
-                    const isLast = index === visibleComputers.length - 1;
-                    return (
-                      <tr key={c.id} ref={isLast ? lastCompRef : null} onClick={() => toggleComputer(c.id)} className={selectedCompIds.has(c.id) ? "selected-row" : ""}>
-                        <td className="text-center"><input type="checkbox" className="custom-checkbox no-events" checked={selectedCompIds.has(c.id)} readOnly /></td>
-                        <td>{c.name}</td><td>{c.os}</td><td className="muted-text">{c.ips?.[0] || "-"}</td>
-                      </tr>
-                    );
-                  })}
-                  {fetchingComp && <tr><td colSpan={4} className="empty-state">Loading more...</td></tr>}
-                  {!fetchingComp && visibleComputers.length === 0 && <tr><td colSpan={4} className="empty-state">No computers found.</td></tr>}
+                  {paginatedComputers.map((c) => (
+                    <tr key={c.id} onClick={() => toggleComputer(c.id)} className={selectedCompIds.has(c.id) ? "selected-row" : ""}>
+                      <td className="text-center"><input type="checkbox" className="custom-checkbox no-events" checked={selectedCompIds.has(c.id)} readOnly /></td>
+                      {cols.find(c=>c.id==='name')?.show && <td>{c.name}</td>}
+                      {cols.find(c=>c.id==='os')?.show && <td>{c.os}</td>}
+                      {cols.find(c=>c.id==='ips')?.show && <td className="muted-text">{c.ips?.[0] || "-"}</td>}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+            )}
           </div>
+
+          <Paginator total={sortedComputers.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={false} />
         </div>
       )}
 
-      <div className="p-0-20-10">
-        {error && <div className="banner error">{error}</div>}
-        {successMsg && <div className="banner success"><svg className="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><span>{successMsg}</span></div>}
-      </div>
-
-      <div className="action-bar">
+      <div className="action-bar" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="spacer"></div>
-        <button className="btn pri min-w-140" onClick={handleCreate} disabled={creating || !groupName || (groupType==='Automatic' && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}>
-          {creating ? "Creating..." : "Create Group"}
+        {isEditing && (
+            <button className="btn outline min-w-140 mr-12" onClick={() => { resetForm(); setActiveTab('MANAGE'); }}>
+                Cancel Edit
+            </button>
+        )}
+        <button 
+          className="btn pri min-w-140" 
+          onClick={handleSaveGroup} 
+          disabled={creating || !groupName || ((groupType==='Automatic' || groupType === 'ServerBased') && !conditions.length) || (groupType==='Manual' && !selectedCompIds.size)}
+        >
+          {creating ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <InlineSpinner size={16} variant="light" />
+              <span>{isEditing ? "Updating..." : "Creating..."}</span>
+            </div>
+          ) : (
+             isEditing ? "Update Group" : "Create Group/Edit Group"
+          )}
         </button>
       </div>
+
+      {groupType === 'Manual' && (
+         <FilterDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} filters={filters} setFilters={setFilters} globalLogic={globalLogic} setGlobalLogic={setGlobalLogic} propertyOptions={propertyOptions} />
+      )}
     </div>
   );
 }

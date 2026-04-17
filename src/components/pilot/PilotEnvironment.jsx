@@ -1,298 +1,196 @@
 // src/components/pilot/PilotEnvironment.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEnvironment } from "../Environment.jsx";
+import FancySelect from "../common/FancySelect";
+import InlineSpinner from "../common/InlineSpinner";
 
 const API_BASE = window.env.VITE_API_BASE;
 
 function getHeaders() {
   return {
     "Content-Type": "application/json",
-    "Accept": "application/json",
-    "x-user-role": sessionStorage.getItem("user_role") || "Admin"
+    Accept: "application/json",
+    "x-user-role": sessionStorage.getItem("user_role") || "Admin",
   };
 }
 
-function enhanceNativeSelect(selectEl) {
-  if (!selectEl || selectEl.dataset.fx === "ok") return;
-  selectEl.dataset.fx = "ok";
-  selectEl.style.display = "none";
-
-  const wrap = document.createElement("div");
-  wrap.className = "fx-wrap";
-  selectEl.parentNode.insertBefore(wrap, selectEl);
-  wrap.appendChild(selectEl);
-
-  const selectedOption = selectEl.options[selectEl.selectedIndex];
-  const displayText = selectedOption ? selectedOption.text : "— select —";
-  const isPlaceholder = !selectedOption || selectedOption.value === "";
-
-  const trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "fx-trigger";
-  trigger.setAttribute("aria-haspopup", "listbox");
-  trigger.setAttribute("aria-expanded", "false");
-  trigger.innerHTML = `
-    <span class="fx-value ${isPlaceholder ? "fx-placeholder" : ""}">${displayText}</span>
-    <span class="fx-chevron">▾</span>
-  `;
-  wrap.insertBefore(trigger, selectEl);
-
-  const menu = document.createElement("div");
-  menu.className = "fx-menu";
-  menu.setAttribute("role", "listbox");
-  const menuInner = document.createElement("div");
-  menuInner.className = "fx-menu-inner";
-  menu.appendChild(menuInner);
-  wrap.appendChild(menu);
-
-  const allOptions = Array.from(selectEl.querySelectorAll("option"));
-  let hoverIdx = -1;
-  const isRealOption = (o) => {
-    const txt = (o.textContent || "").trim().toLowerCase();
-    return !o.disabled && o.value !== "" && !/^—.*—$/.test(txt);
-  };
-  const itemsOnly = () => allOptions.filter(isRealOption);
-
-  function renderMenu() {
-    menuInner.innerHTML = "";
-    const realItems = itemsOnly();
-    if (realItems.length === 0) {
-      const emptyMsg = document.createElement("div");
-      emptyMsg.className = "fx-item fx-empty";
-      emptyMsg.textContent = "No options";
-      menuInner.appendChild(emptyMsg);
-      return;
-    }
-    realItems.forEach((option, visibleIndex) => {
-      const it = document.createElement("div");
-      it.className = "fx-item" + (option.selected ? " fx-active" : "");
-      it.dataset.index = String(visibleIndex);
-      it.setAttribute("role", "option");
-      it.setAttribute("aria-selected", option.selected);
-      it.innerHTML = `
-        <span class="fx-label">${option.textContent}</span>
-        ${option.selected ? "<span class='fx-tick'>✓</span>" : ""}
-      `;
-      it.addEventListener("mouseenter", () => setHover(visibleIndex));
-      it.addEventListener("mousedown", (e) => e.preventDefault());
-      it.addEventListener("click", () => commit(visibleIndex));
-      menuInner.appendChild(it);
-    });
-  }
-
-  function open() {
-    if (wrap.classList.contains("fx-open")) return;
-    const r = trigger.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - r.bottom;
-    const spaceAbove = r.top;
-    if (spaceBelow < 200 && spaceAbove > 200) {
-      menu.classList.add("fx-upward");
-    } else {
-      menu.classList.remove("fx-upward");
-    }
-    wrap.classList.add("fx-open");
-    trigger.setAttribute("aria-expanded", "true");
-    renderMenu();
-    document.addEventListener("mousedown", onDocDown);
-    const triggerWidth = trigger.offsetWidth;
-    menu.style.width = triggerWidth + "px";
-    menu.style.minWidth = triggerWidth + "px";
-    menu.style.maxWidth = triggerWidth + "px";
-    const menuRect = menu.getBoundingClientRect();
-    if (menuRect.right > window.innerWidth) {
-      menu.style.left = "auto";
-      menu.style.right = "0";
-    } else {
-      menu.style.left = "0";
-      menu.style.right = "auto";
-    }
-    menu.style.maxHeight = "300px";
-    menu.style.overflow = "auto";
-    const currentIndex = itemsOnly().findIndex(o => o.selected);
-    setHover(currentIndex >= 0 ? currentIndex : 0);
-  }
-
-  function close() {
-    if (!wrap.classList.contains("fx-open")) return;
-    wrap.classList.remove("fx-open");
-    trigger.setAttribute("aria-expanded", "false");
-    document.removeEventListener("mousedown", onDocDown);
-    hoverIdx = -1;
-    menu.style.width = "";
-    menu.style.minWidth = "";
-    menu.style.maxWidth = "";
-    menu.style.maxHeight = "";
-    menu.style.overflow = "";
-    menu.style.left = "";
-    menu.style.right = "";
-  }
-
-  function onDocDown(e) { if (!wrap.contains(e.target)) close(); }
-
-  function setHover(i) {
-    const realItems = itemsOnly();
-    if (realItems.length === 0) return;
-    hoverIdx = Math.max(0, Math.min(i, realItems.length - 1));
-    const nodes = menuInner.querySelectorAll(".fx-item");
-    nodes.forEach((n, j) => n.classList.toggle("fx-hover", j === hoverIdx));
-    nodes[hoverIdx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }
-
-  function commit(i) {
-    const realItems = itemsOnly();
-    if (realItems.length === 0) return;
-    const chosen = realItems[i];
-    allOptions.forEach(o => (o.selected = false));
-    chosen.selected = true;
-    selectEl.value = chosen.value;
-    const valEl = trigger.querySelector(".fx-value");
-    valEl.textContent = chosen.textContent;
-    valEl.classList.remove("fx-placeholder");
-    close();
-    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  trigger.addEventListener("click", (e) => { e.stopPropagation(); wrap.classList.contains("fx-open") ? close() : open(); });
-  trigger.addEventListener("keydown", (e) => {
-    const isOpen = wrap.classList.contains("fx-open");
-    const realItems = itemsOnly();
-    if (!isOpen && ["ArrowDown","Enter"," "].includes(e.key)) { e.preventDefault(); open(); return; }
-    if (!isOpen) return;
-    switch (e.key) {
-      case "Escape": e.preventDefault(); close(); break;
-      case "Enter": e.preventDefault(); if (hoverIdx >= 0) commit(hoverIdx); break;
-      case "ArrowDown": e.preventDefault(); setHover((hoverIdx + 1) % realItems.length); break;
-      case "ArrowUp": e.preventDefault(); setHover((hoverIdx - 1 + realItems.length) % realItems.length); break;
-    }
-  });
-
-  const obs = new MutationObserver(() => {
-    const selectedOption = selectEl.options[selectEl.selectedIndex];
-    const displayText = selectedOption ? selectedOption.text : "— select —";
-    const isPlaceholder = !selectedOption || selectedOption.value === "";
-    const valEl = trigger.querySelector(".fx-value");
-    if (valEl) {
-      valEl.textContent = displayText;
-      valEl.classList.toggle("fx-placeholder", isPlaceholder);
-    }
-  });
-  obs.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ["selected","value"] });
-  document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) close(); });
-}
-
-function enhanceNativeSelects(root = document) {
-  root.querySelectorAll("#card-env select.control").forEach(enhanceNativeSelect);
-}
-
-export default function PilotEnvironment({ mode = "pilot" }) { 
+export default function PilotEnvironment({ mode = "pilot", lastActions = {} }) {
   const { env, setEnv } = useEnvironment();
   const inProduction = String(mode).toLowerCase() === "production";
-  const userRole = sessionStorage.getItem("user_role") || "Admin";
-  const isEUC = userRole === "EUC";
+  const depKey = inProduction ? "prodDeployments" : "pilotDeployments";
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [baselines, setBaselines] = useState([]);
-  const [groups, setGroups] = useState([]); 
+  const [groups, setGroups] = useState([]);
   const abortRef = useRef(null);
-
-  useEffect(() => {
-    const handleResize = () => { document.querySelectorAll('#card-env .fx-wrap.fx-open').forEach(wrap => { wrap.classList.remove('fx-open'); }); };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   async function loadOptions() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      setLoading(true); setErr("");
-      const groupPromise = fetch(`${API_BASE}/api/groups/list`, { headers: getHeaders(), signal: controller.signal }).then(r => r.json());
-      const baselinePromise = fetch(`${API_BASE}/api/baselines/list`, { headers: getHeaders(), signal: controller.signal }).then(r => r.json());
-      const [bRes, gRes] = await Promise.all([baselinePromise, groupPromise]);
+      setLoading(true);
+      setErr("");
 
-      const bNames = (bRes.baselines || []).map(b => b.name).sort();
-      const gNames = (gRes.groups || []).map(g => g.name).sort();
+      const groupPromise = fetch(`${API_BASE}/api/groups/list`, { headers: getHeaders(), signal: controller.signal }).then((r) => r.json());
+      const baselinePromise = fetch(`${API_BASE}/api/baselines/list`, { headers: getHeaders(), signal: controller.signal }).then((r) => r.json());
+      const configPromise = fetch(`${API_BASE}/api/config`, { headers: getHeaders(), signal: controller.signal }).then(async (r) => { if (!r.ok) return {}; try { return await r.json(); } catch { return {}; } }).catch(() => ({}));
 
-      setBaselines(bNames);
-      setGroups(gNames); 
+      const [bRes, gRes, cConfig] = await Promise.all([baselinePromise, groupPromise, configPromise]);
 
-      setEnv((f) => ({
-        ...f,
-        baseline: bNames.includes(f.baseline) ? f.baseline : (bNames[0] || ""),
-        pilotGroup: inProduction ? (f.pilotGroup || "") : (gNames.includes(f.pilotGroup) ? f.pilotGroup : (gNames[0] || "")),
-        prodGroup: inProduction ? (gNames.includes(f.prodGroup) ? f.prodGroup : (gNames[0] || "")) : (f.prodGroup || ""), 
-        successThreshold: f.successThreshold ?? 90,
-        allowableCriticalHF: f.allowableCriticalHF ?? 0,
-        patchWindowDays: f.patchWindowDays ?? 2,
-        patchWindowHours: f.patchWindowHours ?? 0,
-        patchWindowMinutes: f.patchWindowMinutes ?? 0,
-      }));
+      const groupObjects = (gRes.groups || []).sort((a, b) => a.name.localeCompare(b.name));
+      const baselineObjects = (bRes.baselines || []).sort((a, b) => a.name.localeCompare(b.name));
+
+      setBaselines(baselineObjects);
+      setGroups(groupObjects);
+
+      setEnv((f) => {
+        const st = cConfig.successThreshold != null ? Number(cConfig.successThreshold) : (f.successThreshold ?? 90);
+        const hf = cConfig.allowableCriticalHF != null ? Number(cConfig.allowableCriticalHF) : (f.allowableCriticalHF ?? 0);
+
+        let currentDeps = f[depKey] || [];
+        const isCurrentEmpty = currentDeps.length === 0 || (currentDeps.length === 1 && !currentDeps[0].baseline && !currentDeps[0].group);
+
+        if (isCurrentEmpty) {
+            const prevKey = inProduction ? "pilotDeployments" : "sandboxDeployments";
+            const prevDeps = f[prevKey] || [];
+            const validPrev = prevDeps.filter(d => d.baseline || d.group);
+            
+            const prevActions = inProduction ? (lastActions?.PILOT?.actions || lastActions?.SANDBOX?.actions) : lastActions?.SANDBOX?.actions;
+
+            if (validPrev.length > 0) {
+                currentDeps = validPrev.map(d => ({ ...d }));
+            } else if (prevActions && prevActions.length > 0) {
+                currentDeps = prevActions.map(a => ({ baseline: a.baseline, group: a.group }));
+            } else {
+                currentDeps = [{ baseline: "", group: "" }];
+            }
+        }
+        
+        if (currentDeps.length === 0) currentDeps = [{ baseline: "", group: "" }];
+
+        return {
+          ...f,
+          [depKey]: currentDeps, 
+          successThreshold: st,
+          allowableCriticalHF: hf,
+          snapshotVM: cConfig.snapshotVM ?? f.snapshotVM,
+          cloneVM: cConfig.cloneVM ?? f.cloneVM,
+          enablePilot: cConfig.enablePilot ?? f.enablePilot,
+          enableSandbox: cConfig.enableSandbox ?? f.enableSandbox,
+          patchWindowDays: f.patchWindowDays ?? 2,
+          patchWindowHours: f.patchWindowHours ?? 0,
+          patchWindowMinutes: f.patchWindowMinutes ?? 0,
+        };
+      });
+      
     } catch (e) {
       if (e.name !== "AbortError") setErr(`Failed to load options: ${e.message}`);
     } finally {
       setLoading(false);
-      setTimeout(() => enhanceNativeSelects(document), 100);
     }
   }
 
-  useEffect(() => { loadOptions(); return () => abortRef.current?.abort(); }, [mode]); 
-  useEffect(() => { if (!loading) { const t = setTimeout(() => enhanceNativeSelects(document), 100); return () => clearTimeout(t); } }, [baselines, groups, loading]);
+  //  FIXED: Added lastActions to dependency array so it correctly runs on browser refresh!
+  useEffect(() => {
+    loadOptions();
+    return () => abortRef.current?.abort();
+  }, [mode, lastActions]);
 
-  const on = (k) => (e) => setEnv((f) => ({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.type === "number" ? Number(e.target.value) : e.target.value }));
-  const onNumber = (k, min = 0, max = 999) => (e) => { let val = parseInt(e.target.value, 10); if (isNaN(val) || val < min) val = min; if (val > max) val = max; setEnv((f) => ({ ...f, [k]: val })); };
+  const handleNumChange = (k) => (e) => {
+    const val = e.target.value;
+    if (val === "") setEnv((f) => ({ ...f, [k]: "" }));
+    else setEnv((f) => ({ ...f, [k]: Number(val) }));
+  };
 
-  const baselineOptions = useMemo(() => baselines.map((x) => <option key={x} value={x}>{x}</option>), [baselines]);
-  const groupOptions = useMemo(() => groups.map((x) => <option key={x} value={x}>{x}</option>), [groups]);
+  const handleBlur = (k, min = 0, max = 999) => () => {
+      setEnv((f) => {
+        let num = Number(f[k]);
+        if (!Number.isFinite(num) || f[k] === "") num = min;
+        num = Math.min(max, Math.max(min, num));
+        return { ...f, [k]: num };
+      });
+  };
+
   const disabled = loading || (!baselines.length && !groups.length);
+  const inputsLocked = !env[`${mode}Unlocked`];
+  const userRole = sessionStorage.getItem("user_role") || "Admin";
+  const isEUC = userRole === "EUC";
+
+  const handleUpdateDeployment = (index, field, value) => {
+    if (inputsLocked) return;
+    const newDeps = [...(env[depKey] || [{ baseline: "", group: "" }])];
+    newDeps[index][field] = value;
+    setEnv((p) => ({ ...p, [depKey]: newDeps }));
+  };
+
+  const handleAddDeployment = () => {
+    if (inputsLocked) return;
+    setEnv((p) => ({ ...p, [depKey]: [...(p[depKey] || []), { baseline: "", group: "" }] }));
+  };
+
+  const handleRemoveDeployment = (index) => {
+    if (inputsLocked) return;
+    const newDeps = (env[depKey] || []).filter((_, i) => i !== index);
+    setEnv((p) => ({ ...p, [depKey]: newDeps }));
+  };
 
   return (
     <section className="card reveal mb-0" id="card-env" data-reveal>
       <div className="env-header-row">
         <h2>Environment &amp; Baseline</h2>
-        <button type="button" onClick={loadOptions} disabled={loading} className="btn" title="Reload">{loading ? "Loading…" : "Reload"}</button>
+        <button type="button" onClick={loadOptions} disabled={loading} className="btn outline small" title="Reload" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          {loading ? <><InlineSpinner size={14} variant="dark" /><span>Loading...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
+        </button>
       </div>
 
       {loading && <div className="sub">loading baselines &amp; groups…</div>}
       {err && <div className="env-error-msg">{err}</div>}
 
-      <div className={`env-inputs-row ${loading ? 'opacity-60' : ''}`}>
-        <div className="field">
-          <span className="label">Baseline</span>
-          <select className="control" value={env.baseline} onChange={on("baseline")} disabled={disabled || !baselines.length}>
-            {!baselines.length && <option value="">— loading… —</option>}
-            {baselines.length > 0 && <option value="">— select baseline —</option>}
-            {baselineOptions}
-          </select>
-        </div>
-
-        <div className="field">
-          <span className="label">{inProduction ? "Production Group" : "Pilot Group"}</span>
-          <select className="control" value={inProduction ? env.prodGroup : env.pilotGroup} onChange={on(inProduction ? "prodGroup" : "pilotGroup")} disabled={disabled || !groups.length}>
-            {!groups.length && <option value="">— loading… —</option>}
-            {groups.length > 0 && <option value="">— select group —</option>}
-            {groupOptions}
-          </select>
+      <div className={`env-inputs-row ${loading ? "opacity-60" : ""}`} style={{ display: "flex", flexDirection: "column", gap: "16px", paddingBottom: "16px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%" }}>
+            <span className="label" style={{ fontSize: "13px", fontWeight: 600, color: "var(--text)" }}>Deployments (Baseline ➔ {inProduction ? "Production" : "Pilot"} Group)</span>
+            
+            {(env[depKey] || [{ baseline: "", group: "" }]).map((dep, i) => (
+              <div key={i} style={{ display: "flex", gap: "12px", alignItems: "center", width: "100%" }}>
+                <div style={{ flex: 1 }}>
+                  <FancySelect options={baselines.map((b) => ({ value: b.name, label: `${b.name} [${b.component_count ?? 0}]` }))} value={dep.baseline} onChange={(val) => handleUpdateDeployment(i, "baseline", val)} disabled={disabled || !baselines.length || inputsLocked} placeholder={!baselines.length ? "— loading… —" : "— select baseline —"} searchable={true} />
+                </div>
+                <span style={{ color: "var(--muted)", fontWeight: "bold" }}>➔</span>
+                <div style={{ flex: 1 }}>
+                  <FancySelect options={groups.map((g) => ({ value: g.name, label: `${g.name} [${g.count ?? 0}]` }))} value={dep.group} onChange={(val) => handleUpdateDeployment(i, "group", val)} disabled={disabled || !groups.length || inputsLocked} placeholder={!groups.length ? "— loading… —" : "— select group —"} searchable={true} />
+                </div>
+                {!inputsLocked && (env[depKey] || []).length > 1 && (
+                  <button className="btn outline small" onClick={() => handleRemoveDeployment(i)} title="Remove Deployment" style={{ height: "36px", padding: "0 12px" }}>✕</button>
+                )}
+              </div>
+            ))}
+            
+            {!inputsLocked && (
+              <div>
+                <button className="btn outline small mt-4" onClick={handleAddDeployment}>+ Add Deployment</button>
+              </div>
+            )}
         </div>
       </div>
 
       {!isEUC && (
-        <div className="row mt-14">
+        <div className="row mt-14" style={{ display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
           <div className="field">
-            <div className="label">Success Threshold (%)</div>
-            <input type="number" className="control" min={0} max={100} value={env.successThreshold ?? 90} onChange={on("successThreshold")} />
+            <div className="label">Success Threshold (%) <span title="Configured by Admin in Environment Settings" style={{ cursor: "help", opacity: 0.6 }}>🔒</span></div>
+            <input type="number" className="control disabled" value={env.successThreshold ?? 90} disabled={true} />
           </div>
           <div className="field">
-            <div className="label">Allowable Critical Health Failures</div>
-            <input type="number" className="control" min={0} value={env.allowableCriticalHF ?? 0} onChange={on("allowableCriticalHF")} />
+            <div className="label">Allowable Critical Health Failures <span title="Configured by Admin in Environment Settings" style={{ cursor: "help", opacity: 0.6 }}>🔒</span></div>
+            <input type="number" className="control disabled" value={env.allowableCriticalHF ?? 0} disabled={true} />
           </div>
           <div className="field flex-15">
             <span className="label">Patch Window (Days / Hours / Mins)</span>
             <div className="env-patch-window-inputs">
-              <input type="number" className="control env-patch-input" title="Days" min={0} value={env.patchWindowDays ?? 0} onChange={onNumber("patchWindowDays", 0)} disabled={loading} />
-              <input type="number" className="control env-patch-input" title="Hours" min={0} max={23} value={env.patchWindowHours ?? 0} onChange={onNumber("patchWindowHours", 0, 23)} disabled={loading} />
-              <input type="number" className="control env-patch-input" title="Minutes" min={0} max={59} value={env.patchWindowMinutes ?? 0} onChange={onNumber("patchWindowMinutes", 0, 59)} disabled={loading} />
+              <input type="number" className={`control env-patch-input ${inputsLocked ? "disabled" : ""}`} title="Days" min={0} value={env.patchWindowDays ?? 0} onChange={handleNumChange("patchWindowDays")} onBlur={handleBlur("patchWindowDays", 0, 999)} disabled={inputsLocked} />
+              <input type="number" className={`control env-patch-input ${inputsLocked ? "disabled" : ""}`} title="Hours" min={0} max={23} value={env.patchWindowHours ?? 0} onChange={handleNumChange("patchWindowHours")} onBlur={handleBlur("patchWindowHours", 0, 23)} disabled={inputsLocked} />
+              <input type="number" className={`control env-patch-input ${inputsLocked ? "disabled" : ""}`} title="Minutes" min={0} max={59} value={env.patchWindowMinutes ?? 0} onChange={handleNumChange("patchWindowMinutes")} onBlur={handleBlur("patchWindowMinutes", 0, 59)} disabled={inputsLocked} />
             </div>
           </div>
         </div>
