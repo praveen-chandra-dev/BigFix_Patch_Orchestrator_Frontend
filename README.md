@@ -1,6 +1,6 @@
 # BigFix Patch Orchestrator — Frontend
 
-A **React 19 + Vite** dashboard for orchestrating OS patch rollouts with **HCL BigFix**.
+A **React 19 + Vite** dashboard for orchestrating OS patch rollouts with **BigFix**.
 It walks operators through a **Sandbox → Pilot → Production** promotion flow, surfaces real-time
 health/success **KPIs**, and enforces promotion **gates** (success threshold + allowable critical
 health failures) — including optional **ServiceNow** Change Request validation before Pilot.
