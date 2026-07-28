@@ -1,5 +1,6 @@
 // src/modules/risk/BaselineTab.jsx
 import { useState, useEffect, useRef, useMemo } from "react";
+import PropTypes from "prop-types";
 import api from "../../api/api";
 import { useToast } from "../../components/common/CustomToast";
 import { getErrorMessage } from "../../utils/errorHandler";
@@ -47,13 +48,20 @@ const RiskDropdown = ({
         <div className="fx-menu">
           <div className="fx-menu-inner">
             {options.map((opt) => (
-              <div
+              <button
+                type="button"
                 key={opt.value}
                 className={`fx-item ${value === opt.value ? "active" : ""}`}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  font: "inherit",
+                  cursor: "pointer",
+                  textAlign: "left"
                 }}
                 onClick={() => {
                   onChange(opt.value);
@@ -62,13 +70,21 @@ const RiskDropdown = ({
               >
                 <span className="fx-label">{opt.label}</span>
                 {value === opt.value}
-              </div>
+              </button>
             ))}
           </div>
         </div>
       )}
     </div>
   );
+};
+
+RiskDropdown.propTypes = {
+  options: PropTypes.array.isRequired,
+  value: PropTypes.string,
+  onChange: PropTypes.func.isRequired,
+  width: PropTypes.string,
+  disabled: PropTypes.bool,
 };
 
 export default function BaselineTab({
@@ -96,6 +112,7 @@ export default function BaselineTab({
   const { showToast } = useToast();
   const [selectedBaselineId, setSelectedBaselineId] = useState(null);
   const selectedBaselineIdRef = useRef(selectedBaselineId);
+  
   useEffect(() => {
     selectedBaselineIdRef.current = selectedBaselineId;
   }, [selectedBaselineId]);
@@ -225,7 +242,7 @@ export default function BaselineTab({
         setPatchLookup(map);
       })
       .catch((err) => {
-        console.error("Failed to load patches for lookup", err);
+        console.warn("Failed to load patches for lookup", err);
       });
   }, [refreshTrigger]);
 
@@ -419,7 +436,7 @@ export default function BaselineTab({
       });
       setPatches(loadedPatches);
     } catch (err) {
-      console.error(err);
+      console.warn(err);
       showToast("Failed to fetch baseline details", "error");
     } finally {
       setLoadingDetails(false);
@@ -492,7 +509,7 @@ export default function BaselineTab({
       setDeletingBaseline(false);
     }
   };
-  /* ADDED: Sorting and Filtering logic */
+  
   const [sortConfig, setSortConfig] = useState({
     key: "name",
     direction: "asc",
@@ -519,36 +536,42 @@ export default function BaselineTab({
     );
   };
 
+  // S3776 Fix: Extracted from applyFilters to reduce Cognitive Complexity
+  const evaluateBaselineCondition = (baseline, c) => {
+    const search = String(c.value).toLowerCase();
+    const field = String(baseline.name || "").toLowerCase();
+
+    if (c.operator === "contains") return field.includes(search);
+    if (c.operator === "=") return field === search;
+    if (c.operator === "!=") return field !== search;
+
+    return true;
+  };
+
   const applyFilters = (baseline) => {
     if (!parentFilters || !parentFilters.length) return true;
-    let globalMatch = parentLogic === "OR" ? false : true;
+    
+    // S6644 Fix: Removed boolean literal logic
+    let globalMatch = parentLogic !== "OR"; 
+    
     for (let b of parentFilters) {
       let blockMatch = true;
       let validConds = 0;
+      
       for (let c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase();
-
-        let field = "";
-        if (c.column === "baseline_name") {
-          field = String(baseline.name || "").toLowerCase();
-        } else {
-          field = String(baseline.name || "").toLowerCase();
-        }
-
-        if (c.operator === "contains") condition = field.includes(search);
-        else if (c.operator === "=") condition = field === search;
-        else if (c.operator === "!=") condition = field !== search;
-
+        const condition = evaluateBaselineCondition(baseline, c);
         blockMatch = blockMatch && condition;
       }
+      
       if (validConds > 0) {
-        globalMatch =
-          parentLogic === "OR"
-            ? globalMatch || blockMatch
-            : globalMatch && blockMatch;
+        // S3358 Fix: Extracted nested ternary operation into positive logic
+        if (parentLogic === "OR") {
+          globalMatch = globalMatch || blockMatch;
+        } else {
+          globalMatch = globalMatch && blockMatch;
+        }
       }
     }
     return globalMatch;
@@ -634,6 +657,8 @@ export default function BaselineTab({
               <tr>
                 <th
                   onClick={() => handleSort("name")}
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSort("name"); }}
                   style={{
                     cursor: "pointer",
                     padding: "12px 20px",
@@ -648,6 +673,8 @@ export default function BaselineTab({
                 </th>
                 <th
                   onClick={() => handleSort("componentCount")}
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSort("componentCount"); }}
                   style={{
                     cursor: "pointer",
                     padding: "12px 20px",
@@ -682,6 +709,8 @@ export default function BaselineTab({
                   <tr
                     key={b.id}
                     onClick={() => fetchBaselineDetails(b)}
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter') fetchBaselineDetails(b); }}
                     style={{
                       cursor: "pointer",
                       borderBottom: "1px solid var(--border)",
@@ -737,6 +766,7 @@ export default function BaselineTab({
             }}
           >
             <button
+              type="button"
               className="btn danger"
               onClick={deleteBaseline}
               disabled={deletingBaseline}
@@ -846,6 +876,7 @@ export default function BaselineTab({
               </div>
               <button
                 className="close-btn"
+                type="button"
                 onClick={() => clearEditor()}
                 style={{
                   background: "transparent",
@@ -1057,6 +1088,7 @@ export default function BaselineTab({
                   <span>Patch Order ({patches.length})</span>
                   {patches.length > 0 && onGoToPatches && !isExternal && (
                     <button
+                      type="button"
                       className="btn outline small"
                       onClick={onGoToPatches}
                       style={{
@@ -1126,6 +1158,7 @@ export default function BaselineTab({
                         {!isExternal && (
                           <div style={{ display: "flex", gap: "8px" }}>
                             <button
+                              type="button"
                               className="btn ghost small"
                               onClick={() => movePatch(index, -1)}
                               disabled={index === 0}
@@ -1140,6 +1173,7 @@ export default function BaselineTab({
                               ↑
                             </button>
                             <button
+                              type="button"
                               className="btn ghost small"
                               onClick={() => movePatch(index, 1)}
                               disabled={index === patches.length - 1}
@@ -1157,6 +1191,7 @@ export default function BaselineTab({
                               ↓
                             </button>
                             <button
+                              type="button"
                               className="btn danger small"
                               onClick={() => removePatch(index)}
                               style={{
@@ -1202,6 +1237,7 @@ export default function BaselineTab({
                       CVE Details ({cveData.length})
                     </span>
                     <button
+                      type="button"
                       className="btn ghost small"
                       onClick={() => setShowCVE(false)}
                       style={{ padding: "4px 12px", borderRadius: "6px" }}
@@ -1378,6 +1414,7 @@ export default function BaselineTab({
             >
               {!isExternal && (
                 <button
+                  type="button"
                   className="btn pri"
                   onClick={selectedBaselineId ? updateBaseline : createBaseline}
                   disabled={creatingBaseline}
@@ -1465,3 +1502,13 @@ export default function BaselineTab({
     </div>
   );
 }
+
+BaselineTab.propTypes = {
+  pendingPatches: PropTypes.array,
+  clearPendingPatches: PropTypes.func,
+  setEditingBaseline: PropTypes.func,
+  onGoToPatches: PropTypes.func,
+  refreshTrigger: PropTypes.number,
+  parentFilters: PropTypes.array,
+  parentLogic: PropTypes.string,
+};

@@ -1,8 +1,8 @@
 // src/components/CloneSelector.jsx
 import { useState, useEffect, useRef, useMemo } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
-import { evaluateCondition } from "../utils/filterUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
 import { useToast } from "./common/CustomToast";
@@ -10,25 +10,79 @@ import InlineSpinner from "./common/InlineSpinner";
 
 const vmResolutionCache = new Map();
 
-const API = window.env?.VITE_API_BASE || "http://localhost:5174";
+const API = globalThis.env?.VITE_API_BASE || "http://localhost:5174";
 
 function getHeaders() {
   return { "Content-Type": "application/json", "x-user-role": sessionStorage.getItem("user_role") || "Admin" };
 }
+
 async function getJSON(url) {
   const r = await fetch(`${API}${url}`, { headers: getHeaders() });
   return r.json();
 }
+
 async function postJSON(url, body) {
   const r = await fetch(`${API}${url}`, { method: "POST", headers: getHeaders(), body: JSON.stringify(body) });
   return r.json();
 }
 
+const incrementIp = (ip, add) => {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(Number.isNaN)) return ip; 
+  let val = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+  val = (val + add) >>> 0;
+  return [(val >>> 24) & 255, (val >>> 16) & 255, (val >>> 8) & 255, val & 255].join('.');
+};
+
+const getFieldStatus = (status) => {
+  const st = String(status).toLowerCase();
+  if (st === 'completed' || st === 'success') return 'success';
+  if (st === 'running') return 'running...';
+  if (st === 'queued') return 'queued...';
+  if (st === 'failed' || st === 'error') return 'failed';
+  return st;
+};
+
+const getFieldVcStatus = (vcStatus, vcId) => {
+  const st = String(vcStatus).toLowerCase();
+  if (st === 'ready') return `ready (${vcId})`;
+  if (st === 'not_found') return 'not found';
+  if (st === 'resolving') return 'resolving...';
+  return 'waiting...';
+};
+
+const evaluateFilterCondition = (item, c) => {
+  const query = String(c.value).toLowerCase();
+  let field = "";
+  
+  if (c.column === "ips") {
+      field = (item.ips || []).join(", ").toLowerCase();
+  } else if (c.column === "status" && item.status !== undefined) {
+      field = getFieldStatus(item.status);
+  } else if (c.column === "vcStatus" && item.vcStatus !== undefined) {
+      field = getFieldVcStatus(item.vcStatus, item.vcId);
+  } else {
+      field = String(item[c.column] || "").toLowerCase();
+  }
+
+  if (c.operator === "contains") return field.includes(query);
+  if (c.operator === "=") return field === query;
+  if (c.operator === "!=") return field !== query;
+  return true;
+};
+
+const getRowClass = (row, selectedIds) => {
+  if (row.vcStatus === 'ready') {
+      if (selectedIds.has(row.vcId)) return "selected-row cursor-pointer";
+      return "cursor-pointer";
+  }
+  return "disabled";
+};
+
 export default function CloneManager({ onClose, groupName: initialGroup, onComplete, environment }) {
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState("TARGETS");
-  // const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
   const [mode, setMode] = useState("COMPUTER"); 
   const [items, setItems] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -89,22 +143,22 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const [invLoading, setInvLoading] = useState(false);
   const [globalDest, setGlobalDest] = useState({ datacenter: "", host: "", datastore: "", folder: "", osSpec: "" });
   const [vmConfigs, setVmConfigs] = useState({});
-  const [bulkIp, setBulkIp] = useState("10.1.153.138");
-  const [bulkSubnet, setBulkSubnet] = useState("255.255.254.0");
-  const [bulkGateway, setBulkGateway] = useState("10.1.152.1");
-  const [bulkDns, setBulkDns] = useState("10.1.50.2");
+  const [bulkIp, setBulkIp] = useState("");
+  const [bulkSubnet, setBulkSubnet] = useState("");
+  const [bulkGateway, setBulkGateway] = useState("");
+  const [bulkDns, setBulkDns] = useState("");
 
   const [processing, setProcessing] = useState(false);
   const [executions, setExecutions] = useState([]); 
 
-  useEffect(() => { window.dispatchEvent(new CustomEvent('sync:clone_tab', { detail: activeTab })); }, [activeTab]);
+  useEffect(() => { globalThis.dispatchEvent(new CustomEvent('sync:clone_tab', { detail: activeTab })); }, [activeTab]);
   useEffect(() => { 
       const handler = (e) => {
           setActiveTab(e.detail);
           setFilters([]); 
       };
-      window.addEventListener('nav:clone', handler); 
-      return () => window.removeEventListener('nav:clone', handler); 
+      globalThis.addEventListener('nav:clone', handler); 
+      return () => globalThis.removeEventListener('nav:clone', handler); 
   }, []);
 
   useEffect(() => {
@@ -126,7 +180,10 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
           setGroups(gRes.groups.map((g) => ({ value: String(g.id), label: g.name })));
           if (initialGroup) { const found = gRes.groups.find((g) => g.name === initialGroup); if (found) setSelectedGroupId(String(found.id)); }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("Group list init error:", e);
+      }
+
       setInvLoading(true);
       try {
         const invRes = await getJSON("/api/vcenter/inventory");
@@ -140,10 +197,59 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
              osSpecs: i.osSpecs.map(x => ({ value: x.name, label: x.name })),
            });
         }
-      } catch (e) {} finally { setInvLoading(false); }
+      } catch (e) {
+        console.warn("Inventory init error:", e);
+      } finally { 
+        setInvLoading(false); 
+      }
     }
     init();
   }, [initialGroup]);
+
+  const resolveBatch = async (unresolvedItems) => {
+      const CHUNK_SIZE = 200; 
+      
+      for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
+          const chunk = unresolvedItems.slice(i, i + CHUNK_SIZE);
+          const targets = chunk.map(m => ({ name: m.name, ips: (m.ips || []).map(ip => String(ip).trim()) }));
+          
+          try {
+              const look = await postJSON("/api/vcenter/lookup", { targets });
+              const resultMap = new Map();
+              (look.matches || []).forEach(m => { if (m.name && m.id) resultMap.set(String(m.name).toLowerCase(), m.id); });
+              
+              const chunkUpdates = {};
+              chunk.forEach(c => {
+                  const key = String(c.name || "").toLowerCase();
+                  const vcId = resultMap.get(key);
+                  const status = vcId ? 'ready' : 'not_found';
+                  
+                  vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
+                  chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
+              });
+              
+              setItems(prev => prev.map(item => {
+                  const key = String(item.name || "").toLowerCase();
+                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
+                  return item;
+              }));
+              
+          } catch (e) {
+              console.warn("Batch resolve failed", e);
+              const chunkUpdates = {};
+              chunk.forEach(c => {
+                  const key = String(c.name || "").toLowerCase();
+                  vmResolutionCache.set(key, { vcId: null, vcStatus: 'not_found' });
+                  chunkUpdates[key] = { vcId: null, vcStatus: 'not_found' };
+              });
+              setItems(prev => prev.map(item => {
+                  const key = String(item.name || "").toLowerCase();
+                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
+                  return item;
+              }));
+          }
+      }
+  };
 
   const fetchData = async () => {
     if (mode === "GROUP" && !selectedGroupId) return;
@@ -191,83 +297,24 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   useEffect(() => { setItems([]); setSelectedIds(new Set()); setCurrentPage(1); }, [mode, selectedGroupId]);
   useEffect(() => { fetchData(); }, [mode, selectedGroupId]);
 
-  const resolveBatch = async (unresolvedItems) => {
-      const CHUNK_SIZE = 200; 
-      
-      for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
-          const chunk = unresolvedItems.slice(i, i + CHUNK_SIZE);
-          const targets = chunk.map(m => ({ name: m.name, ips: (m.ips || []).map(ip => String(ip).trim()) }));
-          
-          try {
-              const look = await postJSON("/api/vcenter/lookup", { targets });
-              const resultMap = new Map();
-              (look.matches || []).forEach(m => { if (m.name && m.id) resultMap.set(String(m.name).toLowerCase(), m.id); });
-              
-              const chunkUpdates = {};
-              chunk.forEach(c => {
-                  const key = String(c.name || "").toLowerCase();
-                  const vcId = resultMap.get(key);
-                  const status = vcId ? 'ready' : 'not_found';
-                  
-                  vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
-                  chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
-              });
-              
-              setItems(prev => prev.map(item => {
-                  const key = String(item.name || "").toLowerCase();
-                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
-                  return item;
-              }));
-              
-          } catch (e) {
-              const chunkUpdates = {};
-              chunk.forEach(c => {
-                  const key = String(c.name || "").toLowerCase();
-                  vmResolutionCache.set(key, { vcId: null, vcStatus: 'not_found' });
-                  chunkUpdates[key] = { vcId: null, vcStatus: 'not_found' };
-              });
-              setItems(prev => prev.map(item => {
-                  const key = String(item.name || "").toLowerCase();
-                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
-                  return item;
-              }));
-          }
-      }
-  };
-
   const applyFilters = (item) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
+    let globalMatch = globalLogic !== "OR"; 
     for (let b of filters) {
-      let blockMatch = true; let validConds = 0;
+      let blockMatch = true; 
+      let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
         validConds++; 
-        
-        let field = "";
-        if (c.column === "ips") {
-            field = (item.ips || []).join(", ").toLowerCase();
-        } else if (c.column === "status" && item.status !== undefined) {
-            const st = String(item.status).toLowerCase();
-            if (st === 'completed' || st === 'success') field = 'success';
-            else if (st === 'running') field = 'running...';
-            else if (st === 'queued') field = 'queued...';
-            else if (st === 'failed' || st === 'error') field = 'failed';
-            else field = st;
-        } else if (c.column === "vcStatus" && item.vcStatus !== undefined) {
-            const st = String(item.vcStatus).toLowerCase();
-            if (st === 'ready') field = `ready (${item.vcId})`;
-            else if (st === 'not_found') field = 'not found';
-            else if (st === 'resolving') field = 'resolving...';
-            else field = 'waiting...';
-        } else {
-            field = String(item[c.column] || "").toLowerCase();
-        }
-
-        const condition = evaluateCondition(field, c.operator, String(c.value).toLowerCase(), c.column);
-        blockMatch = blockMatch && condition;
+        blockMatch = blockMatch && evaluateFilterCondition(item, c);
       }
-      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      if (validConds > 0) {
+        if (globalLogic === "OR") {
+          globalMatch = globalMatch || blockMatch;
+        } else {
+          globalMatch = globalMatch && blockMatch;
+        }
+      }
     }
     return globalMatch;
   };
@@ -323,17 +370,23 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
 
   const toggleRow = (vcId) => {
     if (!vcId || processing) return;
-    setSelectedIds(prev => { const next = new Set(prev); next.has(vcId) ? next.delete(vcId) : next.add(vcId); return next; });
+    setSelectedIds(prev => { const next = new Set(prev); if (next.has(vcId)) { next.delete(vcId); } else { next.add(vcId); } return next; });
   };
 
   const toggleAllVisible = () => {
     if (processing) return;
     const validIds = sortedItems.filter(i => i.vcStatus === 'ready' && i.vcId).map(i => i.vcId);
     if (validIds.length === 0) return;
-    const allSelected = validIds.every(id => selectedIds.has(id));
+    const allLoadedSelected = validIds.every(id => selectedIds.has(id));
     setSelectedIds(prev => { 
         const next = new Set(prev); 
-        validIds.forEach(id => allSelected ? next.delete(id) : next.add(id)); 
+        validIds.forEach(id => {
+          if (allLoadedSelected) {
+            next.delete(id);
+          } else {
+            next.add(id);
+          }
+        }); 
         return next; 
     });
   };
@@ -341,21 +394,51 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
   const handleExport = (scope, isExec) => { 
-    if (isExec) setShowExecExpDrop(false); else setShowExpDrop(false); 
+    if (isExec) {
+      setShowExecExpDrop(false); 
+    } else {
+      setShowExpDrop(false); 
+    }
 
     let dataToExport = [];
-    const format = isExec ? execExportFormat : exportFormat;
-    const columns = isExec ? execCols : cols;
-    const filename = isExec ? "clone_history" : "clone_targets";
+    let format = "";
+    let columns = [];
+    let filename = "";
 
-    if (scope === 'page') dataToExport = isExec ? execPaginatedItems : paginatedItems;
-    else if (scope === 'filtered') dataToExport = isExec ? sortedExecs : sortedItems;
-    else dataToExport = isExec ? visibleExecs : visibleItems;
+    if (isExec) {
+        format = execExportFormat;
+        columns = execCols;
+        filename = "clone_history";
+        if (scope === 'page') {
+          dataToExport = execPaginatedItems;
+        } else if (scope === 'filtered') {
+          dataToExport = sortedExecs;
+        } else {
+          dataToExport = visibleExecs;
+        }
+    } else {
+        format = exportFormat;
+        columns = cols;
+        filename = "clone_targets";
+        if (scope === 'page') {
+          dataToExport = paginatedItems;
+        } else if (scope === 'filtered') {
+          dataToExport = sortedItems;
+        } else {
+          dataToExport = visibleItems;
+        }
+    }
 
     performExport(dataToExport, columns, format, filename, (p, c) => {
         let val = p[c];
         if (!isExec && c === 'ips') val = Array.isArray(p.ips) ? p.ips.join(", ") : "";
-        if (!isExec && c === 'vcStatus') val = p.vcStatus === 'ready' ? 'Ready' : p.vcStatus === 'resolving' ? 'Resolving' : p.vcStatus === 'not_found' ? 'Not Found' : 'Pending';
+        if (!isExec && c === 'vcStatus') {
+            const st = p.vcStatus;
+            if (st === 'ready') val = 'Ready';
+            else if (st === 'resolving') val = 'Resolving';
+            else if (st === 'not_found') val = 'Not Found';
+            else val = 'Pending';
+        }
         return val;
     });
   };
@@ -373,24 +456,41 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
             return next;
         });
     }
-  }, [activeTab, selectedIds, items]);
+  }, [activeTab, selectedIds, items, bulkSubnet, bulkGateway, bulkDns]);
 
+  // S2004 Fix: Prevent deep nesting by unrolling loops cleanly
   const applyBulkSettings = () => {
-    const incrementIp = (ip, add) => {
-        const parts = ip.split('.').map(Number);
-        if (parts.length !== 4 || parts.some(isNaN)) return ip;
-        let val = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
-        val = (val + add) >>> 0;
-        return [(val >>> 24) & 255, (val >>> 16) & 255, (val >>> 8) & 255, val & 255].join('.');
-    };
     setVmConfigs(prev => {
-        const next = { ...prev }; let index = 0; const sortedIds = Array.from(selectedIds); 
-        sortedIds.forEach(id => { if (next[id]) { next[id] = { ...next[id], subnet: bulkSubnet, gateway: bulkGateway, dns: bulkDns, newIp: bulkIp ? incrementIp(bulkIp, index) : next[id].newIp }; index++; } });
+        const next = { ...prev }; 
+        const sortedIds = Array.from(selectedIds); 
+        for (let i = 0; i < sortedIds.length; i++) {
+            const id = sortedIds[i];
+            if (next[id]) {
+                next[id] = {
+                    ...next[id],
+                    subnet: bulkSubnet,
+                    gateway: bulkGateway,
+                    dns: bulkDns,
+                    newIp: bulkIp ? incrementIp(bulkIp, i) : next[id].newIp
+                };
+            }
+        }
         return next;
     });
   };
 
   const updateVmConfig = (id, field, value) => { setVmConfigs(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } })); };
+
+  const refreshHistory = async () => {
+    const res = await getJSON("/api/vcenter/history");
+    if (res.ok && Array.isArray(res.history)) {
+        const mapped = res.history.filter(h => h.Type === 'Clone').map(h => ({ id: h.VmId, taskId: h.TaskId, name: h.VmName, backupName: h.SnapshotName, status: h.Status, error: h.Error, createdAt: new Date(h.CreatedAt).toLocaleString() }));
+        setExecutions(mapped);
+        setExecLastUpdated(new Date().toLocaleString());
+        return mapped; 
+    }
+    return [];
+  };
 
   const handleExecute = async () => {
     if (selectedIds.size === 0) return;
@@ -415,17 +515,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
       setProcessing(false); 
       setActiveTab("SETTINGS"); 
     }
-  };
-
-  const refreshHistory = async () => {
-    const res = await getJSON("/api/vcenter/history");
-    if (res.ok && Array.isArray(res.history)) {
-        const mapped = res.history.filter(h => h.Type === 'Clone').map(h => ({ id: h.VmId, taskId: h.TaskId, name: h.VmName, backupName: h.SnapshotName, status: h.Status, error: h.Error, createdAt: new Date(h.CreatedAt).toLocaleString() }));
-        setExecutions(mapped);
-        setExecLastUpdated(new Date().toLocaleString());
-        return mapped; 
-    }
-    return [];
   };
 
   useEffect(() => {
@@ -454,6 +543,16 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
       return <span className="pill gray">Waiting...</span>;
   };
 
+  const isCurrentlyLoading = activeTab === 'EXECUTION' ? processing : isFetching;
+  const handleRefreshData = activeTab === 'EXECUTION' ? refreshHistory : fetchData;
+
+  let updatedText = "—";
+  if (activeTab === "EXECUTION") {
+      updatedText = execLastUpdated || "—";
+  } else {
+      updatedText = lastUpdated || "—";
+  }
+
   return (
     <div className="mgmtenv">
       <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -464,7 +563,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
             </div>
             {activeTab !== 'SETTINGS' && (
                 <div className="sub mt-4 text-13 muted-text">
-                   Updated: {activeTab === 'EXECUTION' ? execLastUpdated || "—" : lastUpdated || "—"}
+                   Updated: {updatedText}
                 </div>
             )}
         </div>
@@ -477,8 +576,8 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                     </button>
                     {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
                 </div>
-                <button className="iconbtn" onClick={activeTab === 'EXECUTION' ? refreshHistory : fetchData} disabled={processing || isFetching} title="Refresh Data">
-                    {(activeTab === 'EXECUTION' ? processing : isFetching) ? <InlineSpinner size={16} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
+                <button className="iconbtn" onClick={handleRefreshData} disabled={isCurrentlyLoading} title="Refresh Data">
+                    {isCurrentlyLoading ? <InlineSpinner size={16} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
                 </button>
               </>
             )}
@@ -493,10 +592,10 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                     const validConds = b.conds.filter(c => c.value);
                     if (!validConds.length) return null;
                     return (
-                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                      <div key={`filter-block-${bIdx}-${validConds.length}`} style={{display:'inline-flex', alignItems:'center'}}>
                         {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
                         {validConds.map((c, cIdx) => (
-                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                          <span key={`filter-cond-${bIdx}-${cIdx}-${c.column}`} style={{display:'inline-flex', alignItems:'center'}}>
                             {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
                             <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                           </span>
@@ -541,14 +640,17 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                         {showColDrop && (
                             <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                    {cols.map((col, i) => (
-                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
-                                            <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
-                                                const next = [...cols]; next[i].show = e.target.checked; setCols(next);
-                                            }} />
-                                            <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
-                                        </label>
-                                    ))}
+                                    {cols.map((col) => {
+                                        const i = cols.findIndex(x => x.id === col.id);
+                                        return (
+                                            <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
+                                                <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
+                                                    const next = [...cols]; next[i].show = e.target.checked; setCols(next);
+                                                }} />
+                                                <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
+                                            </label>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}
@@ -562,9 +664,12 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                             <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
                                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
-                                   {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                     <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
-                                   ))}
+                                   {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => {
+                                     const isPri = exportFormat === fmt;
+                                     return (
+                                        <button key={fmt} className={`btn small ${isPri ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                                     );
+                                   })}
                                 </div>
                                 <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
@@ -578,11 +683,13 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
             </div>
 
             <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
-              {isFetching ? (
+              {isFetching && (
                   <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading servers...</div>
-              ) : paginatedItems.length === 0 ? (
+              )}
+              {!isFetching && paginatedItems.length === 0 && (
                   <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No servers found.</div>
-              ) : (
+              )}
+              {!isFetching && paginatedItems.length > 0 && (
                 <table>
                   <thead className="kpi-th-sticky">
                     <tr>
@@ -593,11 +700,11 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedItems.map((row, i) => (
-                      <tr key={i} onClick={() => toggleRow(row.vcId)} className={selectedIds.has(row.vcId) ? "selected-row cursor-pointer" : row.vcStatus !== 'ready' ? 'disabled' : 'cursor-pointer'}>
+                    {paginatedItems.map((row) => (
+                      <tr key={row.vcId || row.name} onClick={() => toggleRow(row.vcId)} className={getRowClass(row, selectedIds)}>
                         <td className="text-center"><input type="checkbox" className="custom-checkbox no-events" checked={selectedIds.has(row.vcId)} readOnly /></td>
                         {cols.find(c=>c.id==='name')?.show && <td>{row.name}</td>}
-                        {cols.find(c=>c.id==='ips')?.show && <td>{row.ips?.join(", ")}</td>}
+                        {cols.find(c=>c.id==='ips')?.show && <td>{row.ips?.join(", ") || "-"}</td>}
                         {cols.find(c=>c.id==='vcStatus')?.show && <td>{renderVcStatus(row.vcStatus, row.vcId)}</td>}
                       </tr>
                     ))}
@@ -608,7 +715,7 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
 
             <Paginator total={sortedItems.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={false} />
           </div>
-          <div className="action-bar"><button className="btn pri min-w-140" onClick={() => setActiveTab("SETTINGS")} disabled={!selectedIds.size}>Next</button></div>
+          <div className="action-bar"><button className="btn pri min-w-140" onClick={() => setActiveTab("SETTINGS")} disabled={selectedIds.size === 0}>Next</button></div>
         </>
       )}
 
@@ -628,20 +735,20 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
             <div className="section-head"><span className="title">2. Network Configuration</span></div>
             <div className="grid">
                <div className="field">
-                   <div className="meta"><label>Start IP</label></div>
-                   <div className="inputwrap"><input className="control" value={bulkIp} onChange={e=>setBulkIp(e.target.value)} placeholder="10.1.x.x" /></div>
+                   <div className="meta"><label htmlFor="bulkIp">Start IP</label></div>
+                   <div className="inputwrap"><input id="bulkIp" className="control" value={bulkIp} onChange={e=>setBulkIp(e.target.value)} placeholder="10.1.x.x" /></div>
                </div>
                <div className="field">
-                   <div className="meta"><label>Subnet</label></div>
-                   <div className="inputwrap"><input className="control" value={bulkSubnet} onChange={e=>setBulkSubnet(e.target.value)} /></div>
+                   <div className="meta"><label htmlFor="bulkSubnet">Subnet</label></div>
+                   <div className="inputwrap"><input id="bulkSubnet" className="control" value={bulkSubnet} onChange={e=>setBulkSubnet(e.target.value)} /></div>
                </div>
                <div className="field">
-                   <div className="meta"><label>Gateway</label></div>
-                   <div className="inputwrap"><input className="control" value={bulkGateway} onChange={e=>setBulkGateway(e.target.value)} /></div>
+                   <div className="meta"><label htmlFor="bulkGateway">Gateway</label></div>
+                   <div className="inputwrap"><input id="bulkGateway" className="control" value={bulkGateway} onChange={e=>setBulkGateway(e.target.value)} /></div>
                </div>
                <div className="field">
-                   <div className="meta"><label>DNS</label></div>
-                   <div className="inputwrap"><input className="control" value={bulkDns} onChange={e=>setBulkDns(e.target.value)} /></div>
+                   <div className="meta"><label htmlFor="bulkDns">DNS</label></div>
+                   <div className="inputwrap"><input id="bulkDns" className="control" value={bulkDns} onChange={e=>setBulkDns(e.target.value)} /></div>
                </div>
             </div>
             <div className="action-bar" style={{borderTop: 'none', paddingTop: 0, paddingBottom: '20px', justifyContent: 'flex-start', background: 'transparent'}}>
@@ -653,11 +760,12 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                 <tbody>
                   {Array.from(selectedIds).map(id => {
                      const item = items.find(i => i.vcId === id); const conf = vmConfigs[id] || {}; if (!item) return null;
+                     const isDanger = conf.newIp ? '' : 'border-danger';
                      return (
                        <tr key={id}>
                          <td className="fw-800">{item.name}</td>
                          <td><input className="table-input" value={conf.cloneName} onChange={e=>updateVmConfig(id,'cloneName',e.target.value)} /></td>
-                         <td><input className={`table-input ${!conf.newIp ? 'border-danger' : ''}`} value={conf.newIp} onChange={e=>updateVmConfig(id,'newIp',e.target.value)} /></td>
+                         <td><input className={`table-input ${isDanger}`} value={conf.newIp} onChange={e=>updateVmConfig(id,'newIp',e.target.value)} /></td>
                          <td><input className="table-input" value={conf.subnet} onChange={e=>updateVmConfig(id,'subnet',e.target.value)} /></td>
                          <td><input className="table-input" value={conf.gateway} onChange={e=>updateVmConfig(id,'gateway',e.target.value)} /></td>
                          <td><input className="table-input" value={conf.dns} onChange={e=>updateVmConfig(id,'dns',e.target.value)} /></td>
@@ -671,8 +779,6 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
           
           <div className="action-bar justify-between">
               <button className="btn outline" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button>
-              
-              {/* 🚀 Integrate InlineSpinner */}
               <button 
                 className="btn pri min-w-140" 
                 onClick={handleExecute} 
@@ -707,9 +813,9 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 {execCols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
-                                            const next = [...execCols]; next[i].show = e.target.checked; setCols(next);
+                                            const next = [...execCols]; next[i].show = e.target.checked; setExecCols(next);
                                         }} />
                                         <span style={{ fontSize: "13px", fontWeight: 500 }}>{col.label}</span>
                                     </label>
@@ -727,9 +833,12 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
                         <div className="dropdown-menu show" style={{ width: "280px", padding: "16px", right: 0 }}>
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
-                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className={`btn small ${execExportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExecExportFormat(fmt); }}>{fmt}</button>
-                               ))}
+                               {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => {
+                                 const isPriExec = execExportFormat === fmt;
+                                 return (
+                                   <button key={fmt} className={`btn small ${isPriExec ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExecExportFormat(fmt); }}>{fmt}</button>
+                                 );
+                               })}
                             </div>
                             <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
@@ -753,8 +862,8 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
               </thead>
               <tbody>
                 {execPaginatedItems.length === 0 ? (<tr><td colSpan={4} className="text-center p-20">No clones found.</td></tr>) : (
-                  execPaginatedItems.map((x, i) => (
-                    <tr key={i}>
+                  execPaginatedItems.map((x) => (
+                    <tr key={x.taskId || `${x.name}-${x.createdAt}`}>
                       {execCols.find(c=>c.id==='name')?.show && <td>{x.name}</td>}
                       {execCols.find(c=>c.id==='backupName')?.show && <td>{x.backupName}</td>}
                       {execCols.find(c=>c.id==='createdAt')?.show && <td>{x.createdAt}</td>}
@@ -773,3 +882,10 @@ export default function CloneManager({ onClose, groupName: initialGroup, onCompl
     </div>
   );
 }
+
+CloneManager.propTypes = {
+  onClose: PropTypes.func,
+  groupName: PropTypes.string,
+  onComplete: PropTypes.func,
+  environment: PropTypes.string
+};

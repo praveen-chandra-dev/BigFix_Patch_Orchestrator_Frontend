@@ -151,7 +151,7 @@ export default function Environment() {
 
   const selectsDisabled = loading || (!baselines.length && !groups.length);
 
-  // 🚀 Add these Multi-Deployment Handlers
+  // Add these Multi-Deployment Handlers
   const handleUpdateDeployment = (index, field, value) => {
     const newDeps = [...(env.sandboxDeployments || [{ baseline: "", group: "" }])];
     newDeps[index][field] = value;

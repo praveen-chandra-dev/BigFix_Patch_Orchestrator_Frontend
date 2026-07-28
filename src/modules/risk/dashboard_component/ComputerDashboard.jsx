@@ -1,8 +1,124 @@
 // src/modules/risk/dashboard_component/ComputerDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import api from "../../../api/api";
 import { performExport } from "../../../utils/exportUtils";
 import Paginator from "../../../components/common/Paginator";
+
+// --- Extracted Helper to drastically reduce Cognitive Complexity (S3776, S2004) ---
+const evaluateDeviceCondition = (device, c, baselines) => {
+  const search = String(c.value).toLowerCase();
+
+  if (c.column === "device_name") {
+    const field = device.device_name.toLowerCase();
+    if (c.operator === "contains") return field.includes(search);
+    if (c.operator === "=") return field === search;
+    if (c.operator === "!=") return field !== search;
+    return true;
+  }
+
+  if (c.column === "patch_id") {
+    const siteCondition = c.__site_name;
+
+    return (device.patches || []).some((x) => {
+      if (typeof x === "string") {
+        return String(x).toLowerCase().includes(search);
+      }
+
+      const patchIdMatch =
+        String(x.patch_id || "")
+          .replace(/^BIGFIX-/i, "")
+          .trim()
+          .toLowerCase() === search;
+
+      if (!patchIdMatch) {
+        return false;
+      }
+
+      if (!siteCondition) {
+        return true;
+      }
+
+      return (
+        String(x.site_name || "")
+          .trim()
+          .toLowerCase() === String(siteCondition).trim().toLowerCase()
+      );
+    });
+  }
+
+  if (c.column === "cve_id") {
+    return (device.cves || []).some(
+      (x) => String(x).trim().toLowerCase() === search,
+    );
+  }
+
+  if (c.column === "baseline_name") {
+    const matchedBls = baselines.filter((x) => {
+      const name = String(x.baseline_name || x.name || "").toLowerCase();
+      if (c.operator === "=") return name === search;
+      if (c.operator === "contains") return name.includes(search);
+      return false;
+    });
+
+    if (c.operator === "!=") {
+      const exactMatch = baselines.filter(
+        (x) => String(x.baseline_name || x.name || "").toLowerCase() === search,
+      );
+      const allBlPatches = new Set();
+      exactMatch.forEach((mb) => {
+        let rP = Array.isArray(mb.patches) ? mb.patches : [];
+        if (typeof mb.patches === "string") {
+          try {
+            rP = JSON.parse(mb.patches);
+          } catch (e) {
+            console.warn("Failed to parse baseline patches", e); // S2486 Fix
+          }
+        }
+        rP.forEach((p) =>
+          allBlPatches.add(
+            String(p.patch_id || p.id || p)
+              .replace(/^BIGFIX-/i, "")
+              .trim(),
+          ),
+        );
+      });
+      return !Array.from(allBlPatches).some((pid) =>
+        device.patches.includes(pid),
+      );
+    }
+
+    if (matchedBls.length > 0) {
+      const allBlPatches = new Set();
+      matchedBls.forEach((mb) => {
+        let rP = Array.isArray(mb.patches) ? mb.patches : [];
+        if (typeof mb.patches === "string") {
+          try {
+            rP = JSON.parse(mb.patches);
+          } catch (e) {
+            console.warn("Failed to parse baseline patches", e); // S2486 Fix
+          }
+        }
+        rP.forEach((p) =>
+          allBlPatches.add(
+            String(p.patch_id || p.id || p)
+              .replace(/^BIGFIX-/i, "")
+              .trim(),
+          ),
+        );
+      });
+      // A device is applicable if it is missing AT LEAST ONE patch from the baseline
+      return Array.from(allBlPatches).some((pid) =>
+        device.patches.includes(pid),
+      );
+    }
+
+    return false; // Baseline not found
+  }
+
+  return true;
+};
+// --- End Extracted Helper ---
 
 export default function ComputerDashboard({
   patches = [],
@@ -18,11 +134,11 @@ export default function ComputerDashboard({
 
   const [showColDrop, setShowColDrop] = useState(false);
   const [showExpDrop, setShowExpDrop] = useState(false);
-  const [exportFormat, setExportFormat] = useState('CSV');
+  const [exportFormat, setExportFormat] = useState("CSV");
   const colRef = useRef(null);
   const expRef = useRef(null);
 
-const [baselines, setBaselines] = useState([]);
+  const [baselines, setBaselines] = useState([]);
 
   const [cols, setCols] = useState([
     { id: "device_name", label: "Device Name", show: true },
@@ -41,42 +157,75 @@ const [baselines, setBaselines] = useState([]);
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
- useEffect(() => {
-    api.get("/baselines").then(res => {
-      const data = Array.isArray(res.data) ? res.data : res.data?.data || [];
-      setBaselines(data);
-    }).catch(err => console.error(err)).finally(() => {
-      onDataLoaded?.();
-    });
+  useEffect(() => {
+    api
+      .get("/baselines")
+      .then((res) => {
+        const data = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        setBaselines(data);
+      })
+      .catch((err) => console.error(err))
+      .finally(() => {
+        onDataLoaded?.();
+      });
   }, []);
 
   const patchCveMap = useMemo(() => {
     const map = {};
-    cves.forEach((c) => {
-      if (!map[c.patch_id]) map[c.patch_id] = [];
-      map[c.patch_id].push(c.cve_id);
+
+    cves.forEach((cve) => {
+      (cve.patchObjects || []).forEach((patch) => {
+        const patchId = String(patch.patch_id || "").trim();
+
+        const siteName = String(patch.site_name || "").trim();
+
+        const key = `${patchId}|${siteName}`;
+
+        if (!map[key]) {
+          map[key] = [];
+        }
+
+        map[key].push(cve.cve_id);
+      });
     });
+
     return map;
   }, [cves]);
 
   const deviceExposure = useMemo(() => {
     const map = {};
     patches.forEach((patch) => {
-      const devices = patch.applicable_computers || [];
-      const cvesForPatch = patchCveMap[patch.patch_id] || [];
+      const devices = Array.isArray(patch.applicable_computers)
+        ? patch.applicable_computers
+        : [];
+      const patchKey = `${String(patch.patch_id || "").trim()}|${String(
+        patch.site_name || "",
+      ).trim()}`;
+
+      const cvesForPatch = patchCveMap[patchKey] || [];
       devices.forEach((device) => {
-        if (!map[device])
-          map[device] = {
-            device_name: device,
+        const normalizedDevice = String(device).trim();
+
+        if (!normalizedDevice) return;
+
+        if (!map[normalizedDevice]) {
+          map[normalizedDevice] = {
+            device_name: normalizedDevice,
             patches: new Set(),
             cves: new Set(),
           };
-        const cleanPatchId = patch.patch_id
-          ? patch.patch_id.replace(/^BIGFIX-/i, "")
-          : "";
-        map[device].patches.add(cleanPatchId);
+        }
+
+        map[normalizedDevice].patches.add({
+          patch_id: String(patch.patch_id || "")
+            .replace(/^BIGFIX-/i, "")
+            .trim(),
+
+          site_name: String(patch.site_name || "").trim(),
+        });
+
         cvesForPatch.forEach((cve) => {
-          map[device].cves.add(cve);
+          map[normalizedDevice].cves.add(cve);
         });
       });
     });
@@ -91,69 +240,22 @@ const [baselines, setBaselines] = useState([]);
 
   const applyFilters = (device) => {
     if (!parentFilters.length) return true;
-    let globalMatch = parentLogic === "OR" ? false : true;
-    for (let b of parentFilters) {
+    let globalMatch = parentLogic !== "OR"; // S6644 Fix
+    for (const b of parentFilters) {
       let blockMatch = true;
       let validConds = 0;
-      for (let c of b.conds) {
+      for (const c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase();
-        if (c.column === "device_name") {
-          const field = device.device_name.toLowerCase();
-          if (c.operator === "contains") condition = field.includes(search);
-          else if (c.operator === "=") condition = field === search;
-          else if (c.operator === "!=") condition = field !== search;
-        } else if (c.column === "patch_id") {
-          condition = (device.patches || []).some((x) =>
-            x.toLowerCase().includes(search),
-          );
-        } else if (c.column === "cve_id") {
-          condition = (device.cves || []).some((x) =>
-            x.toLowerCase().includes(search),
-          );
-        } else if (c.column === "baseline_name") {
-          // Find the baseline being filtered
-          const matchedBls = baselines.filter(x => {
-             const name = String(x.baseline_name || x.name || "").toLowerCase();
-             if (c.operator === "=") return name === search;
-             if (c.operator === "contains") return name.includes(search);
-             return false;
-          });
-
-          if (c.operator === "!=") {
-             const exactMatch = baselines.filter(x => String(x.baseline_name || x.name || "").toLowerCase() === search);
-             const allBlPatches = new Set();
-             exactMatch.forEach(mb => {
-                let rP = Array.isArray(mb.patches) ? mb.patches : [];
-                if (typeof mb.patches === 'string') { try { rP = JSON.parse(mb.patches); } catch(e){} }
-                rP.forEach(p => allBlPatches.add(String(p.patch_id || p.id || p).replace(/^BIGFIX-/i, "").trim()));
-             });
-             condition = !Array.from(allBlPatches).some(pid => device.patches.includes(pid));
-          } else {
-              if (matchedBls.length > 0) {
-                  const allBlPatches = new Set();
-                  matchedBls.forEach(mb => {
-                      let rP = Array.isArray(mb.patches) ? mb.patches : [];
-                      if (typeof mb.patches === 'string') { try { rP = JSON.parse(mb.patches); } catch(e){} }
-                      rP.forEach(p => allBlPatches.add(String(p.patch_id || p.id || p).replace(/^BIGFIX-/i, "").trim()));
-                  });
-                  // A device is applicable if it is missing AT LEAST ONE patch from the baseline
-                  condition = Array.from(allBlPatches).some(pid => device.patches.includes(pid));
-              } else {
-                  condition = false; // Baseline not found
-              }
-          }
-        }
-          
+        const condition = evaluateDeviceCondition(device, c, baselines);
         blockMatch = blockMatch && condition;
       }
-      if (validConds > 0)
+      if (validConds > 0) {
         globalMatch =
           parentLogic === "OR"
             ? globalMatch || blockMatch
             : globalMatch && blockMatch;
+      }
     }
     return globalMatch;
   };
@@ -181,7 +283,10 @@ const [baselines, setBaselines] = useState([]);
     return sortable;
   }, [filteredDevices, sortConfig]);
 
-  const paginatedDevices = sortedDevices.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+  const paginatedDevices = sortedDevices.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage,
+  );
 
   const handleSort = (key) =>
     setSortConfig((prev) => ({
@@ -190,22 +295,31 @@ const [baselines, setBaselines] = useState([]);
     }));
 
   const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
-    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+    if (sortConfig.key !== key)
+      return <span className="muted-text ml-6">↕</span>;
+    return (
+      <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>
+    );
   };
 
   const handleExport = (scope) => {
     setShowExpDrop(false);
     let dataToExport = [];
-    if (scope === 'page') dataToExport = paginatedDevices;
-    else if (scope === 'filtered') dataToExport = sortedDevices;
+    if (scope === "page") dataToExport = paginatedDevices;
+    else if (scope === "filtered") dataToExport = sortedDevices;
     else dataToExport = deviceExposure;
 
-    performExport(dataToExport, cols, exportFormat, "computer_exposure", (d, c) => {
-      if (c === "patch_count") return d.patches.join(",");
-      if (c === "cve_count") return d.cves.join(",");
-      return d[c];
-    });
+    performExport(
+      dataToExport,
+      cols,
+      exportFormat,
+      "computer_exposure",
+      (d, c) => {
+        if (c === "patch_count") return d.patches.join(",");
+        if (c === "cve_count") return d.cves.join(",");
+        return d[c];
+      },
+    );
   };
 
   const visibleColCount = cols.filter((c) => c.show).length;
@@ -228,6 +342,7 @@ const [baselines, setBaselines] = useState([]);
         >
           <div className="dropdown" ref={colRef}>
             <button
+              type="button"
               className="btn outline sec small"
               onClick={() => {
                 setShowColDrop(!showColDrop);
@@ -288,6 +403,7 @@ const [baselines, setBaselines] = useState([]);
           </div>
           <div className="dropdown" ref={expRef}>
             <button
+              type="button"
               className="btn outline small"
               onClick={() => {
                 setShowExpDrop(!showExpDrop);
@@ -318,7 +434,7 @@ const [baselines, setBaselines] = useState([]);
                     color: "var(--muted)",
                     textTransform: "uppercase",
                     marginBottom: "12px",
-                    letterSpacing: '0.05em'
+                    letterSpacing: "0.05em",
                   }}
                 >
                   Format
@@ -334,9 +450,15 @@ const [baselines, setBaselines] = useState([]);
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
                     <button
                       key={fmt}
-                      className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`}
+                      type="button"
+                      className={`btn small ${
+                        exportFormat === fmt ? "pri" : "outline"
+                      }`}
                       style={{ fontSize: "11px", height: "32px", padding: 0 }}
-                      onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExportFormat(fmt);
+                      }}
                     >
                       {fmt}
                     </button>
@@ -356,18 +478,30 @@ const [baselines, setBaselines] = useState([]);
                     color: "var(--muted)",
                     textTransform: "uppercase",
                     marginBottom: "12px",
-                    letterSpacing: '0.05em'
+                    letterSpacing: "0.05em",
                   }}
                 >
                   Scope
                 </div>
-                <button className="item" onClick={() => handleExport('page')}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("page")}
+                >
                   Current Page
                 </button>
-                <button className="item" onClick={() => handleExport('filtered')}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("filtered")}
+                >
                   Filtered Data
                 </button>
-                <button className="item" onClick={() => handleExport('all')}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("all")}
+                >
                   All Data
                 </button>
               </div>
@@ -441,9 +575,20 @@ const [baselines, setBaselines] = useState([]);
                     <td style={{ wordBreak: "break-word" }}>{d.device_name}</td>
                   )}
                   {cols.find((c) => c.id === "patch_count")?.show && (
-                    <td style={{ textAlign: "center", wordBreak: "break-word" }}>
-                      <span
+                    <td
+                      style={{ textAlign: "center", wordBreak: "break-word" }}
+                    >
+                      {/* S6848 & S1082 Fix: Native interactive button element */}
+                      <button
+                        type="button"
                         className="cell-link"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          cursor: "pointer",
+                        }}
                         onClick={() =>
                           navigate(
                             "patch",
@@ -451,7 +596,7 @@ const [baselines, setBaselines] = useState([]);
                               {
                                 conds: [
                                   {
-                                    column: "device",
+                                    column: "device_name",
                                     operator: "=",
                                     value: d.device_name,
                                   },
@@ -463,13 +608,24 @@ const [baselines, setBaselines] = useState([]);
                         }
                       >
                         {d.patch_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                   {cols.find((c) => c.id === "cve_count")?.show && (
-                    <td style={{ textAlign: "center", wordBreak: "break-word" }}>
-                      <span
+                    <td
+                      style={{ textAlign: "center", wordBreak: "break-word" }}
+                    >
+                      {/* S6848 & S1082 Fix: Native interactive button element */}
+                      <button
+                        type="button"
                         className="cell-link"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          cursor: "pointer",
+                        }}
                         onClick={() =>
                           navigate(
                             "cve",
@@ -489,7 +645,7 @@ const [baselines, setBaselines] = useState([]);
                         }
                       >
                         {d.cve_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -499,7 +655,24 @@ const [baselines, setBaselines] = useState([]);
         </table>
       </div>
 
-      <Paginator total={sortedDevices.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={true} />
+      <Paginator
+        total={sortedDevices.length}
+        rpp={rowsPerPage}
+        setRpp={setRowsPerPage}
+        page={currentPage}
+        setPage={setCurrentPage}
+        edgeToEdge={true}
+      />
     </div>
   );
 }
+
+// S6774 Fix: Added Props validation
+ComputerDashboard.propTypes = {
+  patches: PropTypes.array,
+  cves: PropTypes.array,
+  parentFilters: PropTypes.array,
+  parentLogic: PropTypes.string,
+  onDataLoaded: PropTypes.func,
+  navigate: PropTypes.func.isRequired,
+};

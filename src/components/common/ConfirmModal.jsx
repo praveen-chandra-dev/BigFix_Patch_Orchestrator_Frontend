@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 
 export default function ConfirmModal({
   open,
@@ -40,3 +41,14 @@ export default function ConfirmModal({
     </div>
   );
 }
+
+ConfirmModal.propTypes = {
+  open: PropTypes.bool.isRequired,
+  title: PropTypes.string,
+  message: PropTypes.node,
+  confirmText: PropTypes.string,
+  cancelText: PropTypes.string,
+  loading: PropTypes.bool,
+  onConfirm: PropTypes.func.isRequired,
+  onCancel: PropTypes.func.isRequired,
+};

@@ -1,5 +1,6 @@
 // src/components/SnapshotSelector.jsx
 import { useState, useEffect, useRef, useMemo } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
@@ -9,25 +10,48 @@ import InlineSpinner from "./common/InlineSpinner";
 
 const vmResolutionCache = new Map();
 
-const API = window.env?.VITE_API_BASE || "http://localhost:5174";
+// S7764 Fix: Use globalThis instead of window
+const API = globalThis.env?.VITE_API_BASE || "http://localhost:5174";
 
 function getHeaders() {
   return { "Content-Type": "application/json", "x-user-role": sessionStorage.getItem("user_role") || "Admin" };
 }
+
 async function getJSON(url) {
   const r = await fetch(`${API}${url}`, { headers: getHeaders() });
   return r.json();
 }
+
 async function postJSON(url, body) {
   const r = await fetch(`${API}${url}`, { method: "POST", headers: getHeaders(), body: JSON.stringify(body) });
   return r.json();
 }
 
+// Extracted to reduce Cognitive Complexity (S3776)
+const evaluateCondition = (item, c) => {
+  const query = String(c.value).toLowerCase();
+  let field = "";
+  if (c.column === "ips") field = (item.ips || []).join(", ").toLowerCase();
+  else field = String(item[c.column] || "").toLowerCase();
+
+  if (c.operator === "contains") return field.includes(query);
+  if (c.operator === "=") return field === query;
+  if (c.operator === "!=") return field !== query;
+  return true;
+};
+
+// S3358 Fix: Extracted table row class resolution
+const getRowClass = (row, selectedIds) => {
+  if (row.vcStatus === 'ready') {
+      return selectedIds.has(row.vcId) ? "selected-row cursor-pointer" : "cursor-pointer";
+  }
+  return "disabled";
+};
+
 export default function SnapshotManager({ onClose, groupName: initialGroup, onComplete, environment }) {
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState("TARGETS");
-  // const [mode, setMode] = useState(initialGroup ? "GROUP" : "COMPUTER");
   const [mode, setMode] = useState("COMPUTER"); 
   const [items, setItems] = useState([]);
   const [isFetching, setIsFetching] = useState(false);
@@ -93,14 +117,14 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     { value: "vcStatus", label: "Status" }
   ];
 
-  useEffect(() => { window.dispatchEvent(new CustomEvent('sync:snapshot_tab', { detail: activeTab })); }, [activeTab]);
+  useEffect(() => { globalThis.dispatchEvent(new CustomEvent('sync:snapshot_tab', { detail: activeTab })); }, [activeTab]);
   useEffect(() => { 
     const handler = (e) => {
         setActiveTab(e.detail);
         setFilters([]); 
     };
-    window.addEventListener('nav:snapshot', handler); 
-    return () => window.removeEventListener('nav:snapshot', handler); 
+    globalThis.addEventListener('nav:snapshot', handler); 
+    return () => globalThis.removeEventListener('nav:snapshot', handler); 
   }, []);
 
   useEffect(() => {
@@ -124,10 +148,57 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
           setGroups(gRes.groups.map((g) => ({ value: g.id, label: g.name })));
           if (initialGroup) { const found = gRes.groups.find((g) => g.name === initialGroup); if (found) setSelectedGroupId(found.id); }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("Init Error", e);
+      }
     }
     init();
   }, [initialGroup]);
+
+  const resolveBatch = async (unresolvedItems) => {
+    const CHUNK_SIZE = 200; 
+    
+    for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
+        const chunk = unresolvedItems.slice(i, i + CHUNK_SIZE);
+        const targets = chunk.map(m => ({ name: m.name, ips: (m.ips || []).map(ip => String(ip).trim()) }));
+        
+        try {
+            const look = await postJSON("/api/vcenter/lookup", { targets });
+            const resultMap = new Map();
+            (look.matches || []).forEach(m => { if (m.name && m.id) resultMap.set(String(m.name).toLowerCase(), m.id); });
+            
+            const chunkUpdates = {};
+            chunk.forEach(c => {
+                const key = String(c.name || "").toLowerCase();
+                const vcId = resultMap.get(key);
+                const status = vcId ? 'ready' : 'not_found';
+                
+                vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
+                chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
+            });
+            
+            setItems(prev => prev.map(item => {
+                const key = String(item.name || "").toLowerCase();
+                if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
+                return item;
+            }));
+            
+        } catch (e) {
+            console.error("Batch resolve failed", e);
+            const chunkUpdates = {};
+            chunk.forEach(c => {
+                const key = String(c.name || "").toLowerCase();
+                vmResolutionCache.set(key, { vcId: null, vcStatus: 'not_found' });
+                chunkUpdates[key] = { vcId: null, vcStatus: 'not_found' };
+            });
+            setItems(prev => prev.map(item => {
+                const key = String(item.name || "").toLowerCase();
+                if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
+                return item;
+            }));
+        }
+    }
+  };
 
   const fetchData = async () => {
     if (mode === "GROUP" && !selectedGroupId) return;
@@ -175,70 +246,19 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
   useEffect(() => { setItems([]); setSelectedIds(new Set()); setCurrentPage(1); }, [mode, selectedGroupId]);
   useEffect(() => { fetchData(); }, [mode, selectedGroupId]);
 
-  const resolveBatch = async (unresolvedItems) => {
-      const CHUNK_SIZE = 200; 
-      
-      for (let i = 0; i < unresolvedItems.length; i += CHUNK_SIZE) {
-          const chunk = unresolvedItems.slice(i, i + CHUNK_SIZE);
-          const targets = chunk.map(m => ({ name: m.name, ips: (m.ips || []).map(ip => String(ip).trim()) }));
-          
-          try {
-              const look = await postJSON("/api/vcenter/lookup", { targets });
-              const resultMap = new Map();
-              (look.matches || []).forEach(m => { if (m.name && m.id) resultMap.set(String(m.name).toLowerCase(), m.id); });
-              
-              const chunkUpdates = {};
-              chunk.forEach(c => {
-                  const key = String(c.name || "").toLowerCase();
-                  const vcId = resultMap.get(key);
-                  const status = vcId ? 'ready' : 'not_found';
-                  
-                  vmResolutionCache.set(key, { vcId: vcId || null, vcStatus: status });
-                  chunkUpdates[key] = { vcId: vcId || null, vcStatus: status };
-              });
-              
-              setItems(prev => prev.map(item => {
-                  const key = String(item.name || "").toLowerCase();
-                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
-                  return item;
-              }));
-              
-          } catch (e) {
-              console.error("Batch resolve failed", e);
-              const chunkUpdates = {};
-              chunk.forEach(c => {
-                  const key = String(c.name || "").toLowerCase();
-                  vmResolutionCache.set(key, { vcId: null, vcStatus: 'not_found' });
-                  chunkUpdates[key] = { vcId: null, vcStatus: 'not_found' };
-              });
-              setItems(prev => prev.map(item => {
-                  const key = String(item.name || "").toLowerCase();
-                  if (chunkUpdates[key]) return { ...item, ...chunkUpdates[key] };
-                  return item;
-              }));
-          }
-      }
-  };
-
   const applyFilters = (item) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
+    let globalMatch = globalLogic !== "OR"; 
     for (let b of filters) {
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
-        validConds++; let condition = true;
-        const query = String(c.value).toLowerCase();
-        let field = "";
-        if (c.column === "ips") field = (item.ips || []).join(", ").toLowerCase();
-        else field = String(item[c.column] || "").toLowerCase();
-
-        if (c.operator === "contains") condition = field.includes(query);
-        else if (c.operator === "=") condition = field === query;
-        else if (c.operator === "!=") condition = field !== query;
-        blockMatch = blockMatch && condition;
+        validConds++;
+        blockMatch = blockMatch && evaluateCondition(item, c);
       }
-      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      if (validConds > 0) {
+        globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
+      }
     }
     return globalMatch;
   };
@@ -281,6 +301,9 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     return sortableItems;
   }, [visibleExecs, execSortConfig]);
 
+  const paginatedItems = sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+  const execPaginatedItems = sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage);
+
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   const handleExecSort = (key) => setExecSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
   
@@ -299,9 +322,16 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     const validIds = sortedItems.filter(i => i.vcStatus === 'ready' && i.vcId).map(i => i.vcId);
     if (validIds.length === 0) return;
     const allLoadedSelected = validIds.every(id => selectedIds.has(id));
+    
     setSelectedIds(prev => { 
         const next = new Set(prev); 
-        validIds.forEach(id => allLoadedSelected ? next.delete(id) : next.add(id)); 
+        validIds.forEach(id => {
+            if (allLoadedSelected) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+        }); 
         return next; 
     });
   };
@@ -316,9 +346,13 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     const columns = isExec ? execCols : cols;
     const filename = isExec ? "snapshot_history" : "snapshot_targets";
 
-    if (scope === 'page') dataToExport = isExec ? sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage) : sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
-    else if (scope === 'filtered') dataToExport = isExec ? sortedExecs : sortedItems;
-    else dataToExport = isExec ? visibleExecs : visibleItems;
+    if (scope === 'page') {
+      dataToExport = isExec ? execPaginatedItems : paginatedItems;
+    } else if (scope === 'filtered') {
+      dataToExport = isExec ? sortedExecs : sortedItems;
+    } else {
+      dataToExport = isExec ? visibleExecs : visibleItems;
+    }
 
     performExport(dataToExport, columns, format, filename, (p, c) => {
         let val = p[c];
@@ -326,6 +360,17 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
         if (!isExec && c === 'vcStatus') val = p.vcStatus === 'ready' ? 'Ready' : p.vcStatus === 'resolving' ? 'Resolving' : p.vcStatus === 'not_found' ? 'Not Found' : 'Pending';
         return val;
     });
+  };
+
+  const refreshHistory = async () => {
+    const res = await getJSON("/api/vcenter/history");
+    if (res.ok && Array.isArray(res.history)) {
+        const mapped = res.history.filter(h => h.Type === 'Snapshot').map(h => ({ id: h.VmId, name: h.VmName, snapName: h.SnapshotName, taskId: h.TaskId, status: h.Status, error: h.Error, createdAt: new Date(h.CreatedAt).toLocaleString() }));
+        setExecutions(mapped);
+        setExecLastUpdated(new Date().toLocaleString());
+        return mapped;
+    }
+    return [];
   };
 
   const handleExecute = async () => {
@@ -348,17 +393,6 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
       setProcessing(false); 
       setActiveTab("SETTINGS"); 
     }
-  };
-
-  const refreshHistory = async () => {
-    const res = await getJSON("/api/vcenter/history");
-    if (res.ok && Array.isArray(res.history)) {
-        const mapped = res.history.filter(h => h.Type === 'Snapshot').map(h => ({ id: h.VmId, name: h.VmName, snapName: h.SnapshotName, taskId: h.TaskId, status: h.Status, error: h.Error, createdAt: new Date(h.CreatedAt).toLocaleString() }));
-        setExecutions(mapped);
-        setExecLastUpdated(new Date().toLocaleString());
-        return mapped;
-    }
-    return [];
   };
 
   useEffect(() => {
@@ -386,6 +420,53 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
       if (status === 'not_found') return <span className="pill red">Not Found</span>;
       if (status === 'resolving') return <span className="pill blue">Resolving...</span>;
       return <span className="pill gray">Waiting...</span>;
+  };
+
+  const renderTargetContent = () => {
+    if (isFetching) {
+      return <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading servers...</div>;
+    }
+    if (paginatedItems.length === 0) {
+      return <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No servers found.</div>;
+    }
+
+    return (
+      <table>
+        <thead className="kpi-th-sticky">
+          <tr>
+              <th className="w-40 text-center"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} disabled={!paginatedItems.length}/></th>
+              {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Hostname{getSortIcon('name', sortConfig)}</th>}
+              {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortIcon('ips', sortConfig)}</th>}
+              {cols.find(c=>c.id==='vcStatus')?.show && <th className="cursor-pointer" onClick={() => handleSort('vcStatus')}>Status{getSortIcon('vcStatus', sortConfig)}</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {paginatedItems.map((row) => (
+              <tr key={row.vcId || row.name} onClick={() => toggleRow(row.vcId)} className={getRowClass(row, selectedIds)}>
+                <td className="text-center"><input type="checkbox" className="custom-checkbox pointer-events-none" checked={selectedIds.has(row.vcId)} disabled={row.vcStatus !== 'ready' || processing} readOnly /></td>
+                {cols.find(c=>c.id==='name')?.show && <td>{row.name}</td>}
+                {cols.find(c=>c.id==='ips')?.show && <td>{row.ips?.join(", ") || "-"}</td>}
+                {cols.find(c=>c.id==='vcStatus')?.show && <td>{renderVcStatus(row.vcStatus, row.vcId)}</td>}
+              </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
+  const renderExecTableContent = () => {
+    if (execPaginatedItems.length === 0) {
+      return (<tr><td colSpan={5} className="text-center p-20">No snapshots found.</td></tr>);
+    }
+    return execPaginatedItems.map((ex) => (
+      <tr key={ex.taskId || `${ex.name}-${ex.createdAt}`}>
+        {execCols.find(c=>c.id==='name')?.show && <td>{ex.name}</td>}
+        {execCols.find(c=>c.id==='snapName')?.show && <td>{ex.snapName}</td>}
+        {execCols.find(c=>c.id==='taskId')?.show && <td>{ex.taskId || "-"}</td>}
+        {execCols.find(c=>c.id==='createdAt')?.show && <td>{ex.createdAt}</td>}
+        {execCols.find(c=>c.id==='status')?.show && <td>{renderExecStatus(ex.status)} {ex.error && <small className="text-danger d-block">{ex.error}</small>}</td>}
+      </tr>
+    ));
   };
 
   return (
@@ -427,10 +508,10 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                     const validConds = b.conds.filter(c => c.value);
                     if (!validConds.length) return null;
                     return (
-                      <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                      <div key={b.id || `filter-block-${bIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                         {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
                         {validConds.map((c, cIdx) => (
-                          <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                          <span key={`${c.column}-${c.operator}-${c.value}-${cIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                             {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
                             <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                           </span>
@@ -476,7 +557,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                             <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                     {cols.map((col, i) => (
-                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                             <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                                 const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                             }} />
@@ -512,35 +593,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
             </div>
 
             <div className="tableWrap h-400 border-top" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}>
-              {isFetching ? (
-                  <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading servers...</div>
-              ) : sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).length === 0 ? (
-                  <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No servers found.</div>
-              ) : (
-                <table>
-                  <thead className="kpi-th-sticky">
-                    <tr>
-                        <th className="w-40 text-center"><input type="checkbox" className="custom-checkbox" onChange={toggleAllVisible} disabled={!sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).length}/></th>
-                        {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Hostname{getSortIcon('name', sortConfig)}</th>}
-                        {cols.find(c=>c.id==='ips')?.show && <th className="cursor-pointer" onClick={() => handleSort('ips')}>IP Address{getSortIcon('ips', sortConfig)}</th>}
-                        {cols.find(c=>c.id==='vcStatus')?.show && <th className="cursor-pointer" onClick={() => handleSort('vcStatus')}>Status{getSortIcon('vcStatus', sortConfig)}</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedItems.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage).map((row, i) => {
-                        const isReady = row.vcStatus === 'ready';
-                        return (
-                            <tr key={i} className={!isReady ? "disabled" : selectedIds.has(row.vcId) ? "selected-row cursor-pointer" : "cursor-pointer"} onClick={() => toggleRow(row.vcId)}>
-                              <td className="text-center"><input type="checkbox" className="custom-checkbox pointer-events-none" checked={selectedIds.has(row.vcId)} disabled={!isReady || processing} readOnly /></td>
-                              {cols.find(c=>c.id==='name')?.show && <td>{row.name}</td>}
-                              {cols.find(c=>c.id==='ips')?.show && <td>{row.ips?.join(", ") || "-"}</td>}
-                              {cols.find(c=>c.id==='vcStatus')?.show && <td>{renderVcStatus(row.vcStatus, row.vcId)}</td>}
-                            </tr>
-                        );
-                    })}
-                  </tbody>
-                </table>
-              )}
+              {renderTargetContent()}
             </div>
 
             <Paginator total={sortedItems.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={false} />
@@ -555,15 +608,15 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
             <div className="section-head"><span className="title">Snapshot Configuration</span></div>
             <div className="grid">
               <div className="field">
-                <div className="meta"><label>Snapshot Name</label></div>
+                <div className="meta"><label htmlFor="snapNameInput">Snapshot Name</label></div>
                 <div className="inputwrap">
-                    <input className="control" value={snapName} onChange={(e) => setSnapName(e.target.value)} disabled={processing} />
+                    <input id="snapNameInput" className="control" value={snapName} onChange={(e) => setSnapName(e.target.value)} disabled={processing} />
                 </div>
               </div>
               <div className="field">
-                <div className="meta"><label>Description</label></div>
+                <div className="meta"><label htmlFor="snapDescInput">Description</label></div>
                 <div className="inputwrap">
-                    <input className="control" value={description} onChange={(e) => setDescription(e.target.value)} disabled={processing} />
+                    <input id="snapDescInput" className="control" value={description} onChange={(e) => setDescription(e.target.value)} disabled={processing} />
                 </div>
               </div>
               <div className="field w-full flex-row gap-20 mt-10" style={{ alignItems: 'center' }}>
@@ -580,7 +633,6 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
           <div className="action-bar justify-between" style={{ borderTop: '1px solid var(--border)' }}>
              <button className="btn outline" onClick={() => setActiveTab("TARGETS")} disabled={processing}>Back</button>
              
-             {/* 🚀 Integrated InlineSpinner */}
              <button 
                 className="btn pri min-w-140" 
                 onClick={handleExecute} 
@@ -613,7 +665,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 {execCols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                             const next = [...execCols]; next[i].show = e.target.checked; setExecCols(next);
                                         }} />
@@ -634,7 +686,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className={`btn small ${execExportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                                 <button key={fmt} className={`btn small ${execExportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExecExportFormat(fmt); }}>{fmt}</button>
                                ))}
                             </div>
                             <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
@@ -659,17 +711,7 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
                 </tr>
               </thead>
               <tbody>
-                {sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage).length === 0 ? (<tr><td colSpan={5} className="text-center p-20">No snapshots found.</td></tr>) : (
-                  sortedExecs.slice((execCurrentPage - 1) * execRowsPerPage, execCurrentPage * execRowsPerPage).map((ex, i) => (
-                    <tr key={i}>
-                      {execCols.find(c=>c.id==='name')?.show && <td>{ex.name}</td>}
-                      {execCols.find(c=>c.id==='snapName')?.show && <td>{ex.snapName}</td>}
-                      {execCols.find(c=>c.id==='taskId')?.show && <td>{ex.taskId || "-"}</td>}
-                      {execCols.find(c=>c.id==='createdAt')?.show && <td>{ex.createdAt}</td>}
-                      {execCols.find(c=>c.id==='status')?.show && <td>{renderExecStatus(ex.status)} {ex.error && <small className="text-danger d-block">{ex.error}</small>}</td>}
-                    </tr>
-                  ))
-                )}
+                {renderExecTableContent()}
               </tbody>
             </table>
           </div>
@@ -681,3 +723,10 @@ export default function SnapshotManager({ onClose, groupName: initialGroup, onCo
     </div>
   );
 }
+
+SnapshotManager.propTypes = {
+  onClose: PropTypes.func,
+  groupName: PropTypes.string,
+  onComplete: PropTypes.func,
+  environment: PropTypes.string
+};

@@ -1,8 +1,75 @@
 // src/modules/risk/dashboard_component/BaselineDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import api from "../../../api/api";
 import { performExport } from "../../../utils/exportUtils";
 import Paginator from "../../../components/common/Paginator";
+
+// Extracted to reduce Cognitive Complexity and deep nesting (S3776, S2004)
+const processBaseline = (b, patchCompMap, patchCveMap) => {
+  let rawPatches = [];
+  if (Array.isArray(b.patches)) {
+      rawPatches = b.patches;
+  } else if (typeof b.patches === 'string') {
+      try {
+          rawPatches = JSON.parse(b.patches);
+          if (!Array.isArray(rawPatches)) rawPatches = [];
+      } catch(e) {
+          rawPatches = [];
+      }
+  }
+
+  const patchIds = rawPatches.map(p => {
+      let id = "";
+      if (typeof p === 'object' && p !== null) id = String(p.patch_id || p.id || "");
+      else id = String(p);
+      return id.replace(/^BIGFIX-/i, "").trim();
+  }).filter(Boolean);
+  
+  const cveSet = new Set();
+  const compSet = new Set(); 
+  
+  for (const cleanId of patchIds) {
+    const cvesForPatch = patchCveMap[cleanId] || patchCveMap[`BIGFIX-${cleanId}`] || [];
+    for (const c of cvesForPatch) cveSet.add(c);
+    
+    const compsForPatch = patchCompMap[cleanId] || [];
+    for (const c of compsForPatch) compSet.add(c);
+  }
+  
+  return {
+    baseline_name: b.baseline_name || b.name || "Unknown Baseline",
+    patch_count: patchIds.length,
+    cve_count: cveSet.size,
+    computer_count: b.computer_count !== undefined ? b.computer_count : compSet.size, 
+    patches: patchIds,
+    cves: Array.from(cveSet),
+    computers: Array.from(compSet), 
+  };
+};
+
+// Extracted filtering logic (S3776)
+const evaluateCondition = (baseline, c) => {
+  const search = String(c.value).toLowerCase();
+  
+  if (c.column === "baseline_name" || c.column === "patch_name") {
+    const field = String(baseline.baseline_name || "").toLowerCase();
+    if (c.operator === "contains") return field.includes(search);
+    if (c.operator === "=") return field === search;
+    if (c.operator === "!=") return field !== search;
+    return true;
+  }
+  
+  if (c.column === "patch_id") {
+    return (baseline.patches || []).some((x) => String(x).toLowerCase().includes(search));
+  }
+  
+  if (c.column === "cve_id") {
+    return (baseline.cves || []).some((x) => String(x).toLowerCase().includes(search));
+  }
+  
+  return true;
+};
 
 export default function BaselineDashboard({
   parentFilters = [],
@@ -73,13 +140,13 @@ export default function BaselineDashboard({
         
         onDataLoaded?.();
       } catch (err) {
-        console.error(err);
+        console.warn("Failed to load baseline dashboard data", err); // S2486 Fix
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const patchCveMap = useMemo(() => {
     const map = {};
@@ -91,80 +158,26 @@ export default function BaselineDashboard({
     return map;
   }, [cves]);
 
-    const baselineExposure = useMemo(() => {
-    // Create a quick lookup map of Patch ID -> Applicable Computers
+  const baselineExposure = useMemo(() => {
     const patchCompMap = {};
     patches.forEach(p => {
        const id = String(p.patch_id).replace(/^BIGFIX-/i, "").trim();
        patchCompMap[id] = p.applicable_computers || [];
     });
 
-    return baselines.map((b) => {
-      let rawPatches = [];
-      if (Array.isArray(b.patches)) {
-          rawPatches = b.patches;
-      } else if (typeof b.patches === 'string') {
-          try {
-              rawPatches = JSON.parse(b.patches);
-              if (!Array.isArray(rawPatches)) rawPatches = [];
-          } catch(e) {
-              rawPatches = [];
-          }
-      }
-
-      const patchIds = rawPatches.map(p => {
-          let id = "";
-          if (typeof p === 'object' && p !== null) id = String(p.patch_id || p.id || "");
-          else id = String(p);
-          return id.replace(/^BIGFIX-/i, "").trim();
-      }).filter(Boolean);
-      
-      const cveSet = new Set();
-      const compSet = new Set(); 
-      
-      patchIds.forEach((cleanId) => {
-        const cvesForPatch = patchCveMap[cleanId] || patchCveMap[`BIGFIX-${cleanId}`] || [];
-        cvesForPatch.forEach((c) => cveSet.add(c));
-        
-        // Add computers applicable to this patch (used for export data mapping)
-        const compsForPatch = patchCompMap[cleanId] || [];
-        compsForPatch.forEach((c) => compSet.add(c));
-      });
-      
-      return {
-        baseline_name: b.baseline_name || b.name || "Unknown Baseline",
-        patch_count: patchIds.length,
-        cve_count: cveSet.size,
-        //  FIX: Use the exact 100% accurate native count from BigFix!
-        computer_count: b.computer_count !== undefined ? b.computer_count : compSet.size, 
-        patches: patchIds,
-        cves: Array.from(cveSet),
-        computers: Array.from(compSet), 
-      };
-    });
+    return baselines.map((b) => processBaseline(b, patchCompMap, patchCveMap));
   }, [baselines, patchCveMap, patches]);
 
   const applyFilters = (baseline) => {
     if (!parentFilters.length) return true;
-    let globalMatch = parentLogic === "OR" ? false : true;
+    let globalMatch = parentLogic !== "OR"; // S6644 & S7735 Fix
     for (let b of parentFilters) {
       let blockMatch = true;
       let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase();
-        if (c.column === "baseline_name" || c.column === "patch_name") {
-          const field = String(baseline.baseline_name || "").toLowerCase();
-          if (c.operator === "contains") condition = field.includes(search);
-          else if (c.operator === "=") condition = field === search;
-          else if (c.operator === "!=") condition = field !== search;
-        } else if (c.column === "patch_id") {
-          condition = (baseline.patches || []).some((x) => String(x).toLowerCase().includes(search));
-        } else if (c.column === "cve_id") {
-          condition = (baseline.cves || []).some((x) => String(x).toLowerCase().includes(search));
-        }
+        const condition = evaluateCondition(baseline, c);
         blockMatch = blockMatch && condition;
       }
       if (validConds > 0) {
@@ -331,24 +344,42 @@ export default function BaselineDashboard({
                   )}
                   {cols.find((c) => c.id === "patch_count")?.show && (
                     <td style={{ textAlign: "center" }}>
-                      <span className="cell-link" onClick={() => navigate("patch", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}>
+                      {/* S6848 & S1082 Fix: Removed span onClick, replaced with accessible native button element */}
+                      <button 
+                        type="button" 
+                        className="cell-link" 
+                        style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',  cursor: 'pointer' }}
+                        onClick={() => navigate("patch", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}
+                      >
                         {b.patch_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                   {cols.find((c) => c.id === "cve_count")?.show && (
                     <td style={{ textAlign: "center", wordBreak: "break-word" }}>
-                      <span className="cell-link" onClick={() => navigate("cve", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}>
+                      {/* S6848 & S1082 Fix: Removed span onClick, replaced with accessible native button element */}
+                      <button 
+                        type="button" 
+                        className="cell-link" 
+                        style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer' }}
+                        onClick={() => navigate("cve", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}
+                      >
                         {b.cve_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                  
                   {cols.find((c) => c.id === "computer_count")?.show && (
                     <td style={{ textAlign: "center", wordBreak: "break-word" }}>
-                      <span className="cell-link" onClick={() => navigate("computer", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}>
+                      {/* S6848 & S1082 Fix: Removed span onClick, replaced with accessible native button element */}
+                      <button 
+                        type="button" 
+                        className="cell-link" 
+                        style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',  cursor: 'pointer' }}
+                        onClick={() => navigate("computer", [{ conds: [{ column: "baseline_name", operator: "=", value: b.baseline_name }] }], "AND")}
+                      >
                         {b.computer_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -362,3 +393,10 @@ export default function BaselineDashboard({
     </div>
   );
 }
+
+BaselineDashboard.propTypes = {
+  parentFilters: PropTypes.array,
+  parentLogic: PropTypes.string,
+  onDataLoaded: PropTypes.func,
+  navigate: PropTypes.func.isRequired,
+};

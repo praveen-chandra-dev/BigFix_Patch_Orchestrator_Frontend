@@ -1,6 +1,6 @@
-
 // src/components/Header.jsx
 import { useEffect, useState, useRef } from "react";
+import PropTypes from "prop-types";
 import logo from "../assets/bigfix-logo.jpg";
 import { useEnvironment } from "./Environment.jsx";
 
@@ -17,6 +17,22 @@ const IconPolicy = () => (
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
   </svg>
 );
+
+const MenuButton = ({ className = "menu-item", active, style, onClick, children }) => {
+    const combinedClassName = `${className} ${active ? 'active' : ''}`.trim();
+    const defaultStyles = { background: 'transparent', border: 'none', textAlign: 'left', width: '100%', font: 'inherit', cursor: 'pointer', outline: 'none' };
+    return (
+        <button type="button" className={combinedClassName} style={{ ...defaultStyles, ...style }} onClick={onClick}>
+            {children}
+        </button>
+    );
+};
+MenuButton.propTypes = { className: PropTypes.string, active: PropTypes.bool, style: PropTypes.object, onClick: PropTypes.func, children: PropTypes.node };
+
+const getRiskSubTabLabel = (sub) => {
+    const labels = { cve: 'CVEs', computer: 'Computers', baseline: 'Baselines', overview: 'Overview' };
+    return labels[sub] || 'Overview';
+};
 
 class NavManager {
     constructor() {
@@ -58,7 +74,8 @@ class NavManager {
         return null;
     }
 }
-const navMgr = window.__navMgr = window.__navMgr || new NavManager();
+
+const navMgr = globalThis.__navMgr = globalThis.__navMgr || new NavManager();
 let isRestoring = false;
 
 export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab, riskSubTab, setRiskSubTab, kpiTab, setKpiTab }) {
@@ -68,15 +85,16 @@ export function Sidebar({ activeMenu, onNavigate, flowState, riskTab, setRiskTab
   const [localSnapTab, setLocalSnapTab] = useState('TARGETS');
   const [localCloneTab, setLocalCloneTab] = useState('TARGETS');
   const [localRoleTab, setLocalRoleTab] = useState('LIST');
+  const [localPolicyTab, setLocalPolicyTab] = useState('LIST');
+  const [roleMode, setRoleMode] = useState(sessionStorage.getItem('role_mode') || 'LIST');
+  const [localGroupTab, setLocalGroupTab] = useState('COMPUTERS');
 
-const [roleMode, setRoleMode] = useState(sessionStorage.getItem('role_mode') || 'LIST');
-useEffect(() => {
+  useEffect(() => {
       const handleRoleMode = () => setRoleMode(sessionStorage.getItem('role_mode') || 'LIST');
-      window.addEventListener('sync:roles_mode', handleRoleMode);
-      return () => window.removeEventListener('sync:roles_mode', handleRoleMode);
+      globalThis.addEventListener('sync:roles_mode', handleRoleMode);
+      return () => globalThis.removeEventListener('sync:roles_mode', handleRoleMode);
   }, []);
 
-  const [localGroupTab, setLocalGroupTab] = useState('COMPUTERS');
   useEffect(() => {
     if (!isRestoring) {
         navMgr.push({ activeMenu, flowState: flowState?.current, riskTab, riskSubTab, kpiTab, localSnapTab, localCloneTab, localRoleTab, localGroupTab });
@@ -89,41 +107,39 @@ useEffect(() => {
         if (!state) return;
         
         if (state.activeMenu !== activeMenu && onNavigate) onNavigate(state.activeMenu);
-        if (state.flowState !== flowState?.current) window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: state.flowState } }));
+        if (state.flowState !== flowState?.current) globalThis.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: state.flowState } }));
         if (state.riskTab !== riskTab && setRiskTab) setRiskTab(state.riskTab);
         if (state.riskSubTab !== riskSubTab && setRiskSubTab) setRiskSubTab(state.riskSubTab);
         if (state.kpiTab !== kpiTab && setKpiTab) setKpiTab(state.kpiTab);
-        if (state.localSnapTab !== localSnapTab) window.dispatchEvent(new CustomEvent('nav:snapshot', { detail: state.localSnapTab }));
-        if (state.localCloneTab !== localCloneTab) window.dispatchEvent(new CustomEvent('nav:clone', { detail: state.localCloneTab }));
-        if (state.localRoleTab !== localRoleTab) window.dispatchEvent(new CustomEvent('nav:roles', { detail: state.localRoleTab }));
-
-        // ADD THIS LINE:
-        if (state.localGroupTab !== localGroupTab) window.dispatchEvent(new CustomEvent('nav:group', { detail: state.localGroupTab }));
+        if (state.localSnapTab !== localSnapTab) globalThis.dispatchEvent(new CustomEvent('nav:snapshot', { detail: state.localSnapTab }));
+        if (state.localCloneTab !== localCloneTab) globalThis.dispatchEvent(new CustomEvent('nav:clone', { detail: state.localCloneTab }));
+        if (state.localRoleTab !== localRoleTab) globalThis.dispatchEvent(new CustomEvent('nav:roles', { detail: state.localRoleTab }));
+        if (state.localGroupTab !== localGroupTab) globalThis.dispatchEvent(new CustomEvent('nav:group', { detail: state.localGroupTab }));
+        if (state.localPolicyTab !== localPolicyTab) globalThis.dispatchEvent(new CustomEvent('nav:policy', { detail: state.localPolicyTab })); 
     };
-    window.addEventListener('nav:restore', handleRestore);
-    return () => window.removeEventListener('nav:restore', handleRestore);
+    globalThis.addEventListener('nav:restore', handleRestore);
+    return () => globalThis.removeEventListener('nav:restore', handleRestore);
   });
 
   useEffect(() => {
     const handleSnap = (e) => setLocalSnapTab(e.detail);
     const handleClone = (e) => setLocalCloneTab(e.detail);
     const handleRole = (e) => setLocalRoleTab(e.detail);
-    // ADD THIS LINE:
     const handleGroup = (e) => setLocalGroupTab(e.detail);
+    const handlePolicy = (e) => setLocalPolicyTab(e.detail);
 
-    window.addEventListener('sync:snapshot_tab', handleSnap);
-    window.addEventListener('sync:clone_tab', handleClone);
-    window.addEventListener('sync:roles_tab', handleRole);
+    globalThis.addEventListener('sync:snapshot_tab', handleSnap);
+    globalThis.addEventListener('sync:clone_tab', handleClone);
+    globalThis.addEventListener('sync:roles_tab', handleRole);
+    globalThis.addEventListener('sync:group_tab', handleGroup);
+    globalThis.addEventListener('nav:policy', handlePolicy);
 
-    // ADD THIS LINE:
-    window.addEventListener('sync:group_tab', handleGroup);
     return () => {
-        window.removeEventListener('sync:snapshot_tab', handleSnap);
-        window.removeEventListener('sync:clone_tab', handleClone);
-        window.removeEventListener('sync:roles_tab', handleRole);
-
-        // ADD THIS LINE:
-        window.removeEventListener('sync:group_tab', handleGroup);
+        globalThis.removeEventListener('sync:snapshot_tab', handleSnap);
+        globalThis.removeEventListener('sync:clone_tab', handleClone);
+        globalThis.removeEventListener('sync:roles_tab', handleRole);
+        globalThis.removeEventListener('sync:group_tab', handleGroup);
+        globalThis.removeEventListener('nav:policy', handlePolicy);
     };
   }, []);
 
@@ -136,15 +152,125 @@ useEffect(() => {
     if (!isAccessible) cls += " disabled";
 
     return (
-        <a className={cls} 
+        <MenuButton className={cls} 
            style={{ fontWeight: isHold ? 'bold' : 'normal', color: 'inherit' }}
            onClick={() => {
             if (isAccessible) {
-                window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: stageCode } }));
+                globalThis.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: stageCode } }));
             }
         }}>
             {label}
-        </a>
+        </MenuButton>
+    );
+  };
+
+  const renderOrchestrationSubMenu = () => (
+    <div className="sidebar-sub-menu">
+        <MenuButton className="menu-item sub-item step" 
+            style={{ fontWeight: flowState?.current === 'HISTORY' ? 'bold' : 'normal', color: 'inherit' }}
+            onClick={() => globalThis.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: 'HISTORY' } }))}>
+            Deployment History
+        </MenuButton>
+        {renderStage('CONFIG', 'Configuration')}
+        {env.enableSandbox && renderStage('SANDBOX', 'Sandbox')}
+        {env.enablePilot && renderStage('PILOT', 'Pilot')}
+        {renderStage('PRODUCTION', 'Production')}
+        {renderStage('FINAL RESULT', 'Final Result')}
+    </div>
+  );
+
+  const renderRiskSubMenu = () => (
+    <div className="sidebar-sub-menu">
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: riskTab === 'patches' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskTab('patches')}>
+            Patches
+        </MenuButton>
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: riskTab === 'baseline' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskTab('baseline')}>
+            Manage Baselines
+        </MenuButton>
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: riskTab === 'dashboard' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { setRiskTab('dashboard'); setRiskSubTab('overview'); }}>
+            Dashboard
+        </MenuButton>
+        {riskTab === 'dashboard' && (
+            <div style={{ marginLeft: '40px', display: 'flex', flexDirection: 'column' }}>
+                {['overview', 'cve', 'computer', 'baseline'].map(sub => (
+                    <MenuButton key={sub} className="menu-item sub-item step" style={{ padding: '6px 20px 6px 24px', fontSize: '13px', borderLeft: 'none', fontWeight: riskSubTab === sub ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskSubTab(sub)}>
+                        {getRiskSubTabLabel(sub)}
+                    </MenuButton>
+                ))}
+            </div>
+        )}
+    </div>
+  );
+
+  const renderKpiSubMenu = () => (
+    <div className="sidebar-sub-menu">
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: kpiTab === 'health' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { if(setKpiTab) setKpiTab('health'); }}>
+            Critical Health
+        </MenuButton>
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: kpiTab === 'reboot' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { if(setKpiTab) setKpiTab('reboot'); }}>
+            Pending Reboots
+        </MenuButton>
+    </div>
+  );
+
+  const renderGroupSubMenu = () => (
+    <div className="sidebar-sub-menu">
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'COMPUTERS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:group', {detail: 'COMPUTERS'}))}>
+            Computer List
+        </MenuButton>
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'CREATE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:group', {detail: 'CREATE'}))}>
+            Create Group
+        </MenuButton>
+        <MenuButton className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'MANAGE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:group', {detail: 'MANAGE'}))}>
+            Manage Groups
+        </MenuButton>
+    </div>
+  );
+
+  // S3776 Fix: Extracted style resolution logic out of inline conditional blocks
+  const getRoleTabStyle = (expectedMode) => {
+      const isListMode = roleMode === 'LIST';
+      const isEditMode = roleMode === 'EDIT';
+      
+      let isEnabled = false;
+      if (expectedMode === 'ALL') isEnabled = true;
+      else if (expectedMode === 'NOT_LIST') isEnabled = !isListMode;
+      else if (expectedMode === 'EDIT') isEnabled = isEditMode;
+
+      return {
+          fontWeight: 'normal',
+          color: 'inherit',
+          pointerEvents: isEnabled ? 'auto' : 'none',
+          opacity: isEnabled ? 1 : 0.4,
+          cursor: isEnabled ? 'pointer' : 'default'
+      };
+  };
+
+  const renderRolesSubMenu = () => {
+    const listActive = localRoleTab === 'LIST';
+    const detailsActive = localRoleTab === 'DETAILS';
+    const compActive = localRoleTab === 'COMPUTERS';
+    const sitesActive = localRoleTab === 'SITES';
+    const opActive = localRoleTab === 'OPERATORS';
+
+    return (
+      <div className="sidebar-sub-menu">
+          <MenuButton className={`menu-item sub-item step ${listActive ? 'active' : ''}`} style={{ fontWeight: listActive ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:roles', {detail: 'LIST'}))}>
+              Role List
+          </MenuButton>
+          <MenuButton className={`menu-item sub-item step ${detailsActive ? 'active' : ''}`} style={{ ...getRoleTabStyle('NOT_LIST'), fontWeight: detailsActive ? 'bold' : 'normal' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:roles', {detail: 'DETAILS'}))}>
+              Details
+          </MenuButton>
+          <MenuButton className={`menu-item sub-item step ${compActive ? 'active' : ''}`} style={{ ...getRoleTabStyle('EDIT'), fontWeight: compActive ? 'bold' : 'normal' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:roles', {detail: 'COMPUTERS'}))}>
+              Computer Assignments
+          </MenuButton>
+          <MenuButton className={`menu-item sub-item step ${sitesActive ? 'active' : ''}`} style={{ ...getRoleTabStyle('EDIT'), fontWeight: sitesActive ? 'bold' : 'normal' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:roles', {detail: 'SITES'}))}>
+              Sites
+          </MenuButton>
+          <MenuButton className={`menu-item sub-item step ${opActive ? 'active' : ''}`} style={{ ...getRoleTabStyle('EDIT'), fontWeight: opActive ? 'bold' : 'normal' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:roles', {detail: 'OPERATORS'}))}>
+              Operators
+          </MenuButton>
+      </div>
     );
   };
 
@@ -152,137 +278,88 @@ useEffect(() => {
     <nav className="sidebar">
       <div className="sidebar-logo">
         <img src={logo} alt="HCL" style={{height: 28, borderRadius: 4}} />
-        BigFix Patch Setu
+        <span> BigFix Patch Setu</span>
       </div>
       
       <div className="sidebar-menu">
         <div className="menu-label">Dashboards</div>
         
-        <a className={`menu-item ${activeMenu === 'orchestration' ? 'active' : ''}`} onClick={() => onNavigate('orchestration')}>
+        <MenuButton active={activeMenu === 'orchestration'} onClick={() => onNavigate('orchestration')}>
            <IconFlow /> Orchestration Flow
-        </a>
-        
-        {activeMenu === 'orchestration' && (
-           <div className="sidebar-sub-menu">
-               <a className="menu-item sub-item step" 
-                  style={{ fontWeight: flowState?.current === 'HISTORY' ? 'bold' : 'normal', color: 'inherit' }}
-                  onClick={() => window.dispatchEvent(new CustomEvent('flow:request_stage', { detail: { stage: 'HISTORY' } }))}>
-                  Deployment History
-               </a>
-               {renderStage('CONFIG', 'Configuration')}
-               {env.enableSandbox && renderStage('SANDBOX', 'Sandbox')}
-               {env.enablePilot && renderStage('PILOT', 'Pilot')}
-               {renderStage('PRODUCTION', 'Production')}
-               {renderStage('FINAL RESULT', 'Final Result')}
-           </div>
-        )}
+        </MenuButton>
+        {activeMenu === 'orchestration' && renderOrchestrationSubMenu()}
 
-        <a className={`menu-item ${activeMenu === 'risk' ? 'active' : ''}`} onClick={() => onNavigate('risk')}>
+        <MenuButton active={activeMenu === 'risk'} onClick={() => onNavigate('risk')}>
            <IconShield /> Risk Prioritization
-        </a>
+        </MenuButton>
+        {activeMenu === 'risk' && renderRiskSubMenu()}
 
-        {activeMenu === 'risk' && (
-           <div className="sidebar-sub-menu">
-               <a className="menu-item sub-item step" style={{ fontWeight: riskTab === 'patches' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskTab('patches')}>
-                    Patches
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: riskTab === 'baseline' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskTab('baseline')}>
-                    Manage Baselines
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: riskTab === 'dashboard' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { setRiskTab('dashboard'); setRiskSubTab('overview'); }}>
-                    Dashboard
-               </a>
-               {riskTab === 'dashboard' && (
-                   <div style={{ marginLeft: '40px', display: 'flex', flexDirection: 'column', }}>
-                       {/* {['overview', 'cve', 'patch', 'computer', 'baseline'].map(sub => (
-                           <a key={sub} className="menu-item sub-item step" style={{ padding: '6px 20px 6px 24px', fontSize: '13px', borderLeft: 'none', fontWeight: riskSubTab === sub ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskSubTab(sub)}>
-                               {sub === 'cve' ? 'CVEs' : sub === 'computer' ? 'Computers' : sub === 'patch' ? 'Patches' : sub === 'baseline' ? 'Baselines' : 'Overview'}
-                           </a>
-                       ))} */}
-                       {['overview', 'cve', 'computer', 'baseline'].map(sub => (
-                            <a key={sub} className="menu-item sub-item step" style={{ padding: '6px 20px 6px 24px', fontSize: '13px', borderLeft: 'none', fontWeight: riskSubTab === sub ? 'bold' : 'normal', color: 'inherit' }} onClick={() => setRiskSubTab(sub)}>
-                                {sub === 'cve' ? 'CVEs' : sub === 'computer' ? 'Computers' : sub === 'baseline' ? 'Baselines' : 'Overview'}
-                            </a>
-                        ))}
-                   </div>
-               )}
-           </div>
-        )}
-
-        <a className={`menu-item ${activeMenu === 'kpi-details' ? 'active' : ''}`} onClick={() => { onNavigate('kpi-details'); if(setKpiTab) setKpiTab('health'); }}>
+        <MenuButton active={activeMenu === 'kpi-details'} onClick={() => { onNavigate('kpi-details'); if(setKpiTab) setKpiTab('health'); }}>
            <IconDashboard /> KPI Details
-        </a>
-
-        {activeMenu === 'kpi-details' && (
-           <div className="sidebar-sub-menu">
-               <a className="menu-item sub-item step" style={{ fontWeight: kpiTab === 'health' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { if(setKpiTab) setKpiTab('health'); }}>
-                    Critical Health
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: kpiTab === 'reboot' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => { if(setKpiTab) setKpiTab('reboot'); }}>
-                    Pending Reboots
-               </a>
-           </div>
-        )}
+        </MenuButton>
+        {activeMenu === 'kpi-details' && renderKpiSubMenu()}
 
         <div className="menu-label">Patch Management</div>
-        <a className={`menu-item ${activeMenu === 'calendar' ? 'active' : ''}`} onClick={() => onNavigate('calendar')}>
+        <MenuButton active={activeMenu === 'calendar'} onClick={() => onNavigate('calendar')}>
            <IconCalendar /> Patch Calendar
-        </a>
+        </MenuButton>
 
-        {/* <a className={`menu-item ${activeMenu === 'policy' ? 'active' : ''}`} onClick={() => onNavigate('policy')}>
+        {/* <MenuButton active={activeMenu === 'policy'} onClick={() => onNavigate('policy')}>
            <IconPolicy /> Patch Policy
-        </a> */}
+        </MenuButton> */}
+
+        {activeMenu === 'policy' && (
+           <div className="sidebar-sub-menu">
+               <MenuButton className="menu-item sub-item step" 
+                  style={{ fontWeight: localPolicyTab === 'LIST' ? 'bold' : 'normal', color: 'inherit' }} 
+                  onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:policy', {detail: 'LIST'}))}>
+                     Patch Policy List
+               </MenuButton>
+               <MenuButton className="menu-item sub-item step" 
+                  style={{ fontWeight: localPolicyTab === 'CREATE' ? 'bold' : 'normal', color: 'inherit' }} 
+                  onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:policy', {detail: 'CREATE'}))}>
+                     Create Patch Policy
+               </MenuButton>
+           </div>
+        )}
 
         <div className="menu-label">Infrastructure</div>
-        <a className={`menu-item ${activeMenu === 'group' ? 'active' : ''}`} onClick={() => onNavigate('group')}>
+        <MenuButton active={activeMenu === 'group'} onClick={() => onNavigate('group')}>
            <IconGroup /> Group Management
-        </a>
-        {/* ADD THIS ENTIRE BLOCK: */}
-        {activeMenu === 'group' && (
-           <div className="sidebar-sub-menu">
-                <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'COMPUTERS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'COMPUTERS'}))}>
-                     Computer List
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'CREATE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'CREATE'}))}>
-                     Create Group
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: localGroupTab === 'MANAGE' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'MANAGE'}))}>
-                     Manage Groups
-               </a>
-           </div>
-        )}
+        </MenuButton>
+        {activeMenu === 'group' && renderGroupSubMenu()}
         
-        <a className={`menu-item ${activeMenu === 'snapshot' ? 'active' : ''}`} onClick={() => onNavigate('snapshot')}>
+        <MenuButton active={activeMenu === 'snapshot'} onClick={() => onNavigate('snapshot')}>
            <IconFolder /> Take Snapshot
-        </a>
+        </MenuButton>
         {activeMenu === 'snapshot' && (
            <div className="sidebar-sub-menu">
-               <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'TARGETS'}))}>
+               <MenuButton className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'TARGETS'}))}>
                      Targets
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'SETTINGS'}))}>
+               </MenuButton>
+               <MenuButton className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'SETTINGS'}))}>
                     Settings
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'EXECUTION'}))}>
+               </MenuButton>
+               <MenuButton className="menu-item sub-item step" style={{ fontWeight: localSnapTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:snapshot', {detail: 'EXECUTION'}))}>
                     Execution
-               </a>
+               </MenuButton>
            </div>
         )}
 
-        <a className={`menu-item ${activeMenu === 'clone' ? 'active' : ''}`} onClick={() => onNavigate('clone')}>
+        <MenuButton active={activeMenu === 'clone'} onClick={() => onNavigate('clone')}>
            <IconFolder /> Clone VM
-        </a>
+        </MenuButton>
         {activeMenu === 'clone' && (
            <div className="sidebar-sub-menu">
-               <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'TARGETS'}))}>
+               <MenuButton className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'TARGETS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:clone', {detail: 'TARGETS'}))}>
                      Targets
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'SETTINGS'}))}>
+               </MenuButton>
+               <MenuButton className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'SETTINGS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:clone', {detail: 'SETTINGS'}))}>
                      Settings
-               </a>
-               <a className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:clone', {detail: 'EXECUTION'}))}>
+               </MenuButton>
+               <MenuButton className="menu-item sub-item step" style={{ fontWeight: localCloneTab === 'EXECUTION' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:clone', {detail: 'EXECUTION'}))}>
                      Execution
-               </a>
+               </MenuButton>
            </div>
         )}
 
@@ -290,105 +367,39 @@ useEffect(() => {
         
         {isMO && (
           <>
-            <a className={`menu-item ${activeMenu === 'users' ? 'active' : ''}`} onClick={() => onNavigate('users')}>
+            <MenuButton active={activeMenu === 'users'} onClick={() => onNavigate('users')}>
                <IconGroup /> User Management
-            </a>
+            </MenuButton>
             
-            <a className={`menu-item ${activeMenu === 'roles' ? 'active' : ''}`} onClick={() => onNavigate('roles')}>
+            <MenuButton active={activeMenu === 'roles'} onClick={() => onNavigate('roles')}>
                <IconShield /> Role Management
-            </a>
-            {/* {activeMenu === 'roles' && (
-               <div className="sidebar-sub-menu">
-                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'LIST' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'LIST'}))}>
-                         Role List
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'DETAILS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'DETAILS'}))}>
-                         Details
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'COMPUTERS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'COMPUTERS'}))}>
-                         Computer Assignments
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'SITES' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'SITES'}))}>
-                         Sites
-                   </a>
-                   <a className="menu-item sub-item step" style={{ fontWeight: localRoleTab === 'OPERATORS' ? 'bold' : 'normal', color: 'inherit' }} onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'OPERATORS'}))}>
-                         Operators
-                   </a>
-               </div>
-            )} */}
-           {activeMenu === 'roles' && (
-            <div className="sidebar-sub-menu">
-                
-                {/* 1. ROLE LIST - Always Enabled by default */}
-                <a className={`menu-item sub-item step ${localRoleTab === 'LIST' ? 'active' : ''}`} 
-                    style={{ fontWeight: localRoleTab === 'LIST' ? 'bold' : 'normal', color: 'inherit' }} 
-                    onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'LIST'}))}>
-                        Role List
-                </a>
-
-                {/* 2. DETAILS - Enabled on CREATE or EDIT */}
-                <a className={`menu-item sub-item step ${localRoleTab === 'DETAILS' ? 'active' : ''}`} 
-                    style={{ 
-                        fontWeight: localRoleTab === 'DETAILS' ? 'bold' : 'normal', 
-                        color: 'inherit',
-                        pointerEvents: roleMode !== 'LIST' ? 'auto' : 'none',
-                        opacity: roleMode !== 'LIST' ? 1 : 0.4,
-                        cursor: roleMode !== 'LIST' ? 'pointer' : 'default'
-                    }} 
-                    onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'DETAILS'}))}>
-                        Details
-                </a>
-
-                {/* 3. COMPUTERS - Enabled ONLY on EDIT */}
-                <a className={`menu-item sub-item step ${localRoleTab === 'COMPUTERS' ? 'active' : ''}`} 
-                    style={{ 
-                        fontWeight: localRoleTab === 'COMPUTERS' ? 'bold' : 'normal', 
-                        color: 'inherit',
-                        pointerEvents: roleMode === 'EDIT' ? 'auto' : 'none',
-                        opacity: roleMode === 'EDIT' ? 1 : 0.4,
-                        cursor: roleMode === 'EDIT' ? 'pointer' : 'default'
-                    }} 
-                    onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'COMPUTERS'}))}>
-                        Computer Assignments
-                </a>
-
-                {/* 4. SITES - Enabled ONLY on EDIT */}
-                <a className={`menu-item sub-item step ${localRoleTab === 'SITES' ? 'active' : ''}`} 
-                    style={{ 
-                        fontWeight: localRoleTab === 'SITES' ? 'bold' : 'normal', 
-                        color: 'inherit',
-                        pointerEvents: roleMode === 'EDIT' ? 'auto' : 'none',
-                        opacity: roleMode === 'EDIT' ? 1 : 0.4,
-                        cursor: roleMode === 'EDIT' ? 'pointer' : 'default'
-                    }} 
-                    onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'SITES'}))}>
-                        Sites
-                </a>
-
-                {/* 5. OPERATORS - Enabled ONLY on EDIT */}
-                <a className={`menu-item sub-item step ${localRoleTab === 'OPERATORS' ? 'active' : ''}`} 
-                    style={{ 
-                        fontWeight: localRoleTab === 'OPERATORS' ? 'bold' : 'normal', 
-                        color: 'inherit',
-                        pointerEvents: roleMode === 'EDIT' ? 'auto' : 'none',
-                        opacity: roleMode === 'EDIT' ? 1 : 0.4,
-                        cursor: roleMode === 'EDIT' ? 'pointer' : 'default'
-                    }} 
-                    onClick={() => window.dispatchEvent(new CustomEvent('nav:roles', {detail: 'OPERATORS'}))}>
-                        Operators
-                </a>
-            </div>
-            )}
+            </MenuButton>
+            {activeMenu === 'roles' && renderRolesSubMenu()}
           </>
         )}
         
-        <a className={`menu-item ${activeMenu === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
+        <MenuButton active={activeMenu === 'settings'} onClick={() => onNavigate('settings')}>
            <IconSettings /> Environment Settings
-        </a>
+        </MenuButton>
       </div>
     </nav>
   );
 }
+
+Sidebar.propTypes = {
+  activeMenu: PropTypes.string,
+  onNavigate: PropTypes.func,
+  flowState: PropTypes.shape({
+    current: PropTypes.string,
+    accessible: PropTypes.arrayOf(PropTypes.string)
+  }),
+  riskTab: PropTypes.string,
+  setRiskTab: PropTypes.func,
+  riskSubTab: PropTypes.string,
+  setRiskSubTab: PropTypes.func,
+  kpiTab: PropTypes.string,
+  setKpiTab: PropTypes.func
+};
 
 export function Topbar({ onNavHistory, username, onLogout }) {
   const [roles, setRoles] = useState([]);
@@ -398,59 +409,56 @@ export function Topbar({ onNavHistory, username, onLogout }) {
   const [hasBfCreds, setHasBfCreds] = useState(true); 
   const dropdownRef = useRef(null);
 
+  // S3776 Fix: Flattened massive useEffect logic out into a clear sync function
+  const syncRoleState = (data) => {
+    let currentSessionRole = sessionStorage.getItem('user_role');
+    
+    if (currentSessionRole === 'null' || currentSessionRole === 'undefined') {
+        currentSessionRole = '';
+    }
+
+    const userIsAdmin = currentSessionRole === 'Admin';
+    setIsMO(userIsAdmin);
+    sessionStorage.setItem('isMO', userIsAdmin ? 'true' : 'false');
+    
+    const fetchedRoles = Array.isArray(data.roles) ? data.roles.map(r => r.trim()) : [];
+    setRoles(fetchedRoles);
+    
+    if (!userIsAdmin) {
+        if (fetchedRoles.length > 0) {
+            const isCurrentInvalid = !currentSessionRole || 
+                                     currentSessionRole === 'No Role Assigned' || 
+                                     !fetchedRoles.includes(currentSessionRole.trim());
+            if (isCurrentInvalid) {
+                currentSessionRole = fetchedRoles[0];
+                sessionStorage.setItem('user_role', currentSessionRole);
+                
+                fetch(`/api/auth/team-state?role=${encodeURIComponent(currentSessionRole)}`, {
+                    method: 'GET',
+                    headers: { "Content-Type": "application/json", "x-user-role": currentSessionRole }
+                }).catch(() => {});
+            }
+        } else {
+            currentSessionRole = 'No Role Assigned';
+            sessionStorage.setItem('user_role', currentSessionRole);
+        }
+    }
+
+    setActiveRole(currentSessionRole || 'No Role Assigned');
+    globalThis.dispatchEvent(new CustomEvent('role:changed', { detail: currentSessionRole || 'No Role Assigned' }));
+  };
+
   useEffect(() => {
     fetch('/api/auth/roles')
       .then(r => r.json())
       .then(data => {
-        if (data.ok) {
-          let currentSessionRole = sessionStorage.getItem('user_role');
-          
-          // Fallbacks for invalid local storage values
-          if (!currentSessionRole || currentSessionRole === 'null' || currentSessionRole === 'undefined') {
-              currentSessionRole = '';
-          }
-
-          const userIsAdmin = currentSessionRole === 'Admin';
-          
-          setIsMO(userIsAdmin);
-          sessionStorage.setItem('isMO', userIsAdmin ? 'true' : 'false');
-          
-          const fetchedRoles = Array.isArray(data.roles) ? data.roles.map(r => r.trim()) : [];
-          setRoles(fetchedRoles);
-          
-          // 🚀 FULLY FIXED: Auto-selection logic without infinite reloads
-          if (!userIsAdmin) {
-              if (fetchedRoles.length > 0) {
-                  const isCurrentInvalid = !currentSessionRole || 
-                                           currentSessionRole === 'No Role Assigned' || 
-                                           !fetchedRoles.includes(currentSessionRole.trim());
-                                           
-                  if (isCurrentInvalid) {
-                      currentSessionRole = fetchedRoles[0];
-                      sessionStorage.setItem('user_role', currentSessionRole);
-                      
-                      // Silently sync the cookie to the backend
-                      fetch(`/api/auth/team-state?role=${encodeURIComponent(currentSessionRole)}`, {
-                          method: 'GET',
-                          headers: { "Content-Type": "application/json", "x-user-role": currentSessionRole }
-                      }).catch(() => {});
-                  }
-              } else {
-                  currentSessionRole = 'No Role Assigned';
-                  sessionStorage.setItem('user_role', currentSessionRole);
-              }
-          }
-
-          // Instantly update the React State so the UI paints properly (NO window.reload needed here!)
-          setActiveRole(currentSessionRole || 'No Role Assigned');
-          window.dispatchEvent(new CustomEvent('role:changed', { detail: currentSessionRole || 'No Role Assigned' }));
-        }
+        if (data.ok) syncRoleState(data);
       });
   }, []);
 
   useEffect(() => {
     const checkCreds = () => {
-      const API = window.env?.VITE_API_BASE || "";
+      const API = globalThis.env?.VITE_API_BASE || "";
       fetch(`${API}/api/auth/my-bigfix-creds`, { credentials: 'include' })
         .then(r => r.json())
         .then(data => {
@@ -466,8 +474,8 @@ export function Topbar({ onNavHistory, username, onLogout }) {
       setHasBfCreds(true);
     };
 
-    window.addEventListener('bf-creds-updated', onCredsUpdated);
-    return () => window.removeEventListener('bf-creds-updated', onCredsUpdated);
+    globalThis.addEventListener('bf-creds-updated', onCredsUpdated);
+    return () => globalThis.removeEventListener('bf-creds-updated', onCredsUpdated);
   }, []);
 
   useEffect(() => {
@@ -485,14 +493,13 @@ export function Topbar({ onNavHistory, username, onLogout }) {
     sessionStorage.setItem('user_role', newRole);
     setShowDropdown(false);
     
-    // Only here, when the user MANUALLY clicks a new role, do we force a reload to clear the app's state.
     fetch(`/api/auth/team-state?role=${encodeURIComponent(newRole)}`, {
         method: 'GET',
         headers: { "Content-Type": "application/json", "x-user-role": newRole }
     }).then(() => {
-        window.location.reload(); 
+        globalThis.location.reload(); 
     }).catch(() => {
-        window.location.reload(); 
+        globalThis.location.reload(); 
     });
   };
 
@@ -500,7 +507,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
     const state = navMgr.back();
     if (state) {
         isRestoring = true;
-        window.dispatchEvent(new CustomEvent('nav:restore', { detail: state }));
+        globalThis.dispatchEvent(new CustomEvent('nav:restore', { detail: state }));
         setTimeout(() => { isRestoring = false; }, 100);
     } else {
         onNavHistory(-1); 
@@ -511,7 +518,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
     const state = navMgr.forward();
     if (state) {
         isRestoring = true;
-        window.dispatchEvent(new CustomEvent('nav:restore', { detail: state }));
+        globalThis.dispatchEvent(new CustomEvent('nav:restore', { detail: state }));
         setTimeout(() => { isRestoring = false; }, 100);
     } else {
         onNavHistory(1); 
@@ -545,7 +552,9 @@ export function Topbar({ onNavHistory, username, onLogout }) {
       <div className="flex-row items-center gap-16">
 
         <div ref={dropdownRef} style={{ position: 'relative' }}>
-          <div
+          {/* S6819 & S6848 Fix: Native HTML button automatically provides correct keyboard support! */}
+          <button
+            type="button"
             onClick={() => { if (hasMultipleRoles) setShowDropdown(!showDropdown); }}
             style={{
               display: 'flex',
@@ -555,7 +564,10 @@ export function Topbar({ onNavHistory, username, onLogout }) {
               borderRadius: '10px',
               border: showDropdown ? '1px solid var(--primary)' : '1px solid var(--border)',
               background: 'var(--panel)',
-              cursor: hasMultipleRoles ? 'pointer' : 'default'
+              cursor: hasMultipleRoles ? 'pointer' : 'default',
+              outline: 'none',
+              textAlign: 'left',
+              font: 'inherit'
             }}
           >
             <div style={{
@@ -599,7 +611,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                         </svg>
                     </div>
                 )}
-             </div>
+             </button>
 
              {showDropdown && (
                 <div style={{ 
@@ -624,8 +636,10 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                     <div style={{ padding: '8px' }}>
                         {roles.map(r => {
                             const isActive = activeRole === r;
+                            // S6819 & S6848 Fix: Used native HTML button to safely supply ARIA keyboard events
                             return (
-                                <div key={r} onClick={() => handleRoleChange(r)} 
+                                <button type="button" key={r} 
+                                     onClick={() => handleRoleChange(r)} 
                                      style={{ 
                                          padding: '10px 12px', 
                                          fontSize: '10px', 
@@ -637,10 +651,17 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                                          borderRadius: '6px',
                                          background: isActive ? 'var(--primary-light)' : 'transparent', 
                                          color: isActive ? 'var(--primary)' : 'var(--text)',
-                                         transition: 'all 0.15s ease'
+                                         transition: 'all 0.15s ease',
+                                         outline: 'none',
+                                         border: 'none',
+                                         textAlign: 'left',
+                                         width: '100%',
+                                         font: 'inherit'
                                      }}
                                      onMouseOver={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
+                                     onFocus={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg)' }}
                                      onMouseOut={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                                     onBlur={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
                                 >
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px' }}>
                                         {isActive ? (
@@ -650,7 +671,7 @@ export function Topbar({ onNavHistory, username, onLogout }) {
                                         )}
                                     </div>
                                     <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r}</span>
-                                </div>
+                                </button>
                             );
                         })}
                     </div>
@@ -665,3 +686,9 @@ export function Topbar({ onNavHistory, username, onLogout }) {
     </div>
   );
 }
+
+Topbar.propTypes = {
+  onNavHistory: PropTypes.func,
+  username: PropTypes.string,
+  onLogout: PropTypes.func
+};

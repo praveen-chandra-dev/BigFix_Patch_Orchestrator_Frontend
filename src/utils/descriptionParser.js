@@ -26,7 +26,6 @@ export function parseDescription(desc = "") {
 // LINUX / RHEL / UBUNTU PARSER
 //
 function parseLinux(text) {
-    
     let normalized = text
         .replace(/Target RPMs/g, "\nTarget RPMs\n")
         .replace(/Target \.deb files:/gi, "\nTarget DEB\n");
@@ -37,10 +36,9 @@ function parseLinux(text) {
 
     let packages = [];
     let rest = after || "";
-
     
-    const pkgRegex = /([a-zA-Z0-9._+-]+?\.(rpm|deb))/g;
-
+    // FIX S5852: Limited the unbounded (*) quantifier to {0,250} to prevent ReDoS
+    const pkgRegex = /([a-zA-Z0-9_+-][a-zA-Z0-9_+.-]{0,250}\.(?:rpm|deb))/g;
     let match;
     while ((match = pkgRegex.exec(rest)) !== null) {
         packages.push(match[1]);
@@ -62,13 +60,17 @@ function parseWindows(text) {
     let packages = [];
     let rest = text;
 
-    // Extract KB IDs
-    const kbMatches = text.match(/KB\d{6,}/gi);
-    if (kbMatches) {
-        packages = [...new Set(kbMatches)];
+    const kbRegex = /KB\d{6,15}/gi;
+    let kbMatch;
+    while ((kbMatch = kbRegex.exec(text)) !== null) {
+        packages.push(kbMatch[0]);
+    }
+    
+    if (packages.length > 0) {
+        packages = [...new Set(packages)];
     }
 
-    // First sentence as summary
+    
     const firstLine = text.split(/\n|\./)[0];
     summary = firstLine?.trim() || "";
 
@@ -120,7 +122,7 @@ function buildCommon(text, summary, packages) {
 
     // FILE COUNT
     if (lower.startsWith("number of")) {
-      const match = line.match(/(\d+)/);
+      const match = /(\d{1,15})/.exec(line);
       if (match) stats.fileCount = match[1];
       return;
     }
@@ -130,25 +132,29 @@ function buildCommon(text, summary, packages) {
       lower.includes("file size") ||
       lower.includes("download size")
     ) {
-      const match = line.match(/([\d.]+\s?[A-Z]+)/);
+      const match = /(\d{1,15}(?:\.\d{1,15})?\s?[A-Z]{1,10})/.exec(line);
       if (match) stats.fileSize = match[1];
       return;
     }
 
     // CVEs
-    const cveMatches = line.match(/CVE-\d{4}-\d+/gi);
-    if (cveMatches) {
-      stats.cves.push(...cveMatches);
-      return;
+    const cveRegex = /CVE-\d{4}-\d{4,15}/gi;
+    let cveMatch;
+    let foundCve = false;
+    
+    while ((cveMatch = cveRegex.exec(line)) !== null) {
+      stats.cves.push(cveMatch[0]);
+      foundCve = true;
     }
+    if (foundCve) return;
 
-    //META 
+    // META 
     if (
       !lower.startsWith("note:") &&
       !lower.includes("file size") &&
       !lower.includes("download size") &&
       !lower.includes("number of") &&
-      !lower.match(/cve-\d{4}-\d+/i)
+      !/cve-\d{4}-\d{4,15}/i.test(lower) 
     ) {
       meta.push(line);
     }

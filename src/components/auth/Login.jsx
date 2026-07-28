@@ -1,8 +1,8 @@
-
 // src/components/auth/Login.jsx
 import { useState, useEffect } from "react";
+import PropTypes from "prop-types";
 
-const API_BASE = window.env.VITE_API_BASE;
+const API_BASE = globalThis.env?.VITE_API_BASE || "";
 
 export default function Login({ onSuccess }) {
   const [u, setU] = useState("");
@@ -11,7 +11,7 @@ export default function Login({ onSuccess }) {
   const [isSetup, setIsSetup] = useState(false);
   const [setupConfirm, setSetupConfirm] = useState("");
   
-  //  State for SAML/Okta Configuration
+  // State for SAML/Okta Configuration
   const [samlEnabled, setSamlEnabled] = useState(false);
   const [forceSso, setForceSso] = useState(false);
   
@@ -20,7 +20,6 @@ export default function Login({ onSuccess }) {
   const [busy, setBusy] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
 
- 
   useEffect(() => {
     // 1. Check if Setup is required
     fetch(`${API_BASE}/api/auth/setup-required`)
@@ -32,7 +31,7 @@ export default function Login({ onSuccess }) {
       })
       .catch(() => {});
 
-    //  NEW: Check if we just returned from a successful SSO login
+    // NEW: Check if we just returned from a successful SSO login
     // We check the backend status using credentials: 'include' to send the cookie
     fetch(`${API_BASE}/api/auth/status`, { credentials: 'include' })
       .then(res => res.json())
@@ -53,13 +52,13 @@ export default function Login({ onSuccess }) {
       })
       .catch(() => {});
 
-    // 2. Check if SAML/Okta is enabled (Existing code...)
-    fetch(`${API_BASE}/api/env`)
+    // 2. Check if SAML/Okta is enabled using the public config endpoint
+    fetch(`${API_BASE}/api/auth/login-config`)
       .then(res => res.json())
       .then(data => {
-        if (data.ok && data.values) {
-           const isSamlOn = String(data.values.SAML_ENABLED).toLowerCase() === "true";
-           const isForceSso = String(data.values.FORCE_SSO).toLowerCase() === "true";
+        if (data.ok) {
+           const isSamlOn = String(data.samlEnabled).toLowerCase() === "true";
+           const isForceSso = String(data.forceSso).toLowerCase() === "true";
            setSamlEnabled(isSamlOn);
            setForceSso(isForceSso);
         }
@@ -85,7 +84,12 @@ export default function Login({ onSuccess }) {
         
         const text = await r.text();
         let j;
-        try { j = JSON.parse(text); } catch (e) { throw new Error(text || "Setup failed."); }
+        try { 
+            j = JSON.parse(text); 
+        } catch (parseErr) { 
+            console.warn("Failed to parse signup response:", parseErr);
+            throw new Error(text || "Setup failed."); 
+        }
         
         if (!r.ok || !j.ok) throw new Error(j.message || "Setup failed.");
 
@@ -95,8 +99,8 @@ export default function Login({ onSuccess }) {
       } else {
         await performLogin();
       }
-    } catch (e2) {
-      setErr(e2.message || "An unexpected error occurred.");
+    } catch (error_) {
+      setErr(error_.message || "An unexpected error occurred.");
       setBusy(false);
     }
   }
@@ -112,7 +116,8 @@ export default function Login({ onSuccess }) {
     let j;
     try { 
         j = JSON.parse(text); 
-    } catch (err) { 
+    } catch (parseErr) { 
+        console.warn("Failed to parse login response:", parseErr);
         throw new Error(text || "Invalid response from server."); 
     }
 
@@ -129,14 +134,19 @@ export default function Login({ onSuccess }) {
   }
 
   const handleOktaLogin = () => {
-      
       const link = document.createElement('a');
       link.href = `${API_BASE}/api/auth/saml/login`;
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      link.remove();
   };
 
+  let buttonText = "Login";
+  if (busy) {
+    buttonText = "Processing...";
+  } else if (isSetup) {
+    buttonText = "Create Admin";
+  }
 
   return (
     <div className="login-outer">
@@ -148,7 +158,6 @@ export default function Login({ onSuccess }) {
         {isSetup && <p className="intro-text">Welcome! Please create the first Administrator account.</p>}
         {forceSso && !isSetup && samlEnabled && <p className="intro-text" style={{ textAlign: 'center', marginBottom: '24px' }}>Single Sign-On is required for this environment.</p>}
         
-      
         {!loadingSettings && (!forceSso || isSetup) && (
             <form onSubmit={handleAction}>
                  <label>
@@ -203,12 +212,12 @@ export default function Login({ onSuccess }) {
               {!!info && <div className="alert success">{info}</div>}
 
               <button type="submit" className="btn-primary" disabled={busy}>
-                {busy ? "Processing..." : (isSetup ? "Create Admin" : "Login")}
+                {buttonText}
               </button>
             </form>
         )}
 
-        {/*  OKTA SSO BUTTON: Show if SAML is enabled and we are not in setup mode */}
+        {/* OKTA SSO BUTTON */}
         {samlEnabled && !isSetup && (
             <div style={{ marginTop: forceSso ? '10px' : '24px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 
@@ -228,7 +237,9 @@ export default function Login({ onSuccess }) {
                         color: '#0f172a', borderRadius: '6px', cursor: 'pointer', transition: 'background-color 0.2s' 
                     }}
                     onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                    onFocus={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                    onBlur={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
                     onClick={handleOktaLogin}
                 >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -243,3 +254,7 @@ export default function Login({ onSuccess }) {
     </div>
   );
 }
+
+Login.propTypes = {
+  onSuccess: PropTypes.func
+};

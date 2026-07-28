@@ -1,7 +1,7 @@
 // src/modules/risk/dashboard_component/DashboardOverview.jsx
-import { useEffect, useState, useMemo } from "react";
-import api from "../../../api/api";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import { useMemo } from "react";
+import PropTypes from "prop-types";
+import { PieChart, Pie, Tooltip, ResponsiveContainer } from "recharts";
 
 /* =========================================
    FIXED SEVERITY COLORS
@@ -51,108 +51,15 @@ const getDerivedSeverity = (patch) => {
   return derivedSeverity;
 };
 
-const renderSmartLabel = ({
-  cx,
-  cy,
-  midAngle,
-  innerRadius,
-  outerRadius,
-  percent,
-  name,
-  value,
-}) => {
-  const RADIAN = Math.PI / 180;
-
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-  const outsideX = cx + (outerRadius + 20) * Math.cos(-midAngle * RADIAN);
-  const outsideY = cy + (outerRadius + 20) * Math.sin(-midAngle * RADIAN);
-
-  // If slice is big enough show inside
-  if (percent > 0.08) {
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#fff"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={12}
-        fontWeight="bold"
-      >
-        {value}
-      </text>
-    );
-  }
-
-  // Otherwise show outside with line
-  return (
-    <g>
-      <line
-        x1={cx + outerRadius * Math.cos(-midAngle * RADIAN)}
-        y1={cy + outerRadius * Math.sin(-midAngle * RADIAN)}
-        x2={outsideX}
-        y2={outsideY}
-        stroke="#666"
-      />
-
-      <text
-        x={outsideX}
-        y={outsideY}
-        fill="#333"
-        fontSize={12}
-        textAnchor={outsideX > cx ? "start" : "end"}
-      >
-        {name}: {value}
-      </text>
-    </g>
-  );
-};
-
-export default function DashboardOverview({ navigate }) {
-  const [patches, setPatches] = useState([]);
-  const [cves, setCves] = useState([]);
-  const [baselines, setBaselines] = useState([]);
-
+export default function DashboardOverview({
+  navigate,
+  patches = [],
+  cves = [],
+  baselines = [],
+}) {
   /* =========================================
      LOAD DATA
   ========================================= */
-
-  useEffect(() => {
-    const load = async () => {
-      const patchRes = await api.get("/patches");
-
-      const patchData = Array.isArray(patchRes.data)
-        ? patchRes.data
-        : patchRes.data?.data || [];
-
-      setPatches(patchData);
-
-      const payload = patchData.map((p) => ({
-        patch_id: p.patch_id,
-        site_name: p.site_name,
-      }));
-
-      const cveRes = await api.post("/cves/by-patches", {
-        patches: payload,
-      });
-
-      setCves(cveRes.data?.data || []);
-
-      const baselineRes = await api.get("/baselines");
-
-      const baselineData = Array.isArray(baselineRes.data)
-        ? baselineRes.data
-        : baselineRes.data?.data || [];
-
-      setBaselines(baselineData);
-    };
-
-    load();
-  }, []);
 
   const kevCount = cves.filter((c) => c.is_kev).length;
 
@@ -171,6 +78,7 @@ export default function DashboardOverview({ navigate }) {
     return Object.entries(map).map(([name, value]) => ({
       name,
       value,
+      fill: SEVERITY_COLORS[name] || SEVERITY_COLORS.UNKNOWN,
     }));
   }, [cves]);
 
@@ -201,8 +109,12 @@ export default function DashboardOverview({ navigate }) {
     });
 
     return Object.entries(distribution)
-      .filter(([name, value]) => value > 0) // Only render slices that exist
-      .map(([name, value]) => ({ name, value }));
+      .filter(([, value]) => value > 0) // Only render slices that exist
+      .map(([name, value]) => ({
+        name,
+        value,
+        fill: SEVERITY_COLORS[name] || SEVERITY_COLORS.UNSPECIFIED,
+      }));
   }, [patches]);
 
   const uniqueDeviceCount = useMemo(() => {
@@ -276,10 +188,6 @@ export default function DashboardOverview({ navigate }) {
     );
   };
 
-  const handleKevDonutClick = (label) => {
-    handleKevNavigation(label.toUpperCase());
-  };
-
   /* =========================================
      COMPONENT
   ========================================= */
@@ -291,35 +199,95 @@ export default function DashboardOverview({ navigate }) {
       ===================================== */}
 
       <div className="dashboard-kpi-row">
-        <div className="kpi-card" onClick={() => navigate("cve")}>
+        <button
+          type="button"
+          className="kpi-card"
+          onClick={() => navigate("cve")}
+          style={{
+            display: "block",
+            width: "100%",
+            fontFamily: "inherit",
+            color: "inherit",
+            border: "1px solid var(--border)",
+            textAlign: "center",
+          }}
+        >
           <h4>Total CVEs</h4>
           <p>{cves.length}</p>
           <span>Detected vulnerabilities</span>
-        </div>
+        </button>
 
-        <div className="kpi-card" onClick={() => handleKevNavigation("YES")}>
+        <button
+          type="button"
+          className="kpi-card"
+          onClick={() => handleKevNavigation("YES")}
+          style={{
+            display: "block",
+            width: "100%",
+            fontFamily: "inherit",
+            color: "inherit",
+            border: "1px solid var(--border)",
+            textAlign: "center",
+          }}
+        >
           <h4>KEV CVEs</h4>
           <p>{kevCount}</p>
           <span>Exploited vulnerabilities</span>
-        </div>
+        </button>
 
-        <div className="kpi-card" onClick={() => navigate("patch", [], "AND")}>
+        <button
+          type="button"
+          className="kpi-card"
+          onClick={() => navigate("patch", [], "AND")}
+          style={{
+            display: "block",
+            width: "100%",
+            fontFamily: "inherit",
+            color: "inherit",
+            border: "1px solid var(--border)",
+            textAlign: "center",
+          }}
+        >
           <h4>Total Patches</h4>
           <p>{patches.length}</p>
           <span>Available Patches</span>
-        </div>
+        </button>
 
-        <div className="kpi-card" onClick={() => navigate("computer")}>
+        <button
+          type="button"
+          className="kpi-card"
+          onClick={() => navigate("computer")}
+          style={{
+            display: "block",
+            width: "100%",
+            fontFamily: "inherit",
+            color: "inherit",
+            border: "1px solid var(--border)",
+            textAlign: "center",
+          }}
+        >
           <h4>Device</h4>
           <p>{uniqueDeviceCount}</p>
           <span>Applicable Device</span>
-        </div>
+        </button>
 
-        <div className="kpi-card" onClick={() => navigate("baseline")}>
+        <button
+          type="button"
+          className="kpi-card"
+          onClick={() => navigate("baseline")}
+          style={{
+            display: "block",
+            width: "100%",
+            fontFamily: "inherit",
+            color: "inherit",
+            border: "1px solid var(--border)",
+            textAlign: "center",
+          }}
+        >
           <h4>Baselines</h4>
           <p>{baselines.length}</p>
           <span>Total Baseline</span>
-        </div>
+        </button>
       </div>
 
       {/* =====================================
@@ -342,11 +310,7 @@ export default function DashboardOverview({ navigate }) {
                 outerRadius={120}
                 onClick={(data) => handleCveSeverityClick(data.name)}
                 cursor="pointer"
-              >
-                {severityData.map((entry, i) => (
-                  <Cell key={i} fill={SEVERITY_COLORS[entry.name]} />
-                ))}
-              </Pie>
+              />
 
               <text
                 x="50%"
@@ -376,18 +340,27 @@ export default function DashboardOverview({ navigate }) {
 
           <div className="chart-legend">
             {severityData.map((item) => (
-              <div
+              <button
+                type="button"
                 key={item.name}
                 className="legend-item"
                 onClick={() => handleCveSeverityClick(item.name)}
-                style={{ cursor: "pointer" }}
+                style={{
+                  cursor: "pointer",
+                  background: "none",
+                  border: "none",
+                  fontFamily: "inherit",
+                  fontSize: "inherit",
+                  color: "inherit",
+                  padding: "2px 6px",
+                }}
               >
                 <span
                   className="legend-color"
                   style={{ background: SEVERITY_COLORS[item.name] }}
                 />
                 {item.name} ({item.value})
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -401,8 +374,12 @@ export default function DashboardOverview({ navigate }) {
             <PieChart>
               <Pie
                 data={[
-                  { name: "KEV", value: kevCount },
-                  { name: "Non KEV", value: cves.length - kevCount },
+                  { name: "KEV", value: kevCount, fill: "#dc2626" },
+                  {
+                    name: "Non KEV",
+                    value: cves.length - kevCount,
+                    fill: "#22c55e",
+                  },
                 ]}
                 dataKey="value"
                 innerRadius={80}
@@ -411,10 +388,7 @@ export default function DashboardOverview({ navigate }) {
                   handleKevNavigation(data.name === "KEV" ? "YES" : "NO")
                 }
                 cursor="pointer"
-              >
-                <Cell fill="#dc2626" />
-                <Cell fill="#22c55e" />
-              </Pie>
+              />
 
               <text
                 x="50%"
@@ -441,29 +415,47 @@ export default function DashboardOverview({ navigate }) {
           </ResponsiveContainer>
 
           <div className="chart-legend">
-            <div
+            <button
+              type="button"
               className="legend-item"
               onClick={() => handleKevNavigation("YES")}
-              style={{ cursor: "pointer" }}
+              style={{
+                cursor: "pointer",
+                background: "none",
+                border: "none",
+                fontFamily: "inherit",
+                fontSize: "inherit",
+                color: "inherit",
+                padding: "2px 6px",
+              }}
             >
               <span
                 className="legend-color"
                 style={{ background: "#dc2626" }}
               ></span>
               KEV ({kevCount})
-            </div>
+            </button>
 
-            <div
+            <button
+              type="button"
               className="legend-item"
               onClick={() => handleKevNavigation("NO")}
-              style={{ cursor: "pointer" }}
+              style={{
+                cursor: "pointer",
+                background: "none",
+                border: "none",
+                fontFamily: "inherit",
+                fontSize: "inherit",
+                color: "inherit",
+                padding: "2px 6px",
+              }}
             >
               <span
                 className="legend-color"
                 style={{ background: "#22c55e" }}
               ></span>
               Non KEV ({cves.length - kevCount})
-            </div>
+            </button>
           </div>
         </div>
 
@@ -482,11 +474,7 @@ export default function DashboardOverview({ navigate }) {
                 outerRadius={120}
                 onClick={(data) => handlePatchSeverityClick(data.name)}
                 cursor="pointer"
-              >
-                {patchSeverityDistribution.map((entry, i) => (
-                  <Cell key={i} fill={SEVERITY_COLORS[entry.name]} />
-                ))}
-              </Pie>
+              />
 
               <text
                 x="50%"
@@ -514,18 +502,27 @@ export default function DashboardOverview({ navigate }) {
 
           <div className="chart-legend">
             {patchSeverityDistribution.map((item) => (
-              <div
+              <button
+                type="button"
                 key={item.name}
                 className="legend-item"
                 onClick={() => handlePatchSeverityClick(item.name)}
-                style={{ cursor: "pointer" }}
+                style={{
+                  cursor: "pointer",
+                  background: "none",
+                  border: "none",
+                  fontFamily: "inherit",
+                  fontSize: "inherit",
+                  color: "inherit",
+                  padding: "2px 6px",
+                }}
               >
                 <span
                   className="legend-color"
                   style={{ background: SEVERITY_COLORS[item.name] }}
                 />
                 {item.name} ({item.value})
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -533,3 +530,10 @@ export default function DashboardOverview({ navigate }) {
     </div>
   );
 }
+
+DashboardOverview.propTypes = {
+  navigate: PropTypes.func.isRequired,
+  patches: PropTypes.array,
+  cves: PropTypes.array,
+  baselines: PropTypes.array,
+};

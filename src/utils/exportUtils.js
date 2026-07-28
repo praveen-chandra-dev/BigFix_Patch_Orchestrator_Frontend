@@ -15,7 +15,6 @@ const escapeHTML = (str) => {
 export function performExport(dataToExport, columns, format, filenamePrefix, getVal = (row, colId) => row[colId]) {
     const visibleCols = columns.filter(c => c.show);
     const headers = visibleCols.map(c => c.label);
-    
     const triggerDownload = (content, type, ext) => {
         const blob = new Blob([content], { type });
         const url = URL.createObjectURL(blob);

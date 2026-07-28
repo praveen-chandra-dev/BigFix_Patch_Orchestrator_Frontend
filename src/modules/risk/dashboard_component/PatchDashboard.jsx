@@ -1,8 +1,11 @@
 // src/modules/risk/dashboard_component/PatchDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import api from "../../../api/api";
 import { performExport } from "../../../utils/exportUtils";
 import Paginator from "../../../components/common/Paginator";
+
+// --- Extracted Helper Functions to reduce Cognitive Complexity (S3776) ---
 
 const getScoreColorClass = (score) => {
   if (score >= 90) return "score-critical";
@@ -21,22 +24,17 @@ const getDerivedSeverity = (patch) => {
 
   let derivedSeverity = "UNSPECIFIED";
 
-  // RULE 1: No CVEs → use original severity
   if (cveCount === 0) {
     if (["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)) {
       derivedSeverity = sevRaw;
     }
-  }
-  // RULE 2: Score overrides
-  else if (score > 0) {
+  } else if (score > 0) {
     if (score >= 90) derivedSeverity = "CRITICAL";
     else if (score >= 75) derivedSeverity = "HIGH";
     else if (score >= 60) derivedSeverity = "IMPORTANT";
     else if (score >= 40) derivedSeverity = "MODERATE";
     else derivedSeverity = "LOW";
-  }
-  // RULE 3: fallback
-  else if (
+  } else if (
     ["CRITICAL", "HIGH", "IMPORTANT", "MODERATE", "LOW"].includes(sevRaw)
   ) {
     derivedSeverity = sevRaw;
@@ -45,10 +43,62 @@ const getDerivedSeverity = (patch) => {
   return derivedSeverity;
 };
 
+const evaluatePatchCondition = (patch, c, baselinePatchMap) => {
+  const search = String(c.value).toLowerCase().trim();
+  const col = c.column;
+
+  if (col === "severity") {
+    return String(patch.severity || "").toLowerCase() === search;
+  }
+  if (col === "patch_id") {
+    return String(patch.patch_id || "")
+      .toLowerCase()
+      .includes(search);
+  }
+  if (col === "patch_name") {
+    return String(patch.patch_name || "")
+      .toLowerCase()
+      .includes(search);
+  }
+  if (col === "baseline_name") {
+    const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
+    const baselinePatchSet = baselinePatchMap[search];
+    return baselinePatchSet ? baselinePatchSet.has(patchId) : false; // S7735: Positive logic approach
+  }
+  if (col === "cve_id") {
+    return (patch.cves || []).some((x) => String(x).toLowerCase() === search);
+  }
+  if (col === "device") {
+    return (patch.devices || []).some(
+      (x) => String(x).toLowerCase() === search,
+    );
+  }
+
+  return true;
+};
+
+const getSortValue = (patch, key) => {
+  if (["final_score", "cve_count", "device_count"].includes(key)) {
+    return Number(patch[key] || 0);
+  }
+  return String(patch[key] || "").toLowerCase();
+};
+
+const comparePatches = (a, b, config) => {
+  if (!config.key) return 0;
+  const aVal = getSortValue(a, config.key);
+  const bVal = getSortValue(b, config.key);
+  if (aVal < bVal) return config.direction === "asc" ? -1 : 1;
+  if (aVal > bVal) return config.direction === "asc" ? 1 : -1;
+  return 0;
+};
+
+// --- Main Component ---
+
 export default function PatchDashboard({
   patches = [],
   cves = [],
-  baselines = [], // from parent, may be incomplete
+  baselines = [],
   parentFilters = [],
   parentLogic = "AND",
   onDataLoaded,
@@ -74,9 +124,7 @@ export default function PatchDashboard({
     { id: "device_count", label: "Devices", show: true },
   ]);
 
-  // Store baseline patch IDs for filtering
   const [baselinePatchMap, setBaselinePatchMap] = useState(() => {
-    // Initialize from passed baselines if they already have patch_ids
     const map = {};
     baselines.forEach((b) => {
       const name = (b.baseline_name || b.name || "").toLowerCase();
@@ -90,7 +138,6 @@ export default function PatchDashboard({
     return map;
   });
 
-  // Fetch full baseline list (with patch IDs) when needed
   useEffect(() => {
     const neededBaselines = new Set();
     for (const block of parentFilters) {
@@ -145,21 +192,33 @@ export default function PatchDashboard({
 
   useEffect(() => {
     onDataLoaded?.();
-  }, []);
+  }, [onDataLoaded]);
 
   const patchCveMap = useMemo(() => {
     const map = {};
+
     cves.forEach((c) => {
-      const key = `${c.patch_id}-${c.site_name}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(c.cve_id);
+      (c.patchObjects || []).forEach((p) => {
+        const key = `${String(p.patch_id || "")
+          .replace(/^BIGFIX-/i, "")
+          .trim()}|${String(p.site_name || "").trim()}`;
+
+        if (!map[key]) {
+          map[key] = [];
+        }
+
+        map[key].push(c.cve_id);
+      });
     });
+
     return map;
   }, [cves]);
 
   const patchExposure = useMemo(() => {
     return patches.map((patch) => {
-      const key = `${patch.patch_id}-${patch.site_name}`;
+      const key = `${String(patch.patch_id || "")
+        .replace(/^BIGFIX-/i, "")
+        .trim()}|${String(patch.site_name || "").trim()}`;
       const cvesForPatch = patchCveMap[key] || [];
       const devices = patch.applicable_computers || [];
       const score = Number(patch.final_score || 0);
@@ -181,68 +240,6 @@ export default function PatchDashboard({
     });
   }, [patches, patchCveMap]);
 
-  const applyFilters = (patch) => {
-    if (!parentFilters.length) return true;
-    let globalMatch = parentLogic === "OR" ? false : true;
-    for (let b of parentFilters) {
-      let blockMatch = true;
-      let validConds = 0;
-      for (let c of b.conds) {
-        if (!c.value) continue;
-        validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase().trim();
-
-        if (c.column === "cve_id") {
-          condition = (patch.cves || []).some((x) =>
-            x.toLowerCase().includes(search),
-          );
-        } else if (c.column === "device") {
-          condition = (patch.devices || []).some((x) =>
-            x.toLowerCase().includes(search),
-          );
-        } else if (c.column === "final_score") {
-          const field = Number(patch.final_score);
-          const val = Number(c.value);
-          if (!isNaN(val)) {
-            if (c.operator === ">") condition = field > val;
-            else if (c.operator === "<") condition = field < val;
-            else if (c.operator === "=") condition = field === val;
-            else if (c.operator === ">=") condition = field >= val;
-            else if (c.operator === "<=") condition = field <= val;
-          }
-        } else if (c.column === "baseline_name") {
-          const baselineName = search;
-          const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
-          const baselinePatchSet = baselinePatchMap[baselineName];
-          if (!baselinePatchSet) {
-            condition = false;
-          } else {
-            condition = baselinePatchSet.has(patchId);
-          }
-        } else {
-          let field;
-          if (c.column === "severity") {
-            field = String(patch.severity || "").toLowerCase();
-          } else {
-            field = String(patch[c.column] || "").toLowerCase();
-          }
-
-          if (c.operator === "contains") condition = field.includes(search);
-          else if (c.operator === "=") condition = field === search;
-          else if (c.operator === "!=") condition = field !== search;
-        }
-        blockMatch = blockMatch && condition;
-      }
-      if (validConds > 0)
-        globalMatch =
-          parentLogic === "OR"
-            ? globalMatch || blockMatch
-            : globalMatch && blockMatch;
-    }
-    return globalMatch;
-  };
-
   const normalizedFilters = useMemo(() => {
     if (!parentFilters?.length) return [];
     if (parentFilters[0]?.field) {
@@ -260,73 +257,31 @@ export default function PatchDashboard({
   }, [parentFilters]);
 
   const filteredPatches = patchExposure.filter((patch) => {
-    if (!normalizedFilters.length) return true;
-    let globalMatch = parentLogic === "OR" ? false : true;
-    for (let b of normalizedFilters) {
+    if (normalizedFilters.length === 0) return true; // S7735 Fix
+    let globalMatch = parentLogic !== "OR"; // S6644 Fix
+    for (const b of normalizedFilters) {
       let blockMatch = true;
       let validConds = 0;
-      for (let c of b.conds) {
+      for (const c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase().trim();
-
-        if (c.column === "severity") {
-          condition = String(patch.severity || "").toLowerCase() === search;
-        } else if (c.column === "patch_id") {
-          condition = String(patch.patch_id || "")
-            .toLowerCase()
-            .includes(search);
-        } else if (c.column === "patch_name") {
-          condition = String(patch.patch_name || "")
-            .toLowerCase()
-            .includes(search);
-        } else if (c.column === "baseline_name") {
-          const baselineName = search;
-          const patchId = patch.patch_id.replace(/^BIGFIX-/i, "").trim();
-          const baselinePatchSet = baselinePatchMap[baselineName];
-          condition = baselinePatchSet ? baselinePatchSet.has(patchId) : false;
-        } else if (c.column === "cve_id") {
-          condition = (patch.cves || []).some(
-            (x) => String(x).toLowerCase() === search,
-          );
-        } else if (c.column === "device") {
-          condition = (patch.devices || []).some(
-            (x) => String(x).toLowerCase() === search,
-          );
-        }
+        const condition = evaluatePatchCondition(patch, c, baselinePatchMap);
         blockMatch = blockMatch && condition;
       }
-      if (validConds > 0)
+      if (validConds > 0) {
         globalMatch =
           parentLogic === "OR"
             ? globalMatch || blockMatch
             : globalMatch && blockMatch;
+      }
     }
     return globalMatch;
   });
 
   const sortedPatches = useMemo(() => {
-    let sortable = [...filteredPatches];
-    if (sortConfig.key) {
-      sortable.sort((a, b) => {
-        let aVal = a[sortConfig.key];
-        let bVal = b[sortConfig.key];
-        if (
-          ["final_score", "cve_count", "device_count"].includes(sortConfig.key)
-        ) {
-          aVal = Number(aVal || 0);
-          bVal = Number(bVal || 0);
-        } else {
-          aVal = String(aVal || "").toLowerCase();
-          bVal = String(bVal || "").toLowerCase();
-        }
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-        return 0;
-      });
-    }
-    return sortable;
+    return [...filteredPatches].sort((a, b) =>
+      comparePatches(a, b, sortConfig),
+    );
   }, [filteredPatches, sortConfig]);
 
   const paginatedPatches = sortedPatches.slice(
@@ -368,28 +323,6 @@ export default function PatchDashboard({
     );
   };
 
-  const handleCveRedirect = (cve) => {
-    navigate(
-      "cve",
-      [{ conds: [{ column: "cve_id", operator: "=", value: cve }] }],
-      "AND",
-    );
-  };
-
-  const handleDeviceRedirect = (device) => {
-    navigate(
-      "computer",
-      [
-        {
-          conds: [
-            { column: "device_name", operator: "contains", value: device },
-          ],
-        },
-      ],
-      "AND",
-    );
-  };
-
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
       <div
@@ -406,6 +339,7 @@ export default function PatchDashboard({
         >
           <div className="dropdown" ref={colRef}>
             <button
+              type="button"
               className="btn outline sec small"
               onClick={() => {
                 setShowColDrop(!showColDrop);
@@ -435,8 +369,11 @@ export default function PatchDashboard({
                 style={{ minWidth: "220px", padding: "12px", right: 0 }}
               >
                 {cols.map((col, i) => (
-                  <label
+                  <div
                     key={col.id}
+                    role="menuitemcheckbox"
+                    aria-checked={col.show}
+                    tabIndex={0}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -445,27 +382,52 @@ export default function PatchDashboard({
                       padding: "6px 12px",
                       borderRadius: "4px",
                     }}
+                    onMouseOver={(e) =>
+                      (e.currentTarget.style.background = "#f8fafc")
+                    }
+                    onFocus={(e) =>
+                      (e.currentTarget.style.background = "#f8fafc")
+                    }
+                    onMouseOut={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                    onBlur={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const next = [...cols];
+                      next[i].show = !next[i].show;
+                      setCols(next);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const next = [...cols];
+                        next[i].show = !next[i].show;
+                        setCols(next);
+                      }
+                    }}
                   >
                     <input
                       type="checkbox"
-                      className="custom-checkbox"
+                      className="custom-checkbox no-events"
                       checked={col.show}
-                      onChange={(e) => {
-                        const next = [...cols];
-                        next[i].show = e.target.checked;
-                        setCols(next);
-                      }}
+                      readOnly
+                      tabIndex={-1}
                     />
                     <span style={{ fontSize: "13px", fontWeight: 500 }}>
                       {col.label}
                     </span>
-                  </label>
+                  </div>
                 ))}
               </div>
             )}
           </div>
           <div className="dropdown" ref={expRef}>
             <button
+              type="button"
               className="btn outline small"
               onClick={() => {
                 setShowExpDrop(!showExpDrop);
@@ -512,6 +474,7 @@ export default function PatchDashboard({
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
                     <button
                       key={fmt}
+                      type="button"
                       className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
                       style={{ fontSize: "11px", height: "32px", padding: 0 }}
                       onClick={(e) => {
@@ -542,16 +505,25 @@ export default function PatchDashboard({
                 >
                   Scope
                 </div>
-                <button className="item" onClick={() => handleExport("page")}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("page")}
+                >
                   Current Page
                 </button>
                 <button
+                  type="button"
                   className="item"
                   onClick={() => handleExport("filtered")}
                 >
                   Filtered Data
                 </button>
-                <button className="item" onClick={() => handleExport("all")}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("all")}
+                >
                   All Data
                 </button>
               </div>
@@ -579,6 +551,10 @@ export default function PatchDashboard({
                 <th
                   className="cursor-pointer"
                   onClick={() => handleSort("patch_id")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("patch_id");
+                  }}
                 >
                   Patch ID{getSortIcon("patch_id")}
                 </th>
@@ -587,6 +563,10 @@ export default function PatchDashboard({
                 <th
                   className="cursor-pointer"
                   onClick={() => handleSort("patch_name")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("patch_name");
+                  }}
                 >
                   Name{getSortIcon("patch_name")}
                 </th>
@@ -595,6 +575,10 @@ export default function PatchDashboard({
                 <th
                   className="cursor-pointer"
                   onClick={() => handleSort("site_name")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("site_name");
+                  }}
                 >
                   Site{getSortIcon("site_name")}
                 </th>
@@ -604,6 +588,10 @@ export default function PatchDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("final_score")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("final_score");
+                  }}
                 >
                   Score{getSortIcon("final_score")}
                 </th>
@@ -613,6 +601,10 @@ export default function PatchDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("severity")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("severity");
+                  }}
                 >
                   Severity{getSortIcon("severity")}
                 </th>
@@ -622,6 +614,10 @@ export default function PatchDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("cve_count")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("cve_count");
+                  }}
                 >
                   CVEs{getSortIcon("cve_count")}
                 </th>
@@ -631,6 +627,10 @@ export default function PatchDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("device_count")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("device_count");
+                  }}
                 >
                   Devices{getSortIcon("device_count")}
                 </th>
@@ -641,7 +641,7 @@ export default function PatchDashboard({
             {paginatedPatches.length === 0 ? (
               <tr>
                 <td
-                  colSpan="6"
+                  colSpan="7"
                   style={{
                     textAlign: "center",
                     padding: "40px",
@@ -653,7 +653,7 @@ export default function PatchDashboard({
               </tr>
             ) : (
               paginatedPatches.map((p) => (
-                <tr key={p.patch_id}>
+                <tr key={`${p.patch_id}-${p.site_name}`}>
                   {cols.find((c) => c.id === "patch_id")?.show && (
                     <td>{p.patch_id}</td>
                   )}
@@ -693,8 +693,17 @@ export default function PatchDashboard({
                   )}
                   {cols.find((c) => c.id === "cve_count")?.show && (
                     <td style={{ textAlign: "center" }}>
-                      <span
+                      <button
+                        type="button"
                         className="cell-link"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          color: "inherit",
+                          cursor: "pointer",
+                        }}
                         onClick={() =>
                           navigate(
                             "cve",
@@ -719,13 +728,22 @@ export default function PatchDashboard({
                         }
                       >
                         {p.cve_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                   {cols.find((c) => c.id === "device_count")?.show && (
                     <td style={{ textAlign: "center" }}>
-                      <span
+                      <button
+                        type="button"
                         className="cell-link"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          color: "inherit",
+                          cursor: "pointer",
+                        }}
                         onClick={() =>
                           navigate(
                             "computer",
@@ -737,6 +755,11 @@ export default function PatchDashboard({
                                     operator: "=",
                                     value: p.patch_id,
                                   },
+                                  {
+                                    column: "site_name",
+                                    operator: "=",
+                                    value: p.site_name,
+                                  },
                                 ],
                               },
                             ],
@@ -745,7 +768,7 @@ export default function PatchDashboard({
                         }
                       >
                         {p.device_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -766,3 +789,13 @@ export default function PatchDashboard({
     </div>
   );
 }
+
+PatchDashboard.propTypes = {
+  patches: PropTypes.array,
+  cves: PropTypes.array,
+  baselines: PropTypes.array,
+  parentFilters: PropTypes.array,
+  parentLogic: PropTypes.string,
+  onDataLoaded: PropTypes.func,
+  navigate: PropTypes.func.isRequired,
+};

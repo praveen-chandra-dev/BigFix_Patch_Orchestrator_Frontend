@@ -1,14 +1,37 @@
+// src/components/ComputerList.jsx
 import { useState, useEffect, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import Paginator from "./common/Paginator";
 import { useToast } from "./common/CustomToast";
 
-const API = window.env?.VITE_API_BASE || "";
+const API = globalThis.env?.VITE_API_BASE || "";
 
 function getHeaders() {
   return { "Content-Type": "application/json", "Accept": "application/json", "x-user-role": sessionStorage.getItem("user_role") || "Admin" };
 }
+
+// Extracted to reduce Cognitive Complexity
+const evaluateCondition = (field, operator, search) => {
+  if (operator === "contains") return field.includes(search);
+  if (operator === "=") return field === search;
+  if (operator === "!=") return field !== search;
+  return true;
+};
+
+const evaluateBlock = (comp, block) => {
+  let blockMatch = true;
+  let validConds = 0;
+  for (let c of block.conds) {
+    if (!c.value) continue;
+    validConds++;
+    const search = String(c.value).toLowerCase();
+    const field = String(comp[c.column] || "").toLowerCase();
+    blockMatch = blockMatch && evaluateCondition(field, c.operator, search);
+  }
+  return { blockMatch, validConds };
+};
 
 export default function ComputerList({ groupId, groupName }) {
   const { showToast } = useToast();
@@ -50,8 +73,22 @@ export default function ComputerList({ groupId, groupName }) {
   const propertyOptions = useMemo(() => cols.map(c => ({ value: c.id, label: c.label })), [cols]);
 
   useEffect(() => {
+    const fetchComputers = async () => {
+      setLoading(true);
+      try {
+        const endpoint = groupId ? `/api/groups/computers-extended?groupId=${groupId}` : `/api/groups/computers-extended`;
+        const r = await fetch(`${API}${endpoint}`, { headers: getHeaders() });
+        const data = await r.json();
+        if (data.ok) setComputers(data.computers || []);
+        else throw new Error(data.error || "Failed to fetch computers");
+      } catch (e) {
+        showToast(e.message, "error");
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchComputers();
-  }, [groupId]);
+  }, [groupId, showToast]);
 
   useEffect(() => {
     const handleOutside = (e) => {
@@ -62,38 +99,14 @@ export default function ComputerList({ groupId, groupName }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  const fetchComputers = async () => {
-    setLoading(true);
-    try {
-      const endpoint = groupId ? `/api/groups/computers-extended?groupId=${groupId}` : `/api/groups/computers-extended`;
-      const r = await fetch(`${API}${endpoint}`, { headers: getHeaders() });
-      const data = await r.json();
-      if (data.ok) setComputers(data.computers || []);
-      else throw new Error(data.error || "Failed to fetch computers");
-    } catch (e) {
-      showToast(e.message, "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const applyFilters = (comp) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
+    let globalMatch = globalLogic !== "OR";
     for (let b of filters) {
-      let blockMatch = true; let validConds = 0;
-      for (let c of b.conds) {
-        if (!c.value) continue;
-        validConds++; let condition = true;
-        const search = String(c.value).toLowerCase();
-        const field = String(comp[c.column] || "").toLowerCase();
-
-        if (c.operator === "contains") condition = field.includes(search);
-        else if (c.operator === "=") condition = field === search;
-        else if (c.operator === "!=") condition = field !== search;
-        blockMatch = blockMatch && condition;
+      const { blockMatch, validConds } = evaluateBlock(comp, b);
+      if (validConds > 0) {
+        globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
       }
-      if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
     }
     return globalMatch;
   };
@@ -118,12 +131,24 @@ export default function ComputerList({ groupId, groupName }) {
   const activeFilterCount = filters.reduce((acc, b) => acc + b.conds.filter(c => c.value).length, 0);
 
   const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc" }));
-  const getSortIcon = (key) => sortConfig.key === key ? <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span> : <span className="muted-text ml-6">↕</span>;
+  
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>;
+    return <span className="ml-6">{sortConfig.direction === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const handleExport = (scope) => { 
     setShowExpDrop(false); 
-    let dataToExport = scope === 'page' ? paginatedData : scope === 'filtered' ? sortedData : computers;
-    performExport(dataToExport, cols, exportFormat, groupId ? `Group_${groupName}_Computers` : "All_Computers");
+    
+    let dataToExport = computers;
+    if (scope === 'page') {
+      dataToExport = paginatedData;
+    } else if (scope === 'filtered') {
+      dataToExport = sortedData;
+    }
+
+    const exportName = groupId ? `Group_${groupName}_Computers` : "All_Computers";
+    performExport(dataToExport, cols, exportFormat, exportName);
   };
 
   return (
@@ -137,7 +162,7 @@ export default function ComputerList({ groupId, groupName }) {
         </div>
         <div className="right flex-row gap-12 items-center">
             {groupId && (
-                <button className="btn outline sec" onClick={() => window.dispatchEvent(new CustomEvent('nav:group', {detail: 'MANAGE'}))}>
+                <button className="btn outline sec" onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:group', {detail: 'MANAGE'}))}>
                     ← Back to Groups
                 </button>
             )}
@@ -147,7 +172,7 @@ export default function ComputerList({ groupId, groupName }) {
                  </button>
                  {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
              </div>
-             <button className="iconbtn" onClick={fetchComputers} title="Refresh Data">
+             <button className="iconbtn" onClick={() => globalThis.dispatchEvent(new CustomEvent('nav:group', {detail: 'COMPUTERS'}))} title="Refresh Data">
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
              </button>
         </div>
@@ -163,10 +188,10 @@ export default function ComputerList({ groupId, groupName }) {
                         const validConds = b.conds.filter(c => c.value);
                         if (!validConds.length) return null;
                         return (
-                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                          <div key={`filter-b-${bIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                             {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
                             {validConds.map((c, cIdx) => (
-                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                              <span key={`filter-c-${bIdx}-${cIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                                 {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
                                 <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                               </span>
@@ -195,7 +220,7 @@ export default function ComputerList({ groupId, groupName }) {
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: '300px', overflowY: 'auto' }}>
                                 {cols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                             const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                         }} />
@@ -247,15 +272,18 @@ export default function ComputerList({ groupId, groupName }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedData.map((row, i) => (
-                    <tr key={i}>
-                      {cols.map(c => c.show && (
-                          <td key={c.id}>
-                              {c.id === 'name' ? <strong>{row[c.id]}</strong> : row[c.id]}
-                          </td>
-                      ))}
-                    </tr>
-                  ))}
+                  {paginatedData.map((row, index) => {
+                    const rowKey = row.id || row.name || `row-${row.ip || 'no-ip'}-${index}`;
+                    return (
+                      <tr key={rowKey}>
+                        {cols.map(c => c.show && (
+                            <td key={c.id}>
+                                {c.id === 'name' ? <strong>{row[c.id]}</strong> : row[c.id]}
+                            </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -266,3 +294,8 @@ export default function ComputerList({ groupId, groupName }) {
     </div>
   );
 }
+
+ComputerList.propTypes = {
+  groupId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  groupName: PropTypes.string
+};

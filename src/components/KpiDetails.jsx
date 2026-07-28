@@ -1,13 +1,13 @@
 // src/components/KpiDetails.jsx
 import { useState, useEffect, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import { evaluateCondition } from "../utils/filterUtils";
-import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
 
-const API_BASE = window.env?.VITE_API_BASE || "http://localhost:5174";
-const RPP_OPTIONS = [{value: 10, label: "10"}, {value: 20, label: "20"}, {value: 50, label: "50"}, {value: 10000, label: "All"}];
+// FIX S7764: Prefer globalThis over window
+const API_BASE = globalThis.env?.VITE_API_BASE || "http://localhost:5174";
 
 function getHeaders() {
   return {
@@ -37,7 +37,7 @@ async function postJSON(url, body) {
   if (!r.ok || j?.ok === false) throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
   return j;
 }
-//  FIXED: Imported the exact buckets used in PilotSandboxResult
+
 const BUCKETS = [
   "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
   "Pending Restart", "Pending Client Restart", "Pending Message", "Pending Login", 
@@ -47,7 +47,23 @@ const BUCKETS = [
   "Not Relevant", "Not Reported"
 ];
 
-//  FIXED: Replaced lazy classify function with the comprehensive one
+// FIX S3776: Reduced Cognitive Complexity by mapping regex rules
+const CLASSIFY_RULES = [
+  { rx: /^fixed$/i, res: "Fixed" }, { rx: /executed successfully/i, res: "Fixed" }, { rx: /success/i, res: "Fixed" },
+  { rx: /^completed$/i, res: "Completed" }, { rx: /^running$/i, res: "Running" }, { rx: /is currently running/i, res: "Running" },
+  { rx: /evaluating/i, res: "Running" }, { rx: /^not reported$/i, res: "Not Reported" }, { rx: /waiting for restart/i, res: "Pending Restart" },
+  { rx: /pending restart/i, res: "Pending Restart" }, { rx: /pending downloads/i, res: "Pending Downloads" }, { rx: /waiting for downloads/i, res: "Pending Downloads" },
+  { rx: /pending message/i, res: "Pending Message" }, { rx: /waiting for user to respond/i, res: "Pending Message" }, { rx: /pending login/i, res: "Pending Login" },
+  { rx: /waiting for user to log in/i, res: "Pending Login" }, { rx: /pending offer/i, res: "Pending Offer Acceptance" }, { rx: /waiting for user to accept/i, res: "Pending Offer Acceptance" },
+  { rx: /pending client restart/i, res: "Pending Client Restart" }, { rx: /waiting for client restart/i, res: "Pending Client Restart" },
+  { rx: /constrained/i, res: "Constrained" }, { rx: /constraint/i, res: "Constrained" }, { rx: /postponed/i, res: "Postponed" },
+  { rx: /invalid signature/i, res: "Invalid Signature" }, { rx: /not relevant/i, res: "Not Relevant" }, { rx: /offers disabled/i, res: "Offers Disabled" },
+  { rx: /disk limited/i, res: "Disk Limited" }, { rx: /disk free limited/i, res: "Disk Free Limited" }, { rx: /hash mismatch/i, res: "Hash Mismatch" },
+  { rx: /transcoding error/i, res: "Transcoding Error" }, { rx: /failed transcoding/i, res: "Transcoding Error" },
+  { rx: /unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i, res: "error" },
+  { rx: /fail|error/i, res: "Failed" }, { rx: /wait|pending/i, res: "Waiting" }
+];
+
 function classify(raw) {
   const s = String(raw || "").trim();
   if (!s) return "Not Reported";
@@ -56,40 +72,52 @@ function classify(raw) {
   const exactBucket = BUCKETS.find(b => b.toLowerCase() === L);
   if (exactBucket) return exactBucket;
 
-  if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
-  if (/^completed$/i.test(s)) return "Completed";
-  if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
-  if (/^not reported$/i.test(s)) return "Not Reported";
-  
-  if (/waiting for restart/i.test(L) || /pending restart/i.test(L)) return "Pending Restart";
-  if (/pending downloads/i.test(L) || /waiting for downloads/i.test(L)) return "Pending Downloads";
-  if (/pending message/i.test(L) || /waiting for user to respond/i.test(L)) return "Pending Message";
-  if (/pending login/i.test(L) || /waiting for user to log in/i.test(L)) return "Pending Login";
-  if (/pending offer/i.test(L) || /waiting for user to accept/i.test(L)) return "Pending Offer Acceptance";
-  if (/pending client restart/i.test(L) || /waiting for client restart/i.test(L)) return "Pending Client Restart";
-
-  if (/constrained/i.test(L) || /constraint/i.test(L)) return "Constrained";
-  if (/postponed/i.test(L)) return "Postponed";
-  if (/invalid signature/i.test(L)) return "Invalid Signature";
-  if (/not relevant/i.test(L)) return "Not Relevant";
-  if (/offers disabled/i.test(L)) return "Offers Disabled";
-  if (/disk limited/i.test(L)) return "Disk Limited";
-  if (/disk free limited/i.test(L)) return "Disk Free Limited";
-  if (/hash mismatch/i.test(L)) return "Hash Mismatch";
-  if (/transcoding error/i.test(L) || /failed transcoding/i.test(L)) return "Transcoding Error";
-  if (/unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i.test(L)) return "error";
-
-  if (/fail|error/i.test(L)) return "Failed";
-  if (/wait|pending/i.test(L)) return "Waiting";
+  const rule = CLASSIFY_RULES.find(r => r.rx.test(L) || r.rx.test(s));
+  if (rule) return rule.res;
   
   return s; 
+}
+
+// FIX S3358: Extracted nested ternary
+function resolveContextType(context, activeTab) {
+  if (typeof context === 'object') return context?.type || activeTab || 'health';
+  if (typeof context === 'string') return context || activeTab || 'health';
+  return activeTab || 'health';
+}
+
+// FIX S3358: Extracted nested ternary for table rows
+function getRowClass(type, row, selectedReboots, selectedHealth, canRestartSvc) {
+  if (type === 'reboot') return selectedReboots.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer';
+  if (type === 'health' && canRestartSvc) return selectedHealth.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer';
+  return "";
+}
+
+function getRowClickHandler(type, row, canRestartSvc, toggleRebootSelection, toggleHealthSelection) {
+  if (type === 'reboot') return () => toggleRebootSelection(row.server);
+  if (type === 'health' && canRestartSvc) return () => toggleHealthSelection(row.server);
+  return undefined;
+}
+
+// FIX S3358: Extracted nested ternary for Status Cell
+function renderStatusCell(status) {
+  const s = classify(status);
+  const isSuccess = s === 'Fixed' || s === 'Completed'; 
+  const isFail = s === 'Failed' || s === 'error' || s === 'Download Failed'; 
+  const isRunning = s === 'Running' || s === 'Evaluating'; 
+  
+  let cls = 'pill amber';
+  if (isSuccess) cls = 'pill green';
+  else if (isFail) cls = 'pill red';
+  else if (isRunning) cls = 'pill blue';
+  
+  return <span className={cls}>{s}</span>;
 }
 
 function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = false }) {
   if (!open) return null;
   return (
-    <div className="modal show" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="box max-w-520" onClick={(e) => e.stopPropagation()}>
+    <div className="modal show" role="presentation" onMouseDown={onClose} tabIndex={-1}>
+      <div className="box max-w-520" onMouseDown={(e) => e.stopPropagation()} role="presentation">
         <h3 className="kpi-modal-title">{title || "Confirm Action"}</h3>
         <div className="sub kpi-confirm-sub">{children}</div>
         <div className="flex-row justify-end gap-8 mt-10">
@@ -101,8 +129,14 @@ function ConfirmationModal({ open, title, children, onClose, onConfirm, busy = f
   );
 }
 
+// FIX S6774: Added validation
+ConfirmationModal.propTypes = {
+  open: PropTypes.bool, title: PropTypes.string, children: PropTypes.node,
+  onClose: PropTypes.func, onConfirm: PropTypes.func, busy: PropTypes.bool
+};
+
 export default function KpiDetails({ context, activeTab }) {
-  const type = (typeof context === 'object' ? context?.type : (typeof context === 'string' ? context : null)) || activeTab || 'health';
+  const type = resolveContextType(context, activeTab);
   const groupName = context?.group || '';
   const actionId = context?.id || null;
 
@@ -146,7 +180,9 @@ export default function KpiDetails({ context, activeTab }) {
     if (pending) {
         try {
             setFilters(JSON.parse(pending));
-        } catch(e) {}
+        } catch(e) {
+            console.warn("Failed to parse pending filters", e); // FIX S2486: Handled
+        }
         sessionStorage.removeItem("kpi_pending_filter");
     }
   }, []);
@@ -188,8 +224,60 @@ export default function KpiDetails({ context, activeTab }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
+  // FIX S3776: Extracted data fetching blocks
+  const fetchSuccessData = async () => {
+    if (!actionId) throw new Error("No Action ID was pinned for the previous deployment.");
+    const idArray = String(actionId).split(",").map(id => id.trim()).filter(Boolean);
+    const allResults = await Promise.all(idArray.map(async (id) => {
+        try { return await getJson(`${API_BASE}/api/actions/${id}/results`); } 
+        catch (e) { 
+            console.warn(e); // FIX S2486: Handled
+            return { rows: [] }; 
+        }
+    }));
+  
+    let combinedRows = [];
+    allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+    
+    const map = new Map();
+    for (const r of combinedRows) { 
+        const key = `${r.server}_${r.patch}`; 
+        if (r.server && !map.has(key)) map.set(key, r); 
+    }
+    return Array.from(map.values());
+  };
 
-    const fetchData = async () => {
+  const fetchHealthData = async (groupNamesArray) => {
+    if (groupNamesArray.length === 0) {
+        const data = await getJson(`${API_BASE}/api/health/critical`);
+        return Array.isArray(data?.rows) ? data.rows : [];
+    }
+    const allResults = await Promise.all(groupNamesArray.map(async (g) => {
+        return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`).catch((e) => { console.warn(e); return null; }); // FIX S2486
+    }));
+    let combinedRows = [];
+    allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+    const map = new Map();
+    for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+    return Array.from(map.values());
+  };
+
+  const fetchRebootData = async (groupNamesArray) => {
+    if (groupNamesArray.length === 0) {
+        const data = await getJson(`${API_BASE}/api/health/reboot-pending`);
+        return Array.isArray(data?.rows) ? data.rows : [];
+    }
+    const allResults = await Promise.all(groupNamesArray.map(async (g) => {
+        return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`).catch((e) => { console.warn(e); return null; }); // FIX S2486
+    }));
+    let combinedRows = [];
+    allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+    const map = new Map();
+    for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
+    return Array.from(map.values());
+  };
+
+  const fetchData = async () => {
       setLoading(true); 
       setError(""); 
       setSelectedReboots(new Set());
@@ -200,58 +288,19 @@ export default function KpiDetails({ context, activeTab }) {
           let fetchedData = [];
 
           if (type === 'success') {
-              if (!actionId) {
-                  setError("No Action ID was pinned for the previous deployment.");
-                  setLoading(false);
-                  return;
-              }
-              const idArray = String(actionId).split(",").map(id => id.trim()).filter(Boolean);
-              const allResults = await Promise.all(idArray.map(async (id) => {
-                  try { return await getJson(`${API_BASE}/api/actions/${id}/results`); } 
-                  catch (e) { return { rows: [] }; }
-              }));
-            
-            let combinedRows = [];
-              allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
+              fetchedData = await fetchSuccessData();
               
-              const map = new Map();
-              for (const r of combinedRows) { 
-                  const key = `${r.server}_${r.patch}`; //  FIX: Deduplicate by Server AND Patch
-                  if (r.server && !map.has(key)) map.set(key, r); 
+              // NEW: Filter only successes if coming from the donut chart!
+              if (context?.fromKpi) {
+                  fetchedData = fetchedData.filter(r => {
+                      const s = classify(r.status);
+                      return s === 'Fixed' || s === 'Completed';
+                  });
               }
-              fetchedData = Array.from(map.values());
-              
           } else if (type === 'health') {
-              //  FIX: If no group is passed (Sidebar click), fetch full infrastructure (Backend will still enforce RBAC!)
-              if (groupNamesArray.length === 0) {
-                  const data = await getJson(`${API_BASE}/api/health/critical`);
-                  fetchedData = Array.isArray(data?.rows) ? data.rows : [];
-              } else {
-                  const allResults = await Promise.all(groupNamesArray.map(async (g) => {
-                      return await getJson(`${API_BASE}/api/health/critical?group=${encodeURIComponent(g)}`).catch(() => null);
-                  }));
-                  let combinedRows = [];
-                  allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
-                  const map = new Map();
-                  for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-                  fetchedData = Array.from(map.values());
-              }
-              
+              fetchedData = await fetchHealthData(groupNamesArray);
           } else if (type === 'reboot') {
-              //  FIX: If no group is passed, fetch full infrastructure
-              if (groupNamesArray.length === 0) {
-                  const data = await getJson(`${API_BASE}/api/health/reboot-pending`);
-                  fetchedData = Array.isArray(data?.rows) ? data.rows : [];
-              } else {
-                  const allResults = await Promise.all(groupNamesArray.map(async (g) => {
-                      return await getJson(`${API_BASE}/api/health/reboot-pending?group=${encodeURIComponent(g)}`).catch(() => null);
-                  }));
-                  let combinedRows = [];
-                  allResults.forEach(res => { if (Array.isArray(res?.rows)) combinedRows = combinedRows.concat(res.rows); });
-                  const map = new Map();
-                  for (const r of combinedRows) { if (r.server && !map.has(r.server)) map.set(r.server, r); }
-                  fetchedData = Array.from(map.values());
-              }
+              fetchedData = await fetchRebootData(groupNamesArray);
           }
 
           setData(fetchedData);
@@ -263,36 +312,47 @@ export default function KpiDetails({ context, activeTab }) {
       }
   };
 
+  const getTitle = () => {
+      // NEW: Dynamically adjust title based on where they clicked from
+      if (type === 'success') return context?.fromKpi ? "Success Details" : "Action Deployment Details"; 
+      if (type === 'health') return "Critical Health Failures";
+      if (type === 'reboot') return "Pending Reboots";
+      return "KPI Details";
+  };
   useEffect(() => {
       fetchData();
   }, [type, groupName, actionId]);
 
+  // FIX S3776: Extracted condition evaluator
+  const evaluateItemCondition = (item, c) => {
+    let field = "";
+    const search = String(c.value).toLowerCase();
+    
+    if (c.column === 'issues' && Array.isArray(item.issues)) {
+        field = item.issues.join(", ").toLowerCase();
+    } else if (c.column === 'pendingRestart') {
+        field = String(item.pendingRestart ?? item.pending ?? item.restart ?? "").toLowerCase();
+    } else if (c.column === 'status' && type === 'success') {
+        field = classify(item.status).toLowerCase();
+        if (c.operator === "contains" && !field.includes(search)) {
+             field = String(item.status || "").toLowerCase();
+        }
+    } else {
+        field = String(item[c.column] || "").toLowerCase();
+    }
+
+    return evaluateCondition(field, c.operator, c.value, c.column);
+  };
+
   const applyFilters = (item) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
+    let globalMatch = globalLogic !== "OR"; // FIX S6644: Removed boolean literal
     for (let b of filters) {
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
-        validConds++; let condition = true;
-        let field = "";
-        const search = String(c.value).toLowerCase();
-        
-        if (c.column === 'issues' && Array.isArray(item.issues)) {
-            field = item.issues.join(", ").toLowerCase();
-        } else if (c.column === 'pendingRestart') {
-            field = String(item.pendingRestart ?? item.pending ?? item.restart ?? "").toLowerCase();
-        } else if (c.column === 'status' && type === 'success') {
-            field = classify(item.status).toLowerCase();
-            if (c.operator === "contains" && !field.includes(search)) {
-                 field = String(item.status || "").toLowerCase();
-            }
-        } else {
-            field = String(item[c.column] || "").toLowerCase();
-        }
-
-        condition = evaluateCondition(field, c.operator, c.value, c.column);
-        blockMatch = blockMatch && condition;
+        validConds++; 
+        blockMatch = blockMatch && evaluateItemCondition(item, c);
       }
       if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
     }
@@ -473,14 +533,6 @@ export default function KpiDetails({ context, activeTab }) {
       setError(`Bulk service restart failed: ${e.message}`);
     }
   }
-
-  const getTitle = () => {
-      if (type === 'success') return "Action Deployment Details"; 
-      if (type === 'health') return "Critical Health Failures";
-      if (type === 'reboot') return "Pending Reboots";
-      return "KPI Details";
-  };
-
   return (
     <div className="card reveal" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible', boxShadow: 'none', border: 'none', background: 'transparent' }}>
       
@@ -565,7 +617,8 @@ export default function KpiDetails({ context, activeTab }) {
                             <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                                 <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                     {cols.map((col, i) => (
-                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                        // FIX S1082: added onFocus and onBlur
+                                        <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                             <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                                 const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                             }} />
@@ -614,8 +667,9 @@ export default function KpiDetails({ context, activeTab }) {
                                         {type === 'reboot' && (
                                             <input type="checkbox" className="custom-checkbox" onChange={toggleAllReboots} checked={paginatedData.length > 0 && paginatedData.every(r => selectedReboots.has(r.server))} />
                                         )}
+                                        {/* FIX S7754: Prefer some() over filtering length check */}
                                         {type === 'health' && (
-                                            <input type="checkbox" className="custom-checkbox" onChange={toggleAllHealth} disabled={paginatedData.filter(isHealthRestartable).length === 0} checked={paginatedData.filter(isHealthRestartable).length > 0 && paginatedData.filter(isHealthRestartable).every(r => selectedHealth.has(r.server))} />
+                                            <input type="checkbox" className="custom-checkbox" onChange={toggleAllHealth} disabled={!paginatedData.some(isHealthRestartable)} checked={paginatedData.some(isHealthRestartable) && paginatedData.filter(isHealthRestartable).every(r => selectedHealth.has(r.server))} />
                                         )}
                                     </th>
                                 )}
@@ -633,10 +687,11 @@ export default function KpiDetails({ context, activeTab }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {paginatedData.map((row, i) => {
+                            {paginatedData.map((row, index) => {
                                 const canRestartSvc = type === 'health' && isHealthRestartable(row);
+                                const uniqueRowKey = row.server ? `row-${row.server}-${index}` : `row-fallback-${index}`;
                                 return (
-                                    <tr key={i} onClick={type === 'reboot' ? () => toggleRebootSelection(row.server) : (type === 'health' && canRestartSvc ? () => toggleHealthSelection(row.server) : undefined)} className={type === 'reboot' ? (selectedReboots.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : (type === 'health' && canRestartSvc ? (selectedHealth.has(row.server) ? 'selected-row cursor-pointer' : 'cursor-pointer') : "")}>
+                                    <tr key={uniqueRowKey} onClick={getRowClickHandler(type, row, canRestartSvc, toggleRebootSelection, toggleHealthSelection)} className={getRowClass(type, row, selectedReboots, selectedHealth, canRestartSvc)}>
                                         {(type === 'reboot' || (type === 'health' && showService)) && (
                                             <td className="kpi-td-center">
                                                 {type === 'reboot' ? (
@@ -651,17 +706,10 @@ export default function KpiDetails({ context, activeTab }) {
                                             if (!c.show) return null;
                                             let val = row[c.id];
                                             
-                                            //  FIX: Handle the status column styling
                                             if (type === 'success' && c.id === 'status') {
-                                                const s = classify(row.status);
-                                                const isSuccess = s === 'Fixed' || s === 'Completed'; 
-                                                const isFail = s === 'Failed' || s === 'error' || s === 'Download Failed'; 
-                                                const isRunning = s === 'Running' || s === 'Evaluating'; 
-                                                const cls = isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber';
-                                                return <td key={c.id}><span className={cls}>{s}</span></td>;
+                                                return <td key={c.id}>{renderStatusCell(row.status)}</td>;
                                             }
 
-                                            // 🚀 FIX: Ensure Patch Name is cleanly rendered
                                             if (type === 'success' && c.id === 'patch') {
                                                 return <td key={c.id} style={{ color: 'var(--text)' }}>{row.patch || "—"}</td>;
                                             }
@@ -708,7 +756,7 @@ export default function KpiDetails({ context, activeTab }) {
       )}
       {confirmService && (
         <ConfirmationModal open={!!confirmService} title="Confirm Service Restart" onClose={() => setConfirmService(null)} onConfirm={executeServiceRestart} busy={actionStatus[`svc_${confirmService}`] === "loading"}>
-          Are you sure you want to restart "Window Update" service on: <strong>{confirmService}</strong>?
+          Are you sure you want to restart &quot;Window Update&quot; service on: <strong>{confirmService}</strong>?
         </ConfirmationModal>
       )}
       {confirmBulkReboot && (
@@ -721,7 +769,7 @@ export default function KpiDetails({ context, activeTab }) {
       )}
       {confirmBulkService && (
         <ConfirmationModal open={confirmBulkService} title={`Confirm Bulk Service Restart (${selectedHealth.size})`} onClose={() => setConfirmBulkService(false)} onConfirm={executeBulkServiceRestart} busy={bulkServiceStatus === "Triggering..."}>
-           Are you sure you want to restart the "Window Update" service on <strong>{selectedHealth.size}</strong> selected servers immediately?
+           Are you sure you want to restart the &quot;Window Update&quot; service on <strong>{selectedHealth.size}</strong> selected servers immediately?
            <div className="kpi-bulk-box" style={{ maxHeight: '100px', overflowY: 'auto', background: '#f3f4f6', padding: '8px', borderRadius: '4px', fontSize: '12px', marginTop: '10px' }}>
               {Array.from(selectedHealth).join(", ")}
            </div>
@@ -730,3 +778,8 @@ export default function KpiDetails({ context, activeTab }) {
     </div>
   );
 }
+
+KpiDetails.propTypes = {
+  context: PropTypes.oneOfType([PropTypes.object, PropTypes.string]),
+  activeTab: PropTypes.string
+};

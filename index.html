@@ -4,15 +4,45 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/bigfix-logo.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
+
+    <!--
+      AppScan flagged CWE-829 (Check for SRI support): the Google Fonts
+      <link rel="stylesheet"> had no integrity attribute.
+
+      Why we self-host instead of adding integrity=... to the Google URL:
+        1. Google Fonts CSS is dynamic — the served CSS varies by User-Agent
+           (different woff2 sources for Chrome vs Safari), so any pinned
+           SHA-384 will rotate-break the page on browser updates.
+        2. Self-hosting also removes the third-party connection entirely,
+           which is consistent with our CSP (we no longer need
+           https://fonts.googleapis.com or https://fonts.gstatic.com in
+           style-src / font-src).
+
+      Setup steps for the dev team:
+        npm install @fontsource/inter
+        // in src/main.jsx (top of the file):
+        import "@fontsource/inter/300.css";
+        import "@fontsource/inter/400.css";
+        import "@fontsource/inter/500.css";
+        import "@fontsource/inter/600.css";
+        import "@fontsource/inter/700.css";
+
+      The fontsource CSS files inline-reference woff2 files that Vite will
+      bundle into /assets/*.woff2 — all served from our own origin under
+      'self' in font-src / style-src.
+    -->
+
     <title>BigFix Patch Setu</title>
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Both <script> tags below are external same-origin files. They satisfy
+      our CSP under script-src 'self'. The backend's index.html rewriter
+      (src/app.js -> sendIndexWithNonce) stamps a per-request nonce attribute
+      onto each tag at delivery time so that 'strict-dynamic' can propagate
+      trust to anything they dynamically import (e.g. Vite chunks).
+    -->
     <script type="module" src="/src/main.jsx"></script>
     <script src="/env.js"></script>
   </body>

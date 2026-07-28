@@ -1,8 +1,10 @@
 // src/components/pilot/PilotSandboxResult.jsx
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "../FilterDrawer";
 import InlineSpinner from "../common/InlineSpinner";
-const API_BASE = window.env.VITE_API_BASE;
+
+const API_BASE = globalThis.env?.VITE_API_BASE || "";
 
 /* ------------------------------- helpers ------------------------------- */
 async function getJson(url, signal) {
@@ -14,12 +16,12 @@ async function getJson(url, signal) {
 
 const fmtTime = (s) => {
   if (!s || s === "N/A") return "—";
-  const m = s.match(/\b(\d{2}:\d{2}:\d{2})\b/);
+  const m = /\b(\d{2}:\d{2}:\d{2})\b/.exec(String(s));
   return m ? m[1] : s;
 };
 
 const escapeHtml = (str) =>
-  String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  String(str ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
 const BUCKETS = [
   "Fixed", "Completed", "Running", "Evaluating", "Waiting", "Pending Downloads", 
@@ -84,9 +86,27 @@ const EXTRA = ["#10b981", "#f97316", "#e11d48", "#84cc16", "#14b8a6", "#8b5cf6",
 function pickColor(label) {
   if (COLOR[label]) return COLOR[label];
   let h = 0;
-  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < label.length; i++) {
+      h = (h * 31 + label.codePointAt(i)) >>> 0;
+  }
   return EXTRA[h % EXTRA.length];
 }
+
+const CLASSIFY_RULES = [
+  { rx: /^fixed$/i, res: "Fixed" }, { rx: /executed successfully/i, res: "Fixed" }, { rx: /success/i, res: "Fixed" },
+  { rx: /^completed$/i, res: "Completed" }, { rx: /^running$/i, res: "Running" }, { rx: /is currently running/i, res: "Running" },
+  { rx: /evaluating/i, res: "Running" }, { rx: /^not reported$/i, res: "Not Reported" }, { rx: /waiting for restart/i, res: "Pending Restart" },
+  { rx: /pending restart/i, res: "Pending Restart" }, { rx: /pending downloads/i, res: "Pending Downloads" }, { rx: /waiting for downloads/i, res: "Pending Downloads" },
+  { rx: /pending message/i, res: "Pending Message" }, { rx: /waiting for user to respond/i, res: "Pending Message" }, { rx: /pending login/i, res: "Pending Login" },
+  { rx: /waiting for user to log in/i, res: "Pending Login" }, { rx: /pending offer/i, res: "Pending Offer Acceptance" }, { rx: /waiting for user to accept/i, res: "Pending Offer Acceptance" },
+  { rx: /pending client restart/i, res: "Pending Client Restart" }, { rx: /waiting for client restart/i, res: "Pending Client Restart" },
+  { rx: /constrained/i, res: "Constrained" }, { rx: /constraint/i, res: "Constrained" }, { rx: /postponed/i, res: "Postponed" },
+  { rx: /invalid signature/i, res: "Invalid Signature" }, { rx: /not relevant/i, res: "Not Relevant" }, { rx: /offers disabled/i, res: "Offers Disabled" },
+  { rx: /disk limited/i, res: "Disk Limited" }, { rx: /disk free limited/i, res: "Disk Free Limited" }, { rx: /hash mismatch/i, res: "Hash Mismatch" },
+  { rx: /transcoding error/i, res: "Transcoding Error" }, { rx: /failed transcoding/i, res: "Transcoding Error" },
+  { rx: /unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i, res: "error" },
+  { rx: /fail|error/i, res: "Failed" }, { rx: /wait|pending/i, res: "Waiting" }
+];
 
 function classify(raw) {
   const s = String(raw || "").trim();
@@ -96,31 +116,8 @@ function classify(raw) {
   const exactBucket = BUCKETS.find(b => b.toLowerCase() === L);
   if (exactBucket) return exactBucket;
 
-  if (/^fixed$/i.test(s) || /executed successfully/i.test(L) || /success/i.test(L)) return "Fixed";
-  if (/^completed$/i.test(s)) return "Completed";
-  if (/^running$/i.test(s) || /is currently running/i.test(L) || /evaluating/i.test(L)) return "Running";
-  if (/^not reported$/i.test(s)) return "Not Reported";
-  
-  if (/waiting for restart/i.test(L) || /pending restart/i.test(L)) return "Pending Restart";
-  if (/pending downloads/i.test(L) || /waiting for downloads/i.test(L)) return "Pending Downloads";
-  if (/pending message/i.test(L) || /waiting for user to respond/i.test(L)) return "Pending Message";
-  if (/pending login/i.test(L) || /waiting for user to log in/i.test(L)) return "Pending Login";
-  if (/pending offer/i.test(L) || /waiting for user to accept/i.test(L)) return "Pending Offer Acceptance";
-  if (/pending client restart/i.test(L) || /waiting for client restart/i.test(L)) return "Pending Client Restart";
-
-  if (/constrained/i.test(L) || /constraint/i.test(L)) return "Constrained";
-  if (/postponed/i.test(L)) return "Postponed";
-  if (/invalid signature/i.test(L)) return "Invalid Signature";
-  if (/not relevant/i.test(L)) return "Not Relevant";
-  if (/offers disabled/i.test(L)) return "Offers Disabled";
-  if (/disk limited/i.test(L)) return "Disk Limited";
-  if (/disk free limited/i.test(L)) return "Disk Free Limited";
-  if (/hash mismatch/i.test(L)) return "Hash Mismatch";
-  if (/transcoding error/i.test(L) || /failed transcoding/i.test(L)) return "Transcoding Error";
-  if (/unknown error|missing or invalid|invalid site|invalid action|invalid download|configuration error|unknown reasons|translation error|management extender/i.test(L)) return "error";
-
-  if (/fail|error/i.test(L)) return "Failed";
-  if (/wait|pending/i.test(L)) return "Waiting";
+  const rule = CLASSIFY_RULES.find(r => r.rx.test(L) || r.rx.test(s));
+  if (rule) return rule.res;
   
   return s; 
 }
@@ -184,7 +181,7 @@ function downloadBlob(blob, filename) {
 
 function rowsToCSV(rows) {
   const header = ["Server Name", "Patch Name", "Start Time", "End Time", "Status", "Issuer"];
-  const escape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const escape = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
   const lines = [header.join(",")];
   for (const r of rows) {
     const rawStatus = r.status || "Not Reported";
@@ -202,11 +199,71 @@ function rowsToHTML(rows, title = "Results") {
     if ((s === 'Waiting' || s === 'error' || s === 'Failed') && r.status && r.status.toLowerCase() !== s.toLowerCase()) {
         displayStatus = `${s} (${r.status})`;
     }
-    const cls = (s === 'Fixed' || s === 'Completed') ? 'status-green' : (s === 'Failed' || s === 'error' || s === 'Download Failed') ? 'status-red' : (s === 'Running' || s === 'Evaluating') ? 'status-blue' : 'status-amber';
+    
+    let cls = 'status-amber';
+    if (s === 'Fixed' || s === 'Completed') cls = 'status-green';
+    else if (s === 'Failed' || s === 'error' || s === 'Download Failed') cls = 'status-red';
+    else if (s === 'Running' || s === 'Evaluating') cls = 'status-blue';
+    
     return `<tr><td>${escapeHtml(r.server ?? "—")}</td><td>${escapeHtml(r.patch ?? "—")}</td><td>${escapeHtml(fmtTime(r.start))}</td><td>${escapeHtml(fmtTime(r.end))}</td><td><span class="status-pill ${cls}">${escapeHtml(displayStatus)}</span></td><td>${escapeHtml(r.issuer ?? "—")}</td></tr>`;
   }).join("");
-  return `<!doctype html><html><head>${head}</head><body><h1>${safeTitle}</h1><table><thead><tr><th>Server Name</th><th>Patch Name</th><th>Start Time</th><th>End Time</th><th>Status</th><th>Issuer</th></tr></thead><tbody>${rowsHtml || `<tr><td colspan="6">No rows.</td></tr>`}</tbody></table></body></html>`;
+  
+  const emptyRow = '<tr><td colspan="6">No rows.</td></tr>';
+  return `<!doctype html><html><head>${head}</head><body><h1>${safeTitle}</h1><table><thead><tr><th>Server Name</th><th>Patch Name</th><th>Start Time</th><th>End Time</th><th>Status</th><th>Issuer</th></tr></thead><tbody>${rowsHtml || emptyRow}</tbody></table></body></html>`;
 }
+
+const fetchSingleActionResults = async (actId, abortSignal, isManual, deadActionsRef) => {
+  if (!actId) return null;
+  if (deadActionsRef.current.has(actId) && !isManual) return null;
+
+  try {
+      const res = await getJson(`${API_BASE}/api/actions/${actId}/results`, abortSignal);
+      const allRows = Array.isArray(res?.rows) ? res.rows : [];
+      
+      const map = new Map();
+      allRows.forEach(r => { 
+          if (r.server && !map.has(r.server)) {
+              map.set(r.server, r); 
+          }
+      });
+      const uRows = Array.from(map.values());
+
+      const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
+      const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
+      
+      let success = 0;
+      if (uRows.length > 0) {
+          success = uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length;
+      } else {
+          success = Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
+      }
+
+      let statusBanner = { msg: "Status Unknown", type: "info" };
+      if (!deadActionsRef.current.has(actId) || isManual) {
+          try {
+              const statusRes = await getJson(`${API_BASE}/api/actions/${actId}/status`, abortSignal);
+              const s = String(statusRes?.state || "").toLowerCase();
+              if (s === 'open' || s === 'running') {
+                  statusBanner = { msg: "Action is open", type: 'running' };
+              } else if (s === 'expired' || s === 'stopped') {
+                  statusBanner = { msg: "Action Stopped", type: 'completed' };
+                  deadActionsRef.current.add(actId);
+              } else {
+                  statusBanner = { msg: `Status: ${s}`, type: 'info' };
+              }
+          } catch (statusErr) {
+              console.warn("Status fetch failed", statusErr);
+          }
+      } else {
+          statusBanner = { msg: "Action Stopped", type: 'completed' };
+      }
+
+      return { id: actId, data: { summary: { success, total }, counts: cm, rows: uRows, statusBanner } };
+  } catch (actErr) {
+      console.warn(`Failed to fetch action ${actId}:`, actErr);
+      return null;
+  }
+};
 
 
 export default function PilotSandboxResult({ title = "Sandbox Result", detailTitle, actions = [], onViewDetails }) {
@@ -215,32 +272,30 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
   const [err, setErr] = useState("");
   const refreshAbortRef = useRef(null);
 
-  
-  const deadActionsRef = useRef(new Set()); // Tracks actions that are 100% stopped
+  const deadActionsRef = useRef(new Set()); 
 
-
-  //  Scroll controls for the horizontal deployment row
   const scrollRef = useRef(null);
   const handleScroll = (dir) => {
       if (scrollRef.current) {
-          const scrollAmount = 360; // Roughly the width of one card + gap
+          const scrollAmount = 360; 
           scrollRef.current.scrollBy({ left: dir === 'left' ? -scrollAmount : scrollAmount, behavior: 'smooth' });
       }
   };
 
-  //  Calculate the global aggregated KPI numbers
   const globalSummary = useMemo(() => {
     let success = 0, total = 0;
-    Object.values(dataMap).forEach(d => { success += (d.summary?.success || 0); total += (d.summary?.total || 0); });
+    Object.values(dataMap).forEach(d => { 
+        success += (d.summary?.success || 0); 
+        total += (d.summary?.total || 0); 
+    });
     return { success, total };
   }, [dataMap]);
 
   const [openDetailId, setOpenDetailId] = useState(null);
   const [donutFilter, setDonutFilter] = useState(null);
 
-
   const refresh = useCallback(async (abortSignal, isManual = false) => {
-    if (!actions || actions.length === 0) {
+    if (!actions?.length) {
       setLoading(false);
       setDataMap({});
       return;
@@ -249,72 +304,28 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     setLoading(true);
 
     try {
-      const fetchedData = {};
+      const promises = actions.map(act => fetchSingleActionResults(String(act.actionId), abortSignal, isManual, deadActionsRef));
+      const results = await Promise.all(promises);
       
-      // Run concurrent API fetches for all deployments
-      await Promise.all(actions.map(async (act) => {
-        const idToUse = String(act.actionId);
-        if (!idToUse) return;
-
-        // Skip heavy polling if this specific action is already complete
-        if (deadActionsRef.current.has(idToUse) && !isManual) return;
-
-        try {
-            const res = await getJson(`${API_BASE}/api/actions/${idToUse}/results`, abortSignal);
-            const allRows = Array.isArray(res?.rows) ? res.rows : [];
-            
-            const map = new Map();
-            allRows.forEach(r => { if (r.server && !map.has(r.server)) map.set(r.server, r); });
-            const uRows = Array.from(map.values());
-
-            const cm = uRows.length ? countsFromRows(uRows) : countsFromObj(res);
-            const total = uRows.length > 0 ? uRows.length : Number(res?.total ?? 0);
-            const success = uRows.length > 0 
-                ? uRows.filter(r => { const s = classify(r.status); return s === 'Fixed' || s === 'Completed'; }).length 
-                : Number(res?.success ?? res?.Fixed ?? ((cm.has("Fixed") ? cm.get("Fixed") : 0) + (cm.has("Completed") ? cm.get("Completed") : 0))) || 0;
-
-            let statusBanner = { msg: "Status Unknown", type: "info" };
-            if (!deadActionsRef.current.has(idToUse) || isManual) {
-                try {
-                    const statusRes = await getJson(`${API_BASE}/api/actions/${idToUse}/status`, abortSignal);
-                    const s = String(statusRes?.state || "").toLowerCase();
-                    if (s === 'open' || s === 'running') statusBanner = { msg: "Action is open", type: 'running' };
-                    else if (s === 'expired' || s === 'stopped') {
-                        statusBanner = { msg: "Action Stopped", type: 'completed' };
-                        deadActionsRef.current.add(idToUse);
-                    }
-                    else statusBanner = { msg: `Status: ${s}`, type: 'info' };
-                } catch { }
-            } else {
-                statusBanner = { msg: "Action Stopped", type: 'completed' };
-            }
-
-            fetchedData[idToUse] = { summary: { success, total }, counts: cm, rows: uRows, statusBanner, baseline: act.baseline, group: act.group };
-        } catch (actErr) {
-            console.error(`Failed to fetch action ${idToUse}:`, actErr);
-        }
-      }));
+      const fetchedData = results.reduce((acc, res) => {
+          if (res) {
+              const act = actions.find(a => String(a.actionId) === res.id);
+              acc[res.id] = { ...res.data, baseline: act?.baseline, group: act?.group };
+          }
+          return acc;
+      }, {});
       
-      // THE FIX: Use functional state update so `dataMap` isn't in the dependency array!
       setDataMap(prevMap => ({ ...prevMap, ...fetchedData }));
-
     } catch (e) {
-      if (e.name !== "AbortError") setErr(e.message);
+      if (e.name !== "AbortError") {
+          setErr(e.message);
+      }
     } finally {
-      if (!abortSignal || !abortSignal.aborted) setLoading(false);
+      if (!abortSignal?.aborted) {
+          setLoading(false);
+      }
     }
-  }, [actions]); // FIX: Removed dataMap from dependencies to kill the infinite loop
-
-  useEffect(() => {
-    refreshAbortRef.current?.abort();
-    const ab = new AbortController();
-    refreshAbortRef.current = ab;
-    
-    refresh(ab.signal);
-
-    const interval = setInterval(() => refresh(ab.signal), 300000); 
-    return () => { ab.abort(); clearInterval(interval); };
-  }, [actions, refresh]);
+  }, [actions]); 
 
   useEffect(() => {
     refreshAbortRef.current?.abort();
@@ -344,17 +355,13 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     }
   };
 
-  return (
-    <>
-      <section className="card reveal" data-reveal>
-       <div className="flex-row items-center justify-between mb-16">
-          <h2>{title}</h2>
-          <button className="btn outline small" onClick={() => refresh(null, true)} title="Refresh Data" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            {loading ? <><InlineSpinner size={14} variant="dark" /><span>Refreshing...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
-          </button>
-        </div>
-        
-        {err ? <div className="sub error">{err}</div> : (!actions || actions.length === 0) ? <div className="sub">No data</div> : (
+  let content;
+  if (err) {
+      content = <div className="sub error">{err}</div>;
+  } else if (!actions || actions.length === 0) {
+      content = <div className="sub">No data</div>;
+  } else {
+      content = (
           <>
             <div className="flex-row items-center justify-between w-full mb-16 wrap gap-12" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '16px' }}>
               <div className="flex-row items-center gap-12">
@@ -365,13 +372,10 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
               </div>
             </div>
             
-            
-            
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                
-                {/* Left Arrow */}
                 {actions.length > 2 && (
                     <button 
+                        type="button"
                         className="btn" 
                         onClick={() => handleScroll('left')}
                         style={{ position: 'absolute', left: '-18px', zIndex: 10, borderRadius: '50%', width: '25px', height: '25px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg)', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', border: '1px solid var(--border)' }}
@@ -391,8 +395,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                       padding: '8px 4px 16px 4px',
                       width: '100%',
                       scrollBehavior: 'smooth',
-                      scrollbarWidth: 'none', // Firefox
-                      msOverflowStyle: 'none' // IE 10+
+                      scrollbarWidth: 'none', 
+                      msOverflowStyle: 'none' 
                    }}
                 >
                     <style>{`.hide-scroll::-webkit-scrollbar { display: none; }`}</style>
@@ -412,7 +416,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                                 return acc;
                             }, { sum: 0, res: [] }).res;
                             
-                        const pt = d.summary.total > 0 ? Math.round((d.summary.success / d.summary.total) * 100) : 0;
+                        const pt = d.summary?.total > 0 ? Math.round((d.summary.success / d.summary.total) * 100) : 0;
 
                         return (
                             <div key={actId} style={{ 
@@ -422,8 +426,8 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                                 border: '1px solid var(--border)', 
                                 display: 'flex', 
                                 flexDirection: 'column',
-                                minWidth: '340px', // Lock width so cards don't shrink
-                                flex: '0 0 auto'   // Prevent flexbox from shrinking
+                                minWidth: '340px', 
+                                flex: '0 0 auto'   
                             }}>
                                 <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{act.baseline}</div>
                                 <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '12px' }}>➔ {act.group} (ID: {actId})</div>
@@ -432,32 +436,51 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flex: 1 }}>
                                     <div style={{ width: '120px', height: '120px', flexShrink: 0 }}>
-                                        <svg viewBox="0 0 120 120" role="img" className="donut-svg" onClick={(e) => handleContainerClick(e, actId, null)} style={{ cursor: 'pointer', width: '100%', height: '100%' }}>
-                                            <g transform="translate(60,60)">
-                                                {donut.length === 0 ? (
-                                                    fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" /> ))
-                                                ) : (
-                                                    donut.map((s, i) => {
-                                                        const dPath = arcPath(0, 0, 48, s.start, s.end, 30);
-                                                        if (!dPath) return ( <g key={i} onClick={(e) => handleContainerClick(e, actId, s.key)}> {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={idx} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} </g> );
-                                                        return ( <path key={i} d={dPath} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" onClick={(e) => handleContainerClick(e, actId, s.key)} style={{ cursor: 'pointer', transition: "filter 0.2s" }} onMouseOver={e => e.currentTarget.style.filter = "brightness(1.1)"} onMouseOut={e => e.currentTarget.style.filter = "none"} /> );
-                                                    })
-                                                )}
-                                                <text x="0" y="5" textAnchor="middle" fontSize="16" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>{pt}%</text>
-                                            </g>
-                                        </svg>
+                                        <button 
+                                            type="button" 
+                                            className="donut-svg-btn" 
+                                            onClick={(e) => handleContainerClick(e, actId, null)} 
+                                            style={{ background: 'none', border: 'none', padding: 0, width: '100%', height: '100%', cursor: 'pointer', display: 'block' }}
+                                        >
+                                            <svg viewBox="0 0 120 120" className="donut-svg" style={{ width: '100%', height: '100%' }}>
+                                                <g transform="translate(60,60)">
+                                                    {donut.length === 0 ? (
+                                                        fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={`empty-half-${idx === 0 ? 'top' : 'bottom'}`} d={pd} fill="var(--panel-2)" stroke="var(--border)" strokeWidth="1" /> ))
+                                                    ) : (
+                                                        donut.map((s) => {
+                                                            const dPath = arcPath(0, 0, 48, s.start, s.end, 30);
+                                                            if (!dPath) {
+                                                                return ( 
+                                                                    <g key={s.key} onClick={(e) => handleContainerClick(e, actId, s.key)}> 
+                                                                        {fullRingPaths(0, 0, 48, 30).map((pd, idx) => ( <path key={`full-${s.key}-${idx === 0 ? 'top' : 'bottom'}`} d={pd} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" /> ))} 
+                                                                    </g> 
+                                                                );
+                                                            }
+                                                            return ( <path key={s.key} d={dPath} fill={s.fill} stroke="var(--panel-1)" strokeWidth="0.2" onClick={(e) => handleContainerClick(e, actId, s.key)} style={{ cursor: 'pointer', transition: "filter 0.2s" }} onMouseOver={e => e.currentTarget.style.filter = "brightness(1.1)"} onMouseOut={e => e.currentTarget.style.filter = "none"} /> );
+                                                        })
+                                                    )}
+                                                    <text x="0" y="5" textAnchor="middle" fontSize="16" fontWeight="800" fill="var(--text)" style={{ pointerEvents: 'none' }}>{pt}%</text>
+                                                </g>
+                                            </svg>
+                                        </button>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '110px', overflowY: 'auto' }} className="custom-scrollbar">
                                         {donut.length === 0 && <div className="muted-text text-12">No Data</div>}
                                         {donut.map(l => (
-                                            <div key={l.key} onClick={(e) => handleContainerClick(e, actId, l.key)} title={DESCRIPTIONS[l.key] || l.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px' }}>
+                                            <button
+                                                key={l.key}
+                                                type="button"
+                                                onClick={(e) => handleContainerClick(e, actId, l.key)}
+                                                title={DESCRIPTIONS[l.key] || l.key}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', background: 'none', border: 'none', padding: 0, width: '100%', textAlign: 'left' }}
+                                            >
                                                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: l.fill, flexShrink: 0 }}></span>
                                                 <span style={{ color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.key} ({l.val})</span>
-                                            </div>
+                                            </button>
                                         ))}
                                     </div>
                                 </div>
-                                <button className="btn outline small" style={{ width: '100%', marginTop: '16px' }} onClick={(e) => handleContainerClick(e, actId, null)}>View Details</button>
+                                <button type="button" className="btn outline small" style={{ width: '100%', marginTop: '16px' }} onClick={(e) => handleContainerClick(e, actId, null)}>View Details</button>
                             </div>
                         );
                     })}
@@ -466,6 +489,7 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
                 {/* Right Arrow */}
                 {actions.length > 2 && (
                     <button 
+                        type="button"
                         className="btn" 
                         onClick={() => handleScroll('right')}
                         style={{ position: 'absolute', right: '-18px', zIndex: 10, borderRadius: '50%', width: '25px', height: '25px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg)', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', border: '1px solid var(--border)' }}
@@ -476,7 +500,19 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
 
             </div>
           </>
-        )}
+      );
+  }
+
+  return (
+    <>
+      <section className="card reveal" data-reveal>
+       <div className="flex-row items-center justify-between mb-16">
+          <h2>{title}</h2>
+          <button type="button" className="btn outline small" onClick={() => refresh(null, true)} title="Refresh Data" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            {loading ? <><InlineSpinner size={14} variant="dark" /><span>Refreshing...</span></> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
+          </button>
+        </div>
+        {content}
       </section>
       
       <DetailsModal 
@@ -489,6 +525,13 @@ export default function PilotSandboxResult({ title = "Sandbox Result", detailTit
     </>
   );
 }
+
+PilotSandboxResult.propTypes = {
+  title: PropTypes.string,
+  detailTitle: PropTypes.string,
+  actions: PropTypes.array,
+  onViewDetails: PropTypes.func
+};
 
 function DetailsModal({ open, onClose, title, rows, initialStatus }) {
   const [sortConfig, setSortConfig] = useState({ key: "status", dir: "asc" });
@@ -509,47 +552,71 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
   useEffect(() => {
     if (initialStatus && open) {
         setFilters([{ logic: "Single", conds: [{ column: "status", operator: "contains", value: initialStatus }] }]);
-    } else if (open) setFilters([]);
+    } else {
+        if (open) {
+            setFilters([]);
+        }
+    }
   }, [open, initialStatus]);
 
-  useEffect(() => setPage(1), [filters, pageSize]);
+  useEffect(() => {
+      setPage(1);
+  }, [filters, pageSize]);
   
   useEffect(() => {
-    function onDocClick(e) { if (!showMenu) return; if (btnRef.current && !btnRef.current.contains(e.target)) setShowMenu(false); }
-    document.addEventListener("mousedown", onDocClick); return () => document.removeEventListener("mousedown", onDocClick);
+    function onDocClick(e) { 
+        if (!showMenu) return; 
+        if (btnRef.current && !btnRef.current.contains(e.target)) {
+            setShowMenu(false); 
+        }
+    }
+    document.addEventListener("mousedown", onDocClick); 
+    return () => {
+        document.removeEventListener("mousedown", onDocClick);
+    };
   }, [showMenu]);
+
+  const evaluateRowCondition = (row, c) => {
+      const search = String(c.value).toLowerCase();
+      let field = "";
+      if (c.column === "status") {
+          const shortStatus = classify(row.status);
+          field = shortStatus.toLowerCase();
+          if (c.operator === "contains" && !field.includes(search)) {
+              field = String(row.status || "").toLowerCase();
+          }
+      } else {
+          field = String(row[c.column] || "").toLowerCase();
+      }
+
+      if (c.operator === "contains") return field.includes(search);
+      if (c.operator === "=") return field === search;
+      if (c.operator === "!=") return field !== search;
+      return true;
+  };
 
   const applyFilters = (row) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
+    let globalMatch = globalLogic !== "OR";
     let validBlocks = 0;
 
-    for (let b of filters) {
+    for (const b of filters) {
       let blockMatch = true;
       let validConds = 0;
 
-      for (let c of b?.conds || []) {
+      for (const c of b?.conds || []) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase();
-        
-        let field = "";
-        if (c.column === "status") {
-            const shortStatus = classify(row.status);
-            field = shortStatus.toLowerCase();
-            if (c.operator === "contains" && !field.includes(search)) field = String(row.status || "").toLowerCase();
-        } else {
-            field = String(row[c.column] || "").toLowerCase();
-        }
-
-        if (c.operator === "contains") condition = field.includes(search);
-        else if (c.operator === "=") condition = field === search;
-        else if (c.operator === "!=") condition = field !== search;
-        
-        blockMatch = blockMatch && condition;
+        blockMatch = blockMatch && evaluateRowCondition(row, c);
       }
-      if (validConds > 0) { validBlocks++; globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch); }
+      if (validConds > 0) { 
+          validBlocks++; 
+          if (globalLogic === "OR") {
+              globalMatch = globalMatch || blockMatch;
+          } else {
+              globalMatch = globalMatch && blockMatch;
+          }
+      }
     }
     return validBlocks === 0 ? true : globalMatch;
   };
@@ -572,18 +639,40 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
   const handleSort = (key) => { setSortConfig(current => ({ key, dir: current.key === key && current.dir === "asc" ? "desc" : "asc" })); };
   const getSortIcon = (key) => { if (sortConfig.key !== key) return <span className="muted-text ml-6">↕</span>; return <span className="ml-6">{sortConfig.dir === "asc" ? "↑" : "↓"}</span>; };
   
-  const doExport = (type) => { setShowMenu(false); const safeTitle = (title || "Report").replace(/[^\w.-]+/g, "_"); if (type === 'csv') { const csv = rowsToCSV(sorted); downloadBlob(new Blob([csv], { type: "text/csv" }), `${safeTitle}.csv`); } else if (type === 'html') { const html = rowsToHTML(sorted, title); downloadBlob(new Blob([html], { type: "text/html" }), `${safeTitle}.html`); } else if (type === 'pdf') { const html = rowsToHTML(sorted, title); const blob = new Blob([html], { type: "text/html" }); const url = URL.createObjectURL(blob); const iframe = document.createElement("iframe"); iframe.className = "d-none"; iframe.src = url; iframe.onload = () => { try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch {} setTimeout(() => { URL.revokeObjectURL(url); iframe.remove(); }, 2000); }; document.body.appendChild(iframe); } };
+  const doExport = (type) => { 
+      setShowMenu(false); 
+      const safeTitle = (title || "Report").replaceAll(/[^\w.-]+/g, "_"); 
+      if (type === 'csv') { 
+          const csv = rowsToCSV(sorted); 
+          downloadBlob(new Blob([csv], { type: "text/csv" }), `${safeTitle}.csv`); 
+      } else if (type === 'html') { 
+          const html = rowsToHTML(sorted, title); 
+          downloadBlob(new Blob([html], { type: "text/html" }), `${safeTitle}.html`); 
+      } else if (type === 'pdf') { 
+          const html = rowsToHTML(sorted, title); 
+          const blob = new Blob([html], { type: "text/html" }); 
+          const url = URL.createObjectURL(blob); 
+          const iframe = document.createElement("iframe"); 
+          iframe.className = "d-none"; 
+          iframe.src = url; 
+          iframe.onload = () => { 
+              try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch (e) { console.warn(e); } 
+              setTimeout(() => { URL.revokeObjectURL(url); iframe.remove(); }, 2000); 
+          }; 
+          document.body.appendChild(iframe); 
+      } 
+  };
 
   if (!open) return null;
   const activeFilterCount = filters.reduce((acc, b) => acc + (b?.conds ? b.conds.filter(c => c.value).length : 0), 0);
 
   return (
-    <div className="modal show" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="box action-modal-box" style={{ padding: 0 }} onClick={e => e.stopPropagation()}>
+    <div className="modal show" onMouseDown={onClose} tabIndex={-1}>
+      <div className="box action-modal-box" style={{ padding: 0 }} onMouseDown={e => e.stopPropagation()}>
         
         <div className="action-modal-header" style={{ padding: '20px 24px', borderBottom: '1px solid var(--border)', marginBottom: 0 }}>
             <h3 className="modal-title" style={{ margin: 0, fontSize: "18px", color: "var(--text)" }}>{title}</h3>
-            <button className="btn btn-outline" style={{ height: '32px' }} onClick={onClose}>Close</button>
+            <button type="button" className="btn btn-outline" style={{ height: '32px' }} onClick={onClose}>Close</button>
         </div>
         
         <div style={{ padding: '20px 24px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -593,16 +682,16 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
               Showing {filtered.length} Entries {activeFilterCount > 0 && <span className="pill blue ml-10">Filtered</span>}
             </div>
             <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn pri" onClick={() => setDrawerOpen(true)}>
+              <button type="button" className="btn pri" onClick={() => setDrawerOpen(true)}>
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
               </button>
               <div className="dropdown" ref={btnRef}>
-                 <button className="btn pri" onClick={() => setShowMenu(s => !s)}>Export<svg width="14" height="14" viewBox="0 0 24 24" className="ml-6"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></button>
+                 <button type="button" className="btn pri" onClick={() => setShowMenu(s => !s)}>Export<svg width="14" height="14" viewBox="0 0 24 24" className="ml-6"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" /></svg></button>
                  {showMenu && (
                    <div className="menu">
-                     <button className="item" onClick={() => doExport('csv')}>Export to CSV</button>
-                     <button className="item" onClick={() => doExport('pdf')}>Export to PDF</button>
-                     <button className="item" onClick={() => doExport('html')}>Export to HTML</button>
+                     <button type="button" className="item" onClick={() => doExport('csv')}>Export to CSV</button>
+                     <button type="button" className="item" onClick={() => doExport('pdf')}>Export to PDF</button>
+                     <button type="button" className="item" onClick={() => doExport('html')}>Export to HTML</button>
                    </div>
                  )}
               </div>
@@ -614,11 +703,11 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
                
                 <thead className="kpi-th-sticky">
                   <tr>
-                    <th onClick={() => handleSort('server')} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th>
-                    <th onClick={() => handleSort('patch')} className="cursor-pointer">Patch Name {getSortIcon('patch')}</th>
-                    <th onClick={() => handleSort('status')} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th>
-                    <th onClick={() => handleSort('start')} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th>
-                    <th onClick={() => handleSort('end')} className="w-10p cursor-pointer">End {getSortIcon('end')}</th>
+                    <th onClick={() => handleSort('server')} onKeyDown={(e) => { if(e.key === 'Enter') handleSort('server'); }} tabIndex={0} className="w-20p cursor-pointer">Server {getSortIcon('server')}</th>
+                    <th onClick={() => handleSort('patch')} onKeyDown={(e) => { if(e.key === 'Enter') handleSort('patch'); }} tabIndex={0} className="cursor-pointer">Patch Name {getSortIcon('patch')}</th>
+                    <th onClick={() => handleSort('status')} onKeyDown={(e) => { if(e.key === 'Enter') handleSort('status'); }} tabIndex={0} className="w-15p cursor-pointer">Status {getSortIcon('status')}</th>
+                    <th onClick={() => handleSort('start')} onKeyDown={(e) => { if(e.key === 'Enter') handleSort('start'); }} tabIndex={0} className="w-10p cursor-pointer">Start {getSortIcon('start')}</th>
+                    <th onClick={() => handleSort('end')} onKeyDown={(e) => { if(e.key === 'Enter') handleSort('end'); }} tabIndex={0} className="w-10p cursor-pointer">End {getSortIcon('end')}</th>
                     <th className="w-15p">Issuer</th>
                   </tr>
                 </thead>
@@ -631,16 +720,17 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
                           displayStatus = `${shortStatus} (${r.status})`;
                       }
 
-                      const isSuccess = shortStatus === 'Fixed' || shortStatus === 'Completed'; 
-                      const isFail = shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'error'; 
-                      const isRunning = shortStatus === 'Running' || shortStatus === 'Evaluating'; 
+                      let badgeClass = 'pill amber';
+                      if (shortStatus === 'Fixed' || shortStatus === 'Completed') badgeClass = 'pill green';
+                      else if (shortStatus === 'Failed' || shortStatus === 'Download Failed' || shortStatus === 'error') badgeClass = 'pill red';
+                      else if (shortStatus === 'Running' || shortStatus === 'Evaluating') badgeClass = 'pill blue';
                       
                       return (
-                          <tr key={i}>
+                          <tr key={r.server || `row-${i}`}>
                               <td>{r.server}</td>
                               <td>{r.patch}</td>
                               <td>
-                                  <span className={`status-pill ${isSuccess ? 'pill green' : isFail ? 'pill red' : isRunning ? 'pill blue' : 'pill amber'}`} title={DESCRIPTIONS[shortStatus] || r.status}>
+                                  <span className={`status-pill ${badgeClass}`} title={DESCRIPTIONS[shortStatus] || r.status}>
                                       {displayStatus}
                                   </span>
                               </td>
@@ -667,8 +757,8 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
                   {sorted.length > 0 ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, sorted.length)} of {sorted.length}
                 </div>
                 <div className="pager-btns">
-                    <button className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt; Prev</button>
-                    <button className="pager-btn" disabled={page >= totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>Next &gt;</button>
+                    <button type="button" className="pager-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>&lt; Prev</button>
+                    <button type="button" className="pager-btn" disabled={page >= totalPages || totalPages === 0} onClick={() => setPage(p => p + 1)}>Next &gt;</button>
                 </div>
             </div>
         </div>
@@ -686,3 +776,11 @@ function DetailsModal({ open, onClose, title, rows, initialStatus }) {
     </div>
   );
 }
+
+DetailsModal.propTypes = {
+  open: PropTypes.bool,
+  onClose: PropTypes.func.isRequired,
+  title: PropTypes.string,
+  rows: PropTypes.array.isRequired,
+  initialStatus: PropTypes.string
+};

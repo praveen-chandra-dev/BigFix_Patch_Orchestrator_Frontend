@@ -1,29 +1,62 @@
 // src/components/UserManagement.jsx
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
 import InlineSpinner from "./common/InlineSpinner";
 
-const API = window.env?.VITE_API_BASE || "http://localhost:5174";
+const API = globalThis.env?.VITE_API_BASE || "http://localhost:5174";
 
 async function apiFetch(url, options = {}) {
   const headers = {
     "Content-Type": "application/json",
     "x-user-role": sessionStorage.getItem("user_role") || "Admin",
     "x-active-user": sessionStorage.getItem("username"),
-    ...(options.headers || {})
+    ...options.headers
   };
   
   const r = await fetch(`${API}${url}`, { ...options, headers });
   let j;
-  try { j = await r.json(); } catch (e) { j = { ok: false, error: "Failed to parse server response." }; }
+  try { 
+      j = await r.json(); 
+  } catch (e) { 
+      console.warn("Failed to parse API response:", e);
+      j = { ok: false, error: "Failed to parse server response." }; 
+  }
   if (!r.ok || j.ok === false) throw new Error(j.error || j.message || `HTTP ${r.status}`);
   return j;
 }
 
-function fmtDate(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+function fmtDate(iso) { 
+    try { 
+        return new Date(iso).toLocaleString(); 
+    } catch (e) { 
+        console.warn("Date formatting error:", e);
+        return iso; 
+    } 
+}
+
+const evaluateFilterCondition = (row, c) => {
+    let field = "";
+    const search = String(c.value).toLowerCase();
+    
+    if (c.column === "CreatedAt") field = fmtDate(row.CreatedAt).toLowerCase();
+    else field = String(row[c.column] || "").toLowerCase();
+
+    if (c.operator === "contains") return field.includes(search);
+    if (c.operator === "=") return field === search;
+    if (c.operator === "!=") return field !== search;
+    return true;
+};
+
+// AD check status type: 'idle' | 'checking' | 'ad' | 'local' | 'svc_unconfigured'
+const AD_CHECK_IDLE          = "idle";
+const AD_CHECK_CHECKING      = "checking";
+const AD_CHECK_AD            = "ad";
+const AD_CHECK_LOCAL         = "local";
+const AD_CHECK_SVC_NOT_CFG   = "svc_unconfigured"; // LDAP enabled but service account not configured
 
 export default function UserManagement({ onClose, currentUserId }) {
   const [users, setUsers] = useState([]);
@@ -38,16 +71,44 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [adding, setAdding] = useState(false);
   const [availableRoles, setAvailableRoles] = useState([]);
 
-  const isLdapUser = newU.includes("@");
+  // ── Real AD user detection via service account ──────────────────────────
+  // Status tracks the result of the backend check-ad-user API call.
+  const [adCheck, setAdCheck]   = useState(AD_CHECK_IDLE);
+  const adCheckTimer            = useRef(null);
 
-  
+  // Treat user as LDAP only when backend confirmed it in AD
+  const isLdapUser = adCheck === AD_CHECK_AD;
+
+  // ── Debounced AD lookup whenever the username input changes ─────────────
+  useEffect(() => {
+    if (adCheckTimer.current) clearTimeout(adCheckTimer.current);
+
+    const trimmed = newU.trim();
+    if (!trimmed) { setAdCheck(AD_CHECK_IDLE); return; }
+
+    setAdCheck(AD_CHECK_CHECKING);
+
+    adCheckTimer.current = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/api/auth/check-ad-user?username=${encodeURIComponent(trimmed)}`);
+        if (data.reason === "service_account_not_configured") {
+          setAdCheck(AD_CHECK_SVC_NOT_CFG);
+        } else {
+          setAdCheck(data.isAd ? AD_CHECK_AD : AD_CHECK_LOCAL);
+        }
+      } catch {
+        // API error (LDAP disabled, network, etc.) → treat as local
+        setAdCheck(AD_CHECK_LOCAL);
+      }
+    }, 600);
+
+    return () => { if (adCheckTimer.current) clearTimeout(adCheckTimer.current); };
+  }, [newU]);
 
   const [editingUserId, setEditingUserId] = useState(null);
-  // const [editRoleValue, setEditRoleValue] = useState("");
   const [editRoleValue, setEditRoleValue] = useState([]);
 
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -59,7 +120,6 @@ export default function UserManagement({ onClose, currentUserId }) {
   const [globalLogic, setGlobalLogic] = useState("AND");
   const [filters, setFilters] = useState([]);
 
-  // NEW STATE FOR PASSWORD RESET MODAL
   const [resetModal, setResetModal] = useState({ open: false, user: '' });
   const [resetPass, setResetPass] = useState("");
   const [resetOptLocal, setResetOptLocal] = useState(true);
@@ -69,13 +129,11 @@ export default function UserManagement({ onClose, currentUserId }) {
   const colRef = useRef(null);
   const expRef = useRef(null);
 
-
-
   const [cols, setCols] = useState([
     { id: 'UserID', label: 'User ID', show: true },
     { id: 'LoginName', label: 'Login Name', show: true },
     { id: 'Role', label: 'Current Role', show: true },
-    { id: 'UpdateRole', label: 'Change Role', show: true }, // NEW COLUMN
+    { id: 'UpdateRole', label: 'Change Role', show: true }, 
     { id: 'CreatedAt', label: 'Created At', show: true }
   ]);
 
@@ -117,7 +175,7 @@ export default function UserManagement({ onClose, currentUserId }) {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm("Are you sure you want to delete this user?")) return;
+    if (globalThis.confirm("Are you sure you want to delete this user?") === false) return;
     setErr("");
     try {
       await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE', body: JSON.stringify({ currentUserId }) });
@@ -127,7 +185,7 @@ export default function UserManagement({ onClose, currentUserId }) {
     } catch (e) { setErr(e.message); }
   }
 
-async function submitPasswordReset(e) {
+  async function submitPasswordReset(e) {
     e.preventDefault();
     if (!resetOptLocal && !resetOptBF) return setErr("Please select at least one system to reset.");
     if (!resetPass) return setErr("New password is required.");
@@ -147,7 +205,6 @@ async function submitPasswordReset(e) {
       setSuccess(res.message || `Password for ${resetModal.user} reset successfully.`);
       setTimeout(() => setSuccess(""), 4000);
       
-      // Close and clear modal
       setResetModal({ open: false, user: '' });
       setResetPass("");
     } catch (e) {
@@ -157,35 +214,14 @@ async function submitPasswordReset(e) {
     }
   }
 
-
-  async function handleRoleUpdate(userId, newRole) {
-    if (!window.confirm(`Are you sure you want to change this user's role to ${newRole}?`)) return;
-    
-    setErr("");
-    try {
-      const res = await apiFetch(`/api/auth/users/${userId}/role`, { 
-          method: 'PUT', 
-          body: JSON.stringify({ role: newRole }) 
-      });
-      
-      // Update the local state so the UI reflects the change immediately
-      setUsers(u => u.map(x => x.UserID === userId ? { ...x, Role: newRole } : x));
-      
-      setSuccess(res.message || `Role updated to ${newRole} successfully.`);
-      setTimeout(() => setSuccess(""), 4000);
-    } catch (e) { 
-      setErr(e.message); 
-    }
-  }
-
- async function submitRoleUpdate(userId) {
+  async function submitRoleUpdate(userId) {
     const originalRoleStr = users.find(u => u.UserID === userId)?.Role || "";
     const originalRoles = originalRoleStr !== 'No Role Assigned' ? originalRoleStr.split(',').map(r => r.trim()) : [];
     
     const selectedRoles = editRoleValue; 
 
-    const sortedOriginal = [...originalRoles].sort().join(',');
-    const sortedNew = [...selectedRoles].sort().join(',');
+    const sortedOriginal = [...originalRoles].sort((a, b) => String(a).localeCompare(String(b))).join(',');
+    const sortedNew = [...selectedRoles].sort((a, b) => String(a).localeCompare(String(b))).join(',');
 
     if (sortedOriginal === sortedNew) {
       setEditingUserId(null);
@@ -193,7 +229,7 @@ async function submitPasswordReset(e) {
     }
     
     setErr("");
-    setIsUpdating(true); // START LOADING
+    setIsUpdating(true); 
     
     try {
       const res = await apiFetch(`/api/auth/users/${userId}/role`, { 
@@ -206,11 +242,11 @@ async function submitPasswordReset(e) {
       setUsers(u => u.map(x => x.UserID === userId ? { ...x, Role: updatedRoleString } : x));
       setSuccess(res.message || `Roles updated successfully.`);
       setTimeout(() => setSuccess(""), 4000);
-      setEditingUserId(null); // Close editor on success
+      setEditingUserId(null); 
     } catch (e) { 
       setErr(e.message); 
     } finally {
-      setIsUpdating(false); // STOP LOADING
+      setIsUpdating(false); 
     }
   }
 
@@ -218,7 +254,9 @@ async function submitPasswordReset(e) {
     e.preventDefault();
     setErr(""); setSuccess("");
     if (!newU.trim()) return setErr("Username required.");
-    if (!isLdapUser && !newP) return setErr("Password is required for local users.");
+    // Password is only required when we confirmed the user is NOT in AD
+    if (adCheck === AD_CHECK_LOCAL && !newP) return setErr("Password is required for local users.");
+    if (adCheck === AD_CHECK_CHECKING) return setErr("Still verifying AD status, please wait a moment.");
 
     setAdding(true);
     try {
@@ -227,6 +265,7 @@ async function submitPasswordReset(e) {
           body: JSON.stringify({ username: newU.trim(), role: newR, password: newP }) 
       });
       setNewU(""); setNewP(""); setNewR("Admin"); setAddOpen(false); fetchUsers();
+      setAdCheck(AD_CHECK_IDLE);
       setSuccess(res.message || "User added successfully.");
       setTimeout(() => setSuccess(""), 4000);
     } catch (e) { setErr(e.message); } finally { setAdding(false); }
@@ -234,22 +273,13 @@ async function submitPasswordReset(e) {
 
   const applyFilters = (row) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
+    let globalMatch = globalLogic !== "OR";
     for (let b of filters) {
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
         if (!c.value) continue;
-        validConds++; let condition = true;
-        const search = String(c.value).toLowerCase();
-        let field = "";
-        
-        if (c.column === "CreatedAt") field = fmtDate(row.CreatedAt).toLowerCase();
-        else field = String(row[c.column] || "").toLowerCase();
-
-        if (c.operator === "contains") condition = field.includes(search);
-        else if (c.operator === "=") condition = field === search;
-        else if (c.operator === "!=") condition = field !== search;
-        blockMatch = blockMatch && condition;
+        validConds++; 
+        blockMatch = blockMatch && evaluateFilterCondition(row, c);
       }
       if (validConds > 0) globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch);
     }
@@ -308,6 +338,181 @@ async function submitPasswordReset(e) {
     });
   };
 
+  // --- UI Helpers ---
+
+  const renderRoleColumn = (u) => {
+    const isProtected = [9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId;
+    if (isProtected) {
+      return <span className="muted-text text-11" style={{ paddingLeft: '8px' }}>Cannot change</span>;
+    }
+    if (editingUserId === u.UserID) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: '320px' }}>
+          <div style={{ flex: 1, position: 'relative', zIndex: 9999 }}>
+            <FancySelect 
+              options={roleOptions.map(opt => opt.value)} 
+              value={editRoleValue}                       
+              onChange={setEditRoleValue}                 
+              placeholder="— Select Roles —"
+              multiSelect={true}      
+              menuPlacement="bottom"                    
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+            <button 
+              className="btn pri small flex-row items-center justify-center" 
+              style={{ width: '30px', height: '30px', padding: 0 }} 
+              onClick={() => submitRoleUpdate(u.UserID)}
+              disabled={isUpdating}
+              title="Save"
+            >
+              {isUpdating ? <InlineSpinner size={14} variant="light" /> : "✓"}
+            </button>
+            <button 
+              className="btn outline sec small flex-row items-center justify-center" 
+              style={{ width: '30px', height: '30px', padding: 0 }} 
+              onClick={() => setEditingUserId(null)}
+              disabled={isUpdating}
+              title="Cancel"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button 
+        className="btn outline sec small" 
+        onClick={() => { 
+            setEditingUserId(u.UserID); 
+            const currentRoles = u.Role && u.Role !== 'No Role Assigned' ? u.Role.split(',').map(r => r.trim()) : [];
+            setEditRoleValue(currentRoles); 
+        }}
+      >
+        Change Role
+      </button>
+    );
+  };
+
+  const renderActionColumn = (u) => {
+    const isProtected = [9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId;
+    if (isProtected) {
+      return <span className="sub" style={{ paddingRight: '8px' }}>Protected</span>;
+    }
+    return (
+      <>
+        {/* Use IsLdap flag from backend — NOT the @ symbol heuristic */}
+        {u.IsLdap ? (
+          <button 
+            className="btn outline sec small" 
+            disabled 
+            style={{ opacity: 0.5, cursor: 'not-allowed' }} 
+            title="LDAP users must reset passwords via Active Directory"
+          >
+            LDAP Sync
+          </button>
+        ) : (
+            <button 
+              className="btn outline sec small" 
+              onClick={() => {
+                  setResetModal({ open: true, user: u.LoginName });
+                  setResetPass("");
+                  setResetOptLocal(true);
+                  setResetOptBF(true);
+              }} 
+              title="Reset Password"
+            >
+              Reset Pass
+            </button>
+        )}
+        <button className="btn-icon-sm" onClick={() => handleDelete(u.UserID)} title="Delete User">✕</button>
+      </>
+    );
+  };
+
+  // ── Add-user form: AD status hint ──────────────────────────────────────
+  const renderAdStatusHint = () => {
+    if (!newU.trim()) return null;
+    if (adCheck === AD_CHECK_CHECKING) {
+      return (
+        <div className="text-11 muted-text mt-4" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <InlineSpinner size={10} /> Checking Active Directory...
+        </div>
+      );
+    }
+    if (adCheck === AD_CHECK_AD) {
+      return (
+        <div className="text-11 mt-4" style={{ color: '#2e7d32' }}>
+          ✓ AD User verified. Will link to Active Directory.
+        </div>
+      );
+    }
+    if (adCheck === AD_CHECK_SVC_NOT_CFG) {
+      return (
+        <div className="text-11 mt-4" style={{ color: '#b45309' }}>
+          ⚠ LDAP service account not configured. Cannot verify AD status.
+        </div>
+      );
+    }
+    if (adCheck === AD_CHECK_LOCAL && newU.trim()) {
+      return (
+        <div className="text-11 muted-text mt-4">
+          Local User — not found in Active Directory. Password required.
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderTableContent = () => {
+    if (loading) {
+      return <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading users...</div>;
+    }
+    if (paginatedData.length === 0) {
+      return <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No users found.</div>;
+    }
+    return (
+      <table>
+        <thead className="kpi-th-sticky">
+          <tr>
+            {cols.find(c=>c.id==='UserID')?.show && <th className="cursor-pointer" onClick={() => handleSort('UserID')}>User ID{getSortIcon('UserID')}</th>}
+            {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Login Name{getSortIcon('LoginName')}</th>}
+            {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Current Role{getSortIcon('Role')}</th>}
+            {cols.find(c=>c.id==='UpdateRole')?.show && <th>Change Role</th>}
+            {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
+            <th className="right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {paginatedData.map(u => (
+            <tr key={u.UserID}>
+              {cols.find(c=>c.id==='UserID')?.show && <td><b>{u.UserID}</b></td>}
+              {cols.find(c=>c.id==='LoginName')?.show && <td>
+                <span>{u.LoginName}</span>
+                {u.IsLdap && <span className="pill soft ml-4" style={{ fontSize: '10px', marginLeft: '6px' }}>AD</span>}
+              </td>}
+              {cols.find(c=>c.id==='Role')?.show && <td>
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    {u.Role ? u.Role.split(',').map(r => r.trim()).map(r => (
+                        <span key={r} className={r === 'Admin' ? 'pill purple' : 'pill soft'}>{r}</span>
+                    )) : <span className="muted-text text-11">None</span>}
+                </div>
+              </td>}
+              {cols.find(c=>c.id==='UpdateRole')?.show && <td>{renderRoleColumn(u)}</td>}
+              {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(u.CreatedAt)}</td>}
+              <td className="right">
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                  {renderActionColumn(u)}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
+
   return (
     <div className="mgmt">
       <div className="topbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -333,7 +538,6 @@ async function submitPasswordReset(e) {
         {success && <div className="banner success">{success}</div>}
       </div>
 
-      {/* NEW RESET PASSWORD MODAL */}
       {resetModal.open && (
         <div className="section mb-20" style={{ border: '1px solid var(--primary)', background: '#f8fafc' }}>
           <div className="section-head" style={{ background: '#e2e8f0' }}>
@@ -393,13 +597,19 @@ async function submitPasswordReset(e) {
           <form onSubmit={handleAdd} className="flex-row gap-16 items-start p-20 wrap">
             <div className="field flex-1">
               <span className="label">BigFix / AD Username</span>
-              <input className="control" type="text" value={newU} onChange={e=>setNewU(e.target.value)} disabled={adding} placeholder="e.g. jdoe@domain.com or localadmin" />
-              <div className="text-11 muted-text mt-4" style={{ color: isLdapUser ? '#2e7d32' : 'var(--muted)' }}>
-                  {isLdapUser ? "✓ LDAP User detected. Will link to Active Directory." : "Local User detected. Password required."}
-              </div>
+              <input 
+                className="control" 
+                type="text" 
+                value={newU} 
+                onChange={e => { setNewU(e.target.value); }} 
+                disabled={adding} 
+                placeholder="e.g. jdoe@domain.com or localadmin" 
+              />
+              {renderAdStatusHint()}
             </div>
             
-            {!isLdapUser && newU.length > 0 && (
+            {/* Only show password field when confirmed as local user */}
+            {(adCheck === AD_CHECK_LOCAL || adCheck === AD_CHECK_SVC_NOT_CFG) && newU.trim().length > 0 && (
                 <div className="field flex-1">
                     <span className="label">Local Password</span>
                     <input className="control" type="password" value={newP} onChange={e=>setNewP(e.target.value)} disabled={adding} placeholder="Enter password" required />
@@ -417,14 +627,28 @@ async function submitPasswordReset(e) {
             </div>
             
             <div className="pb-0" style={{ display: 'flex', gap: '8px', marginTop: '22px' }}>
-              <button type="submit" className="btn pri small min-w-100" style={{ height: '32px' }} disabled={adding}>{adding?"Adding...":"Confirm"}</button>
-              <button type="button" className="btn ghost small min-w-100" style={{ height: '32px' }} onClick={()=>{setAddOpen(false); setNewU(""); setNewP(""); setNewR("Admin");}} disabled={adding}>Cancel</button>
+              <button 
+                type="submit" 
+                className="btn pri small min-w-100" 
+                style={{ height: '32px' }} 
+                disabled={adding || adCheck === AD_CHECK_CHECKING}
+              >
+                {adding ? "Adding..." : "Confirm"}
+              </button>
+              <button 
+                type="button" 
+                className="btn ghost small min-w-100" 
+                style={{ height: '32px' }} 
+                onClick={() => { setAddOpen(false); setNewU(""); setNewP(""); setNewR("Admin"); setAdCheck(AD_CHECK_IDLE); }} 
+                disabled={adding}
+              >
+                Cancel
+              </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* <div className="section flex-col flex-1 overflow-hidden" style={{ borderRadius: '8px', border: '1px solid var(--border)' }}> */}
       <div className="section flex-col flex-1" style={{ borderRadius: '8px', border: '1px solid var(--border)', overflow: 'visible' }}>
           {activeFilterCount > 0 && (
               <div className="p-0-20-20 mt-20">
@@ -434,10 +658,10 @@ async function submitPasswordReset(e) {
                         const validConds = b.conds.filter(c => c.value);
                         if (!validConds.length) return null;
                         return (
-                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                          <div key={`block-${bIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                             {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
                             {validConds.map((c, cIdx) => (
-                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                              <span key={`cond-${bIdx}-${cIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                                 {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
                                 <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                               </span>
@@ -468,7 +692,7 @@ async function submitPasswordReset(e) {
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 {cols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                             const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                         }} />
@@ -481,7 +705,7 @@ async function submitPasswordReset(e) {
                 </div>
                 <div className="dropdown" ref={expRef}>
                     <button className="btn outline small" onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                         &nbsp; Export
                     </button>
                     {showExpDrop && (
@@ -503,157 +727,8 @@ async function submitPasswordReset(e) {
             </div>
           </div>
 
-          {/* <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none' }}> */}
-          {/* <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'visible' }}> */}
-              <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'auto', paddingBottom: editingUserId ? '200px' : '0' }}>            
-                {loading ? (
-                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>Loading users...</div>
-            ) : paginatedData.length === 0 ? (
-                <div className="sub empty-state" style={{ padding: '40px', textAlign: 'center' }}>No users found.</div>
-            ) : (
-              <table>
-                {/* <thead className="kpi-th-sticky">
-                  <tr>
-                    {cols.find(c=>c.id==='UserID')?.show && <th className="cursor-pointer" onClick={() => handleSort('UserID')}>User ID{getSortIcon('UserID')}</th>}
-                    {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Login Name{getSortIcon('LoginName')}</th>}
-                    {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Role{getSortIcon('Role')}</th>}
-                    {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
-                    <th className="right">Actions</th>
-                  </tr>
-                </thead> */}
-                <thead className="kpi-th-sticky">
-                  <tr>
-                    {cols.find(c=>c.id==='UserID')?.show && <th className="cursor-pointer" onClick={() => handleSort('UserID')}>User ID{getSortIcon('UserID')}</th>}
-                    {cols.find(c=>c.id==='LoginName')?.show && <th className="cursor-pointer" onClick={() => handleSort('LoginName')}>Login Name{getSortIcon('LoginName')}</th>}
-                    
-                    {/* Updated Role Header */}
-                    {cols.find(c=>c.id==='Role')?.show && <th className="cursor-pointer" onClick={() => handleSort('Role')}>Current Role{getSortIcon('Role')}</th>}
-                    
-                    {/* New Change Role Header */}
-                    {cols.find(c=>c.id==='UpdateRole')?.show && <th>Change Role</th>}
-                    {cols.find(c=>c.id==='CreatedAt')?.show && <th className="cursor-pointer" onClick={() => handleSort('CreatedAt')}>Created At{getSortIcon('CreatedAt')}</th>}
-                    <th className="right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedData.map(u => (
-                    <tr key={u.UserID}>
-                      {cols.find(c=>c.id==='UserID')?.show && <td><b>{u.UserID}</b></td>}
-                      {cols.find(c=>c.id==='LoginName')?.show && <td>{u.LoginName}</td>}
-                      {/* {cols.find(c=>c.id==='Role')?.show && <td><span className={u.Role === 'Admin' ? 'pill purple' : 'pill soft'}>{u.Role}</span></td>} */}
-                      {/* 1. The original display column (Restored to just show the pill) */}
-                      {/* {cols.find(c=>c.id==='Role')?.show && <td>
-                          <span className={u.Role === 'Admin' ? 'pill purple' : 'pill soft'}>{u.Role}</span>
-                      </td>} */}
-                      {cols.find(c=>c.id==='Role')?.show && <td>
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                            {u.Role ? u.Role.split(',').map(r => r.trim()).map(r => (
-                                <span key={r} className={r === 'Admin' ? 'pill purple' : 'pill soft'}>{r}</span>
-                            )) : <span className="muted-text text-11">None</span>}
-                        </div>
-                    </td>}
-
-                      
-{/* 2. The interactive column using FancySelect for Multi-Select */}
-{cols.find(c=>c.id==='UpdateRole')?.show && <td>
-  {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
-    <span className="muted-text text-11" style={{ paddingLeft: '8px' }}>Cannot change</span>
-  ) : editingUserId === u.UserID ? (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: '320px' }}>
-      
-      {/* Use FancySelect exactly as you do in BaselineManager */}
-      <div style={{ flex: 1, position: 'relative', zIndex: 9999 }}>
-        <FancySelect 
-          options={roleOptions.map(opt => opt.value)} // Extract just the string values for the options
-          value={editRoleValue}                       // Pass the array of selected string values
-          onChange={setEditRoleValue}                 // Updates the array state
-          placeholder="— Select Roles —"
-          multiSelect={true}      
-          menuPlacement="bottom"                    // Enable checkbox mode!
-        />
-      </div>
-
-      {/* Save and Cancel Buttons */}
-      
-      <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-        <button 
-          className="btn pri small flex-row items-center justify-center" 
-          style={{ width: '30px', height: '30px', padding: 0 }} 
-          onClick={() => submitRoleUpdate(u.UserID)}
-          disabled={isUpdating}
-          title="Save"
-        >
-          {isUpdating ? <InlineSpinner size={14} variant="light" /> : "✓"}
-        </button>
-        <button 
-          className="btn outline sec small flex-row items-center justify-center" 
-          style={{ width: '30px', height: '30px', padding: 0 }} 
-          onClick={() => setEditingUserId(null)}
-          disabled={isUpdating}
-          title="Cancel"
-        >
-          ✕
-        </button>
-      </div>
-      
-    </div>
-  ) : (
-    <button 
-      className="btn outline sec small" 
-      onClick={() => { 
-          setEditingUserId(u.UserID); 
-          // Pre-fill the state with an array of the current role strings
-          const currentRoles = u.Role && u.Role !== 'No Role Assigned' ? u.Role.split(',').map(r => r.trim()) : [];
-          setEditRoleValue(currentRoles); 
-      }}
-    >
-      Change Role
-    </button>
-  )}
-</td>}
-                      {cols.find(c=>c.id==='CreatedAt')?.show && <td>{fmtDate(u.CreatedAt)}</td>}
-                 
-                      <td className="right">
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                          {[9002, 9003, 9004].includes(u.UserID) || u.UserID === currentUserId ? (
-                            <span className="sub" style={{ paddingRight: '8px' }}>Protected</span>
-                          ) : (
-                            <>
-                              {/* CHECK FOR LDAP USER HERE */}
-                              {u.LoginName.includes('@') ? (
-                                <button 
-                                  className="btn outline sec small" 
-                                  disabled 
-                                  style={{ opacity: 0.5, cursor: 'not-allowed' }} 
-                                  title="LDAP users must reset passwords via Active Directory"
-                                >
-                                  LDAP Sync
-                                </button>
-                              ) : (
-                                  <button 
-                                    className="btn outline sec small" 
-                                    onClick={() => {
-                                        setResetModal({ open: true, user: u.LoginName });
-                                        setResetPass("");
-                                        setResetOptLocal(true);
-                                        setResetOptBF(true);
-                                    }} 
-                                    title="Reset Password"
-                                  >
-                                    Reset Pass
-                                  </button>
-                              )}
-
-                              <button className="btn-icon-sm" onClick={() => handleDelete(u.UserID)} title="Delete User">✕</button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+          <div className="tableWrap flex-1 m-0 border-top border-bottom" style={{ borderRadius: 0, borderLeft: 'none', borderRight: 'none', overflow: 'auto', paddingBottom: editingUserId ? '200px' : '0' }}>            
+             {renderTableContent()}
           </div>
           
           <Paginator total={sortedData.length} rpp={rowsPerPage} setRpp={setRowsPerPage} page={currentPage} setPage={setCurrentPage} edgeToEdge={false} />
@@ -663,3 +738,8 @@ async function submitPasswordReset(e) {
     </div>
   );
 }
+
+UserManagement.propTypes = {
+  onClose: PropTypes.func.isRequired,
+  currentUserId: PropTypes.oneOfType([PropTypes.number, PropTypes.string])
+};

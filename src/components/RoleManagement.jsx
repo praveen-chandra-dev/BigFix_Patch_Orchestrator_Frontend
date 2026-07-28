@@ -1,17 +1,54 @@
 // src/components/RoleManagement.jsx
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect } from "react";
+import PropTypes from "prop-types";
 import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
 import { useToast } from "./common/CustomToast";
 import InlineSpinner from "./common/InlineSpinner";
 
-const API = window.env?.VITE_API_BASE || "http://localhost:5174";
+const API = globalThis.env?.VITE_API_BASE || "http://localhost:5174";
+
+const sortData = (dataArray, sortObj) => {
+    let sorted = [...dataArray];
+    if (sortObj.key) {
+        sorted.sort((a, b) => {
+            let aVal = String(a[sortObj.key] || "").toLowerCase();
+            let bVal = String(b[sortObj.key] || "").toLowerCase();
+            if (sortObj.key === 'BigFixRoleID') { aVal = Number(aVal); bVal = Number(bVal); }
+            if (aVal < bVal) return sortObj.direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortObj.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+    return sorted;
+};
+
+const getSortIcon = (sortObj, key) => {
+    if (sortObj.key !== key) return '↕';
+    return sortObj.direction === 'asc' ? '↑' : '↓';
+};
+
+const getSaveButtonText = (tab, roleId, isSaving) => {
+    if (isSaving) return "Saving...";
+    if (tab === 'DETAILS') return roleId ? "Save Details" : "Create Role";
+    return `Save ${tab.charAt(0) + tab.slice(1).toLowerCase()}`;
+};
+
+// COMPONENTS: Extracted to satisfy S6478 and S6774
+const SelectRow = ({ label, value, onChange, options, menuPlacement = 'bottom', disabled = false }) => (
+    <div className="field flex-row items-center m-0" style={{ gap: '16px', marginBottom: '12px' }}>
+        <label className="label m-0" style={{ width: '280px', fontWeight: 500 }}>{label}</label>
+        <FancySelect options={options} value={value} onChange={onChange} width="220px" menuPlacement={menuPlacement} disabled={disabled} />
+    </div>
+);
+SelectRow.propTypes = { label: PropTypes.string.isRequired, value: PropTypes.string, onChange: PropTypes.func.isRequired, options: PropTypes.array.isRequired, menuPlacement: PropTypes.string, disabled: PropTypes.bool };
 
 const CustomModal = ({ open, title, message, onConfirm, onCancel, confirmText = "OK", cancelText = "Cancel", hideCancel = false, busy = false }) => {
     if (!open) return null;
     return (
-        <div className="modal show" role="dialog" aria-modal="true" style={{ zIndex: 9999 }}>
-            <div className="box max-w-520" onClick={e => e.stopPropagation()}>
+
+<div className="modal show" role="dialog" aria-modal="true" style={{ zIndex: 9999 }}>
+            <div className="box max-w-520" onClick={e => e.stopPropagation()} role="presentation">
                 <h3 className="kpi-modal-title" style={{ color: 'var(--primary)', marginBottom: '12px' }}>{title}</h3>
                 <div className="sub kpi-confirm-sub" style={{ fontSize: '14px', lineHeight: '1.5', color: 'var(--text)' }}>{message}</div>
                 <div className="flex-row justify-end gap-8 mt-20">
@@ -24,6 +61,8 @@ const CustomModal = ({ open, title, message, onConfirm, onCancel, confirmText = 
         </div>
     );
 };
+CustomModal.propTypes = { open: PropTypes.bool.isRequired, title: PropTypes.string, message: PropTypes.string, onConfirm: PropTypes.func, onCancel: PropTypes.func, confirmText: PropTypes.string, cancelText: PropTypes.string, hideCancel: PropTypes.bool, busy: PropTypes.bool };
+
 
 export default function RoleManagement({ onClose, role, username }) {
   const { showToast } = useToast();
@@ -33,9 +72,11 @@ export default function RoleManagement({ onClose, role, username }) {
       const res = await fetch(`${API}${endpoint}`, { ...options, headers });
       const text = await res.text();
       let json;
-      try { json = JSON.parse(text); } catch (e) {
-          if (text.trim().startsWith('<')) throw new Error(`API Endpoint not found (${endpoint}). Did you restart the backend server?`);
-          throw new Error(`Invalid response from ${endpoint}: ${text.substring(0, 50)}...`);
+      try { 
+          json = JSON.parse(text); 
+      } catch (e) { // S2486 handled
+          if (text.trim().startsWith('<')) throw new Error(`API Endpoint not found (${endpoint}). Restart backend server. Details: ${e.message}`);
+          throw new Error(`Invalid response from ${endpoint}: ${text.substring(0, 50)}... Details: ${e.message}`);
       }
       if (!res.ok || !json.ok) throw new Error(json.error || "API Error");
       return json;
@@ -99,25 +140,25 @@ export default function RoleManagement({ onClose, role, username }) {
   const [roleSort, setRoleSort] = useState({ key: null, direction: 'asc' });
 
 
-useEffect(() => {
+  useEffect(() => {
       const handleNav = (e) => {
           const tab = String(e.detail).toUpperCase();
           if (tab === 'LIST') {
-              sessionStorage.setItem('role_mode', 'LIST'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
+              sessionStorage.setItem('role_mode', 'LIST'); globalThis.dispatchEvent(new CustomEvent('sync:roles_mode'));
               setView("LIST"); setEditingRoleId(null);
           } else {
               if (!editingRoleId && tab !== 'DETAILS') {
-                  setModalConfig({ open: true, title: "Action Required", message: "You must fill out and 'Save Details' to create the Role before assigning Computers, Sites, or Operators.", confirmText: "Got it", hideCancel: true, onConfirm: () => { setModalConfig({ open: false }); window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: "DETAILS" })); } });
+                  setModalConfig({ open: true, title: "Action Required", message: "You must fill out and 'Save Details' to create the Role before assigning Computers, Sites, or Operators.", confirmText: "Got it", hideCancel: true, onConfirm: () => { setModalConfig({ open: false }); globalThis.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: "DETAILS" })); } });
                   return;
               }
               setView("CREATE"); setActiveTab(tab);
           }
       };
-      window.addEventListener('nav:roles', handleNav);
-      return () => window.removeEventListener('nav:roles', handleNav);
+      globalThis.addEventListener('nav:roles', handleNav);
+      return () => globalThis.removeEventListener('nav:roles', handleNav);
   }, [editingRoleId]);
 
-  useEffect(() => { window.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: view === "LIST" ? "LIST" : activeTab })); }, [view, activeTab]);
+  useEffect(() => { globalThis.dispatchEvent(new CustomEvent('sync:roles_tab', { detail: view === "LIST" ? "LIST" : activeTab })); }, [view, activeTab]);
   useEffect(() => { loadRoles(); }, []);
   useEffect(() => { if (view === "CREATE" && !dataLoaded) { loadCreateData(); setDataLoaded(true); } }, [view, dataLoaded]);
 
@@ -144,15 +185,15 @@ useEffect(() => {
   }
 
 
-const handleOpenCreate = () => {
-      sessionStorage.setItem('role_mode', 'CREATE'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
+  const handleOpenCreate = () => {
+      sessionStorage.setItem('role_mode', 'CREATE'); globalThis.dispatchEvent(new CustomEvent('sync:roles_mode'));
       setEditingRoleId(null); setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); 
       setName(""); setDescription(""); setSelectedComputers([]); setSelectedSites([]); setSelectedOperators([]); 
       setExpandedNodes(new Set(["ROOT", "RETRIEVED"])); loadCreateData();
   };
 
   const handleEditRole = async (r) => {
-      sessionStorage.setItem('role_mode', 'EDIT'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
+      sessionStorage.setItem('role_mode', 'EDIT'); globalThis.dispatchEvent(new CustomEvent('sync:roles_mode'));
       setEditingRoleId(r.BigFixRoleID); setName(r.Name); setDescription(r.Description);
       setView("CREATE"); setActiveTab("DETAILS"); setSaving(false); setLoading(true);
       try {
@@ -167,7 +208,7 @@ const handleOpenCreate = () => {
   };
 
   const handleCancel = () => { 
-      sessionStorage.setItem('role_mode', 'LIST'); window.dispatchEvent(new CustomEvent('sync:roles_mode'));
+      sessionStorage.setItem('role_mode', 'LIST'); globalThis.dispatchEvent(new CustomEvent('sync:roles_mode'));
       setView("LIST"); setEditingRoleId(null); setSaving(false); 
   };
 
@@ -187,7 +228,7 @@ const handleOpenCreate = () => {
               try {
                   const res = await apiFetch(`/api/roles/property-values-filtered`, { method: 'POST', body: JSON.stringify({ targetProp, filters }) });
                   setPropertyValues(p => ({...p, [nodeKey]: res.values || []}));
-              } catch(e) { console.error(e); } finally { setLoadingStates(p => ({...p, [nodeKey]: false})); }
+              } catch(e) { console.warn("Error fetching properties:", e.message); } finally { setLoadingStates(p => ({...p, [nodeKey]: false})); }
           }
       }
   };
@@ -199,16 +240,16 @@ const handleOpenCreate = () => {
       } else setSelectedComputers([...selectedComputers, { property, value, resource }]);
   };
 
-  const handleOperatorToggle = async (username) => {
-      if (selectedOperators.includes(username)) {
-          setSelectedOperators(selectedOperators.filter(u => u !== username)); return;
+  const handleOperatorToggle = async (opUsername) => {
+      if (selectedOperators.includes(opUsername)) {
+          setSelectedOperators(selectedOperators.filter(u => u !== opUsername)); return;
       }
-      setSelectedOperators([...selectedOperators, username]);
-      if (operatorWarnings[username] === undefined) {
+      setSelectedOperators([...selectedOperators, opUsername]);
+      if (operatorWarnings[opUsername] === undefined) {
           try {
-              const res = await apiFetch(`/api/roles/check-operator/${encodeURIComponent(username)}`);
-              setOperatorWarnings(prev => ({...prev, [username]: res.exists }));
-          } catch(e) { setOperatorWarnings(prev => ({...prev, [username]: false })); }
+              const res = await apiFetch(`/api/roles/check-operator/${encodeURIComponent(opUsername)}`);
+              setOperatorWarnings(prev => ({...prev, [opUsername]: res.exists }));
+          } catch(e) { setOperatorWarnings(prev => ({...prev, [opUsername]: false })); }
       }
   };
 
@@ -216,45 +257,41 @@ const handleOpenCreate = () => {
     if (!selectedSites.some(s => s.url === site.url)) setSelectedSites([...selectedSites, { ...site, permission: 'Reader' }]);
   };
 
-const executeSave = async () => {
-    setSaving(true);
-    try {
-        if (activeTab === 'DETAILS') {
-            if (!editingRoleId) {
-                // 1. Initial Creation
-                const payload = { name, description, perms };
-                const res = await apiFetch("/api/roles/create", { method: "POST", body: JSON.stringify(payload) });
-                setEditingRoleId(res.roleId); 
-                
-                // NEW LOGIC: Switch mode to EDIT immediately to unlock the other tabs!
-                sessionStorage.setItem('role_mode', 'EDIT'); 
-                window.dispatchEvent(new CustomEvent('sync:roles_mode'));
-                
-                showToast("Role created! You can now assign Computers, Sites, and Operators.", "success");
-                loadRoles();
-                setSaving(false);
-                return; // Stop here so it doesn't redirect back to the List page
-                
-            } else {
-                // Updating Existing Details
-                const payload = { details: { name, description }, perms };
-                await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify(payload) });
-            }
-        } 
-        else if (activeTab === 'COMPUTERS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ computers: selectedComputers }) });
-        else if (activeTab === 'SITES') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
-        else if (activeTab === 'OPERATORS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
-        
-        // This redirect will now only happen when updating tabs of an already existing role
-        showToast("Role updated successfully! Redirecting...", "success");
-        setTimeout(() => { handleCancel(); loadRoles(); setSaving(false); }, 1200);
-    } catch (e) { 
-        showToast(e.message, "error"); 
-        setSaving(false); 
-    } finally { 
-        setModalConfig({ open: false }); 
-    }
-};
+  const executeSave = async () => {
+      setSaving(true);
+      try {
+          if (activeTab === 'DETAILS') {
+              if (!editingRoleId) {
+                  const payload = { name, description, perms };
+                  const res = await apiFetch("/api/roles/create", { method: "POST", body: JSON.stringify(payload) });
+                  setEditingRoleId(res.roleId); 
+                  
+                  sessionStorage.setItem('role_mode', 'EDIT'); 
+                  globalThis.dispatchEvent(new CustomEvent('sync:roles_mode'));
+                  
+                  showToast("Role created! You can now assign Computers, Sites, and Operators.", "success");
+                  loadRoles();
+                  setSaving(false);
+                  return; 
+                  
+              } else {
+                  const payload = { details: { name, description }, perms };
+                  await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify(payload) });
+              }
+          } 
+          else if (activeTab === 'COMPUTERS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ computers: selectedComputers }) });
+          else if (activeTab === 'SITES') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ sites: selectedSites }) });
+          else if (activeTab === 'OPERATORS') await apiFetch(`/api/roles/${editingRoleId}`, { method: "PUT", body: JSON.stringify({ operators: selectedOperators }) });
+          
+          showToast("Role updated successfully! Redirecting...", "success");
+          setTimeout(() => { handleCancel(); loadRoles(); setSaving(false); }, 1200);
+      } catch (e) { 
+          showToast(e.message, "error"); 
+          setSaving(false); 
+      } finally { 
+          setModalConfig({ open: false }); 
+      }
+  };
 
   const handleSaveInit = () => {
       if (activeTab === 'DETAILS' && !name) { showToast("Role Name is required.", "error"); return; }
@@ -269,15 +306,8 @@ const executeSave = async () => {
   };
 
   const renderDetails = () => {
-      const SelectRow = ({ label, value, onChange, options, menuPlacement = 'bottom', disabled = false }) => (
-          <div className="field flex-row items-center m-0" style={{ gap: '16px', marginBottom: '12px' }}>
-              <label className="label m-0" style={{ width: '280px', fontWeight: 500 }}>{label}</label>
-              <FancySelect options={options} value={value} onChange={onChange} width="220px" menuPlacement={menuPlacement} disabled={disabled} />
-          </div>
-      );
       const privOpts = [{value:"1", label:"Yes"}, {value:"0", label:"No"}];
       const boolOpts = [{value:"true", label:"Yes"}, {value:"false", label:"No"}];
-      
       const isMaster = perms.masterOperator === "1";
 
       return (
@@ -286,12 +316,14 @@ const executeSave = async () => {
                   <div className="section-head" style={{ padding: '16px 20px', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}><span className="title">Details</span></div>
                   <div style={{ padding: '20px', maxWidth: '700px' }}>
                       <div className="field">
-                          <label className="label">Name <span className="req">*</span></label>
-                          <input type="text" className="control" value={name} onChange={e=>setName(e.target.value)} disabled={saving} />
+                          {/* S6853 Fix: added htmlFor */}
+                          <label className="label" htmlFor="inpRoleName">Name <span className="req">*</span></label>
+                          <input id="inpRoleName" type="text" className="control" value={name} onChange={e=>setName(e.target.value)} disabled={saving} />
                       </div>
                       <div className="field m-0">
-                          <label className="label">Description</label>
-                          <textarea className="control" style={{ minHeight: '80px', resize: 'vertical' }} value={description} onChange={e=>setDescription(e.target.value)} disabled={saving} />
+                          {/* S6853 Fix: added htmlFor */}
+                          <label className="label" htmlFor="inpRoleDesc">Description</label>
+                          <textarea id="inpRoleDesc" className="control" style={{ minHeight: '80px', resize: 'vertical' }} value={description} onChange={e=>setDescription(e.target.value)} disabled={saving} />
                       </div>
                   </div>
               </div>
@@ -331,45 +363,52 @@ const executeSave = async () => {
       );
   };
 
+  const renderPropValue = (item, nodeKey, pName, resource, isCompName, currentFilters) => {
+      const valNodeKey = `${nodeKey}__VAL_${String(item.value).replaceAll(/\s+/g, '')}`;
+      const showExpand = item.count > 1 && !isCompName; 
+      const isValExpanded = expandedNodes.has(valNodeKey);
+      const nextFilters = [...currentFilters, { prop: pName, val: item.value }];
+      const isChecked = selectedComputers.some(c => c.property === pName && c.value === item.value);
+
+      return (
+          <div key={valNodeKey} style={{ marginBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button type="button" onClick={() => showExpand && toggleVal(valNodeKey)} style={{ cursor: showExpand ? 'pointer' : 'default', visibility: showExpand ? 'visible' : 'hidden', background: 'none', border: 'none', padding: 0, color: 'var(--primary)' }}>
+                      <span style={{ transform: isValExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', width: 12, display: 'inline-block' }}>▶</span>
+                  </button>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', margin: 0 }}>
+                      <input type="checkbox" className="custom-checkbox" checked={isChecked} onChange={() => handleCompCheck(pName, item.value, resource)} style={{ margin: 0 }} />
+                      <span style={{ whiteSpace: 'nowrap' }}>{isCompName ? '📄' : '📁'} {item.value} {isCompName ? '' : `(${item.count})`}</span>
+                  </label>
+              </div>
+              {showExpand && isValExpanded && <div style={{ paddingLeft: '20px', marginTop: '6px' }}>{renderPropList(nextFilters, valNodeKey)}</div>}
+          </div>
+      );
+  };
+
   const renderPropList = (currentFilters = [], parentNodeKey = "ROOT") => {
       const availableProps = properties.filter(p => !currentFilters.some(f => f.prop === p.name));
       return availableProps.map(pObj => {
           const pName = pObj.name;
           const resource = pObj.resource;
-          const nodeKey = `${parentNodeKey}__PROP_${pName.replace(/\s+/g, '')}`;
+          // S7781 Fix: replaceAll
+          const nodeKey = `${parentNodeKey}__PROP_${pName.replaceAll(/\s+/g, '')}`;
           const isExpanded = expandedNodes.has(nodeKey);
           const isCompName = pName === "Computer Name";
 
           return (
               <div key={nodeKey} style={{ marginBottom: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }} onClick={() => toggleProp(nodeKey, pName, currentFilters)}>
+                  {/* S6848 Fix: Button instead of div */}
+                  <button type="button" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }} onClick={() => toggleProp(nodeKey, pName, currentFilters)}>
                       <span style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', width: 12, display: 'inline-block', color: 'var(--primary)' }}>▶</span>
                       <span>📁</span> <span>By {pName}</span>
-                  </div>
+                  </button>
 
                   {isExpanded && (
                       <div style={{ paddingLeft: '20px', marginTop: '6px' }}>
                           {loadingStates[nodeKey] ? <span className="muted-text">Loading...</span> : 
                            propertyValues[nodeKey] && propertyValues[nodeKey].length > 0 ? (
-                              propertyValues[nodeKey].map(item => {
-                                  const valNodeKey = `${nodeKey}__VAL_${String(item.value).replace(/\s+/g, '')}`;
-                                  const showExpand = item.count > 1 && !isCompName; 
-                                  const isValExpanded = expandedNodes.has(valNodeKey);
-                                  const nextFilters = [...currentFilters, { prop: pName, val: item.value }];
-
-                                  return (
-                                      <div key={valNodeKey} style={{ marginBottom: '6px' }}>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                              <span onClick={() => showExpand && toggleVal(valNodeKey)} style={{ cursor: showExpand ? 'pointer' : 'default', visibility: showExpand ? 'visible' : 'hidden', transform: isValExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', width: 12, display: 'inline-block', color: 'var(--primary)' }}>▶</span>
-                                              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', margin: 0 }}>
-                                                  <input type="checkbox" className="custom-checkbox" checked={selectedComputers.some(c => c.property === pName && c.value === item.value)} onChange={() => handleCompCheck(pName, item.value, resource)} style={{ margin: 0 }} />
-                                                  <span style={{ whiteSpace: 'nowrap' }}>{isCompName ? '📄' : '📁'} {item.value} {isCompName ? '' : `(${item.count})`}</span>
-                                              </label>
-                                          </div>
-                                          {showExpand && isValExpanded && <div style={{ paddingLeft: '20px', marginTop: '6px' }}>{renderPropList(nextFilters, valNodeKey)}</div>}
-                                      </div>
-                                  )
-                              })
+                              propertyValues[nodeKey].map(item => renderPropValue(item, nodeKey, pName, resource, isCompName, currentFilters))
                            ) : <span className="muted-text">No values found.</span>}
                       </div>
                   )}
@@ -385,17 +424,17 @@ const executeSave = async () => {
                 <span className="title text-13">Assign management rights based on properties:</span>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px', fontSize: '13px', userSelect: 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', cursor: 'pointer' }} onClick={() => toggleVal("ROOT")}>
+                <button type="button" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }} onClick={() => toggleVal("ROOT")}>
                    <span style={{ transform: expandedNodes.has("ROOT") ? 'rotate(90deg)' : 'none', transition: '0.2s', width: 12, display: 'inline-block', fontWeight: 'bold', color: 'var(--primary)' }}>▶</span>
                    <span>🖥️</span> <span style={{ fontWeight: 600 }}>All Computers ({totalComps})</span>
-                </div>
+                </button>
                 
                 {expandedNodes.has("ROOT") && (
                     <div style={{ paddingLeft: '24px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', cursor: 'pointer' }} onClick={() => toggleVal("RETRIEVED")}>
+                        <button type="button" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }} onClick={() => toggleVal("RETRIEVED")}>
                            <span style={{ transform: expandedNodes.has("RETRIEVED") ? 'rotate(90deg)' : 'none', transition: '0.2s', width: 12, display: 'inline-block', fontWeight: 'bold', color: 'var(--primary)' }}>▶</span>
                            <span>📁</span> <span>By Retrieved Properties</span>
-                        </div>
+                        </button>
 
                         {expandedNodes.has("RETRIEVED") && (
                             <div style={{ paddingLeft: '24px' }}>
@@ -403,10 +442,11 @@ const executeSave = async () => {
                             </div>
                         )}
                         
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', marginBottom: '10px', cursor: 'pointer' }} onClick={() => toggleVal("GROUP")}>
+                        <button type="button" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', marginBottom: '10px', cursor: 'pointer', background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }} onClick={() => toggleVal("GROUP")}>
                            <span style={{ transform: expandedNodes.has("GROUP") ? 'rotate(90deg)' : 'none', transition: '0.2s', width: 12, display: 'inline-block', fontWeight: 'bold', color: 'var(--primary)' }}>▶</span>
                            <span>📁</span> <span>By Group</span>
-                        </div>
+                        </button>
+
                         {expandedNodes.has("GROUP") && (
                             <div style={{ paddingLeft: '24px', marginTop: '6px' }}>
                                 {patchSetuGroups.length === 0 ? <span className="muted-text">No groups created in Patch Setu yet.</span> :
@@ -459,30 +499,13 @@ const executeSave = async () => {
   );
 
   const renderSites = () => { 
-      let availSortable = [...availableSites];
-      if (availSiteSort.key) {
-          availSortable.sort((a,b) => {
-              let aVal = String(a[availSiteSort.key] || "").toLowerCase();
-              let bVal = String(b[availSiteSort.key] || "").toLowerCase();
-              if (aVal < bVal) return availSiteSort.direction === 'asc' ? -1 : 1;
-              if (aVal > bVal) return availSiteSort.direction === 'asc' ? 1 : -1;
-              return 0;
-          });
-      }
-      const availFiltered = availSortable.filter(s => s.name.toLowerCase().includes(availSiteSearch.toLowerCase()));
+      // S3776 Fix: Pre-sort the arrays outside of the render chain logic using pure helpers
+      const sortedAvail = sortData(availableSites, availSiteSort);
+      const availFiltered = sortedAvail.filter(s => s.name.toLowerCase().includes(availSiteSearch.toLowerCase()));
       const availPaginated = availFiltered.slice((availSitePage - 1) * availSiteRpp, availSitePage * availSiteRpp);
       
-      let selSortable = [...selectedSites];
-      if (selSiteSort.key) {
-          selSortable.sort((a,b) => {
-              let aVal = String(a[selSiteSort.key] || "").toLowerCase();
-              let bVal = String(b[selSiteSort.key] || "").toLowerCase();
-              if (aVal < bVal) return selSiteSort.direction === 'asc' ? -1 : 1;
-              if (aVal > bVal) return selSiteSort.direction === 'asc' ? 1 : -1;
-              return 0;
-          });
-      }
-      const selFiltered = selSortable.filter(s => s.name.toLowerCase().includes(selSiteSearch.toLowerCase()));
+      const sortedSel = sortData(selectedSites, selSiteSort);
+      const selFiltered = sortedSel.filter(s => s.name.toLowerCase().includes(selSiteSearch.toLowerCase()));
       const selPaginated = selFiltered.slice((selSitePage - 1) * selSiteRpp, selSitePage * selSiteRpp);
 
       const handleASort = (k) => setAvailSiteSort(p => ({ key: k, direction: p.key===k && p.direction==='asc' ? 'desc' : 'asc' }));
@@ -499,8 +522,8 @@ const executeSave = async () => {
                     <table style={{ margin: 0 }}>
                        <thead className="kpi-th-sticky">
                          <tr>
-                           <th className="w-50p cursor-pointer" onClick={() => handleASort('name')}>Site Name {availSiteSort.key === 'name' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                           <th className="w-30p cursor-pointer" onClick={() => handleASort('type')}>Type {availSiteSort.key === 'type' ? (availSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                           <th className="w-50p cursor-pointer" onClick={() => handleASort('name')} onKeyDown={(e) => e.key === 'Enter' && handleASort('name')} tabIndex={0}>Site Name {getSortIcon(availSiteSort, 'name')}</th>
+                           <th className="w-30p cursor-pointer" onClick={() => handleASort('type')} onKeyDown={(e) => e.key === 'Enter' && handleASort('type')} tabIndex={0}>Type {getSortIcon(availSiteSort, 'type')}</th>
                            <th className="text-center w-20p">Action</th>
                          </tr>
                        </thead>
@@ -512,7 +535,7 @@ const executeSave = async () => {
                                <td style={{ opacity: isSelected ? 0.5 : 1 }} className="fw-500">{s.name}</td>
                                <td style={{ opacity: isSelected ? 0.5 : 1 }}>{s.type}</td>
                                <td className="text-center">
-                                 <button className="btn outline small" onClick={() => handleSiteAdd(s)} disabled={isSelected}>{isSelected ? 'Added' : 'Add'}</button>
+                                 <button type="button" className="btn outline small" onClick={() => handleSiteAdd(s)} disabled={isSelected}>{isSelected ? 'Added' : 'Add'}</button>
                                </td>
                              </tr>
                            );
@@ -532,8 +555,8 @@ const executeSave = async () => {
                     <table style={{ margin: 0 }}>
                         <thead className="kpi-th-sticky">
                             <tr>
-                              <th className="w-45p cursor-pointer" onClick={() => handleSSort('name')}>Site Name {selSiteSort.key === 'name' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
-                              <th className="w-25p cursor-pointer" onClick={() => handleSSort('type')}>Type {selSiteSort.key === 'type' ? (selSiteSort.direction==='asc'?'↑':'↓') : '↕'}</th>
+                              <th className="w-45p cursor-pointer" onClick={() => handleSSort('name')} onKeyDown={(e) => e.key === 'Enter' && handleSSort('name')} tabIndex={0}>Site Name {getSortIcon(selSiteSort, 'name')}</th>
+                              <th className="w-25p cursor-pointer" onClick={() => handleSSort('type')} onKeyDown={(e) => e.key === 'Enter' && handleSSort('type')} tabIndex={0}>Type {getSortIcon(selSiteSort, 'type')}</th>
                               <th className="w-20p">Permissions</th>
                               <th className="w-10p text-center"></th>
                             </tr>
@@ -555,7 +578,7 @@ const executeSave = async () => {
                                        )}
                                     </td>
                                     <td className="text-center">
-                                       <button 
+                                       <button type="button"
                                           className="btn outline small flex-row items-center justify-center" 
                                           style={{ width: 28, height: 28, padding: 0, color: 'var(--muted)', transition: '0.2s', margin: '0 auto' }}
                                           onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
@@ -606,7 +629,7 @@ const executeSave = async () => {
                                <td className="fw-600" style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userName}</td>
                                <td>{operatorWarnings[userName] === true ? <span className="text-success fw-600">✓ Verified</span> : operatorWarnings[userName] === false ? <span className="text-danger fw-600">⚠ Not Found</span> : '—'}</td>
                                <td className="text-center">
-                                 <button className="btn outline small" onClick={() => handleOperatorToggle(userName)}>Add</button>
+                                 <button type="button" className="btn outline small" onClick={() => handleOperatorToggle(userName)}>Add</button>
                                </td>
                              </tr>
                            );
@@ -637,7 +660,7 @@ const executeSave = async () => {
                                     <td className="fw-600" style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userName}</td>
                                     <td>{operatorWarnings[userName] === true ? <span className="text-success fw-600">✓ Verified</span> : operatorWarnings[userName] === false ? <span className="text-danger fw-600">⚠ Not Found</span> : '—'}</td>
                                     <td className="text-center">
-                                       <button 
+                                       <button type="button"
                                           className="btn-icon cancel" 
                                           onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'red'; e.currentTarget.style.color = 'red'; }}
                                           onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)'; }}
@@ -682,16 +705,14 @@ const executeSave = async () => {
                     </h2>
                 </div>
                 <div className="right flex-row gap-12 items-center">
-                   <button onClick={handleCancel} className="btn outline sec">Cancel</button>
-                   <button onClick={handleSaveInit} disabled={saving} className="btn pri min-w-140 flex-row items-center justify-center gap-8">
+                   <button type="button" onClick={handleCancel} className="btn outline sec">Cancel</button>
+                   <button type="button" onClick={handleSaveInit} disabled={saving} className="btn pri min-w-140 flex-row items-center justify-center gap-8">
                        {saving ? (
                           <>
                              <InlineSpinner size={16} variant="light" />
                              <span>Saving...</span>
                           </>
-                       ) : (
-                          activeTab === 'DETAILS' ? (editingRoleId ? "Save Details" : "Create Role") : `Save ${activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}`
-                       )}
+                       ) : getSaveButtonText(activeTab, editingRoleId, saving)}
                    </button>
                 </div>
             </div>
@@ -706,21 +727,10 @@ const executeSave = async () => {
       );
   }
 
-  let sortedListRoles = [...roles];
-  if (roleSort.key) {
-      sortedListRoles.sort((a,b) => {
-          let aVal = a[roleSort.key] || "";
-          let bVal = b[roleSort.key] || "";
-          if(roleSort.key === 'BigFixRoleID') { aVal = Number(aVal); bVal = Number(bVal); }
-          if (aVal < bVal) return roleSort.direction === 'asc' ? -1 : 1;
-          if (aVal > bVal) return roleSort.direction === 'asc' ? 1 : -1;
-          return 0;
-      });
-  }
+  const sortedListRoles = sortData(roles, roleSort);
   const paginatedRoles = sortedListRoles.slice((rolePage - 1) * roleRpp, rolePage * roleRpp);
   
   const handleRoleSort = (key) => setRoleSort(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
-  const getRoleSortIcon = (key) => roleSort.key !== key ? <span className="muted-text ml-6">↕</span> : <span className="ml-6">{roleSort.direction === 'asc' ? '↑' : '↓'}</span>;
 
   return (
     <div className="mgmtenv" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -729,10 +739,10 @@ const executeSave = async () => {
             <h2 className="m-0">BigFix Role Management</h2>
         </div>
         <div className="right flex-row gap-12 items-center">
-            <button className="iconbtn" onClick={loadRoles} title="Refresh Roles" disabled={loading}>
+            <button type="button" className="iconbtn" onClick={loadRoles} title="Refresh Roles" disabled={loading}>
                 {loading ? <InlineSpinner size={16} /> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>}
             </button>
-            <button onClick={handleOpenCreate} className="btn pri">+ Create Role</button>
+            <button type="button" onClick={handleOpenCreate} className="btn pri">+ Create Role</button>
         </div>
       </div>
       
@@ -749,21 +759,23 @@ const executeSave = async () => {
                     <table style={{ margin: 0 }}>
                         <thead className="kpi-th-sticky">
                             <tr>
-                                <th className="cursor-pointer w-10p" onClick={() => handleRoleSort('BigFixRoleID')}>Role ID {getRoleSortIcon('BigFixRoleID')}</th>
-                                <th className="cursor-pointer w-45p" onClick={() => handleRoleSort('Name')}>BigFix Role Name {getRoleSortIcon('Name')}</th>
-                                <th className="cursor-pointer w-40p" onClick={() => handleRoleSort('Description')}>Description {getRoleSortIcon('Description')}</th>
+                                <th className="cursor-pointer w-10p" onClick={() => handleRoleSort('BigFixRoleID')} onKeyDown={(e) => e.key === 'Enter' && handleRoleSort('BigFixRoleID')} tabIndex={0}>Role ID {getSortIcon(roleSort, 'BigFixRoleID')}</th>
+                                <th className="cursor-pointer w-45p" onClick={() => handleRoleSort('Name')} onKeyDown={(e) => e.key === 'Enter' && handleRoleSort('Name')} tabIndex={0}>BigFix Role Name {getSortIcon(roleSort, 'Name')}</th>
+                                <th className="cursor-pointer w-40p" onClick={() => handleRoleSort('Description')} onKeyDown={(e) => e.key === 'Enter' && handleRoleSort('Description')} tabIndex={0}>Description {getSortIcon(roleSort, 'Description')}</th>
                                 <th className="text-center w-5p">Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {paginatedRoles.length === 0 ? (<tr><td colSpan={4} className="text-center text-muted">No roles found.</td></tr>) : paginatedRoles.map(r => (
-                                <tr key={r.RoleID} onClick={() => handleEditRole(r)} className="cursor-pointer">
-                                    <td className="muted-text font-mono">{r.BigFixRoleID || 'Pending'}</td>
-                                    <td className="fw-600" style={{ color: 'var(--primary)' }}>{r.Name}</td>
-                                    <td>{r.Description || "—"}</td>
-                                    <td className="text-center"><button className="btn outline small" onClick={(e) => { e.stopPropagation(); handleEditRole(r); }}>Edit</button></td>
-                                </tr>
-                            ))}
+                            {paginatedRoles.length === 0 ? (<tr><td colSpan={4} className="text-center text-muted">No roles found.</td></tr>) : paginatedRoles.map(r => {
+                                return (
+                                    <tr key={r.BigFixRoleID || r.Name} onClick={() => handleEditRole(r)} onKeyDown={(e) => e.key === 'Enter' && handleEditRole(r)} tabIndex={0} className="cursor-pointer">
+                                        <td className="muted-text font-mono">{r.BigFixRoleID || 'Pending'}</td>
+                                        <td className="fw-600" style={{ color: 'var(--primary)' }}>{r.Name}</td>
+                                        <td>{r.Description || "—"}</td>
+                                        <td className="text-center"><button type="button" className="btn outline small" onClick={(e) => { e.stopPropagation(); handleEditRole(r); }}>Edit</button></td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -774,3 +786,4 @@ const executeSave = async () => {
     </div>
   );
 }
+RoleManagement.propTypes = { onClose: PropTypes.func, role: PropTypes.string, username: PropTypes.string };

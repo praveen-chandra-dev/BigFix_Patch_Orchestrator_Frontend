@@ -1,15 +1,15 @@
 // src/components/FlowCard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import FilterDrawer from "./FilterDrawer";
 import { performExport } from "../utils/exportUtils";
 import { evaluateCondition } from "../utils/filterUtils";
-import FancySelect from "./common/FancySelect";
 import Paginator from "./common/Paginator";
 
 export const Stage = {
   HISTORY: "HISTORY", CONFIG: "CONFIG", SANDBOX: "SANDBOX", PILOT: "PILOT", PRODUCTION: "PRODUCTION", FinalResult: "FINAL RESULT",
 };
-const API = window.env.VITE_API_BASE;
+const API = globalThis.env?.VITE_API_BASE || "";
 
 async function getJson(url, signal) {
   const r = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal });
@@ -99,8 +99,7 @@ export default function DeploymentHistory() {
 
   const applyFilters = (item) => {
     if (!filters.length) return true;
-    let globalMatch = globalLogic === "OR" ? false : true;
-    let validBlocks = 0;
+    let globalMatch = globalLogic !== "OR";
     for (let b of filters) {
       let blockMatch = true; let validConds = 0;
       for (let c of b.conds) {
@@ -109,9 +108,9 @@ export default function DeploymentHistory() {
         const field = String(item[c.column] || "");
         blockMatch = blockMatch && evaluateCondition(field, c.operator, c.value, c.column);
       }
-      if (validConds > 0) { validBlocks++; globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch); }
+      if (validConds > 0) { globalMatch = globalLogic === "OR" ? (globalMatch || blockMatch) : (globalMatch && blockMatch); }
     }
-    return validBlocks === 0 ? true : globalMatch;
+    return globalMatch;
   };
 
   const filteredItems = useMemo(() => items.filter(applyFilters), [items, filters, globalLogic]);
@@ -147,6 +146,7 @@ export default function DeploymentHistory() {
     if (scope === 'page') dataToExport = paginatedItems;
     else if (scope === 'filtered') dataToExport = sortedItems;
     else dataToExport = items;
+
     performExport(dataToExport, cols, exportFormat, "deployment_history");
   };
 
@@ -166,12 +166,12 @@ export default function DeploymentHistory() {
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <div style={{ position: 'relative' }}>
-            <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+            <button type="button" className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
             </button>
             {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
           </div>
-          <button className="iconbtn" onClick={fetchDeployments} title="Refresh Data">
+          <button type="button" className="iconbtn" onClick={fetchDeployments} title="Refresh Data">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
           </button>
         </div>
@@ -186,10 +186,10 @@ export default function DeploymentHistory() {
                 const validConds = b.conds.filter(c => c.value);
                 if (!validConds.length) return null;
                 return (
-                  <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                  <div key={`filter-b-${bIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                     {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
                     {validConds.map((c, cIdx) => (
-                      <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                      <span key={`filter-c-${cIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                         {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
                         <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                       </span>
@@ -198,7 +198,7 @@ export default function DeploymentHistory() {
                 );
               })}
             </div>
-            <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+            <button type="button" className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
           </div>
         )}
 
@@ -206,7 +206,7 @@ export default function DeploymentHistory() {
             <div className="grid-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}></div>
             <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
                 <div className="dropdown" ref={colRef}>
-                    <button className="btn outline sec small" style={{ height: '36px' }} onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                    <button type="button" className="btn outline sec small" style={{ height: '36px' }} onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
                         &nbsp; Columns
                     </button>
@@ -214,7 +214,7 @@ export default function DeploymentHistory() {
                         <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 {cols.map((col, i) => (
-                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                    <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                         <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                             const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                         }} />
@@ -227,7 +227,7 @@ export default function DeploymentHistory() {
                 </div>
 
                 <div className="dropdown" ref={expRef}>
-                    <button className="btn outline small" style={{ height: '36px' }} onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                    <button type="button" className="btn outline small" style={{ height: '36px' }} onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
                         &nbsp; Export
                     </button>
@@ -236,14 +236,14 @@ export default function DeploymentHistory() {
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                 <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                                 <button type="button" key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                                ))}
                             </div>
                             <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                             <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                            <button className="item" onClick={() => handleExport('page')}>Current Page</button>
-                            <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
-                            <button className="item" onClick={() => handleExport('all')}>All Data</button>
+                            <button type="button" className="item" onClick={() => handleExport('page')}>Current Page</button>
+                            <button type="button" className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                            <button type="button" className="item" onClick={() => handleExport('all')}>All Data</button>
                         </div>
                     )}
                 </div>
@@ -259,12 +259,12 @@ export default function DeploymentHistory() {
                 <table>
                     <thead className="kpi-th-sticky">
                         <tr>
-                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')}>Action Name{getSortIcon('name')}</th>}
-                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')}>ID{getSortIcon('id')}</th>}
-                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')}>State{getSortIcon('state')}</th>}
-                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')}>Issued{getSortIcon('issued')}</th>}
-                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')}>Stopped{getSortIcon('stopped')}</th>}
-                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')}>Issuer{getSortIcon('issuer')}</th>}
+                            {cols.find(c=>c.id==='name')?.show && <th className="cursor-pointer" onClick={() => handleSort('name')} onKeyDown={(e) => e.key === 'Enter' && handleSort('name')} tabIndex={0}>Action Name{getSortIcon('name')}</th>}
+                            {cols.find(c=>c.id==='id')?.show && <th className="cursor-pointer" onClick={() => handleSort('id')} onKeyDown={(e) => e.key === 'Enter' && handleSort('id')} tabIndex={0}>ID{getSortIcon('id')}</th>}
+                            {cols.find(c=>c.id==='state')?.show && <th className="cursor-pointer" onClick={() => handleSort('state')} onKeyDown={(e) => e.key === 'Enter' && handleSort('state')} tabIndex={0}>State{getSortIcon('state')}</th>}
+                            {cols.find(c=>c.id==='issued')?.show && <th className="cursor-pointer" onClick={() => handleSort('issued')} onKeyDown={(e) => e.key === 'Enter' && handleSort('issued')} tabIndex={0}>Issued{getSortIcon('issued')}</th>}
+                            {cols.find(c=>c.id==='stopped')?.show && <th className="cursor-pointer" onClick={() => handleSort('stopped')} onKeyDown={(e) => e.key === 'Enter' && handleSort('stopped')} tabIndex={0}>Stopped{getSortIcon('stopped')}</th>}
+                            {cols.find(c=>c.id==='issuer')?.show && <th className="cursor-pointer" onClick={() => handleSort('issuer')} onKeyDown={(e) => e.key === 'Enter' && handleSort('issuer')} tabIndex={0}>Issuer{getSortIcon('issuer')}</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -273,7 +273,7 @@ export default function DeploymentHistory() {
                         ) : (
                             paginatedItems.map((it) => (
                                 <tr key={it.id} onClick={() => openActionDetails(it)} className="cursor-pointer">
-                                    {cols.find(c=>c.id==='name')?.show && <td><button className="name-link" onClick={(e) => { e.stopPropagation(); openActionDetails(it); }} style={{ display: 'inline-flex', alignItems: 'center', textAlign: 'left', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, font: 'inherit' }}>{it.name}</button></td>}
+                                    {cols.find(c=>c.id==='name')?.show && <td><button type="button" className="name-link" onClick={(e) => { e.stopPropagation(); openActionDetails(it); }} style={{ display: 'inline-flex', alignItems: 'center', textAlign: 'left', background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, font: 'inherit' }}>{it.name}</button></td>}
                                     {cols.find(c=>c.id==='id')?.show && <td style={{ fontFamily: 'monospace', color: 'var(--muted)' }}>{it.id}</td>}
                                     {cols.find(c=>c.id==='state')?.show && <td><span className={`pill ${it.state.toLowerCase() === 'open' ? 'green' : 'amber'}`}>{it.state}</span></td>}
                                     {cols.find(c=>c.id==='issued')?.show && <td>{it.issued}</td>}
@@ -336,7 +336,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
 
     const applyFilters = (row) => {
       if (!filters.length) return true;
-      let globalMatch = globalLogic === "OR" ? false : true;
+      let globalMatch = globalLogic !== "OR";
       let validBlocks = 0;
       for (let b of filters) {
         let blockMatch = true; let validConds = 0;
@@ -386,6 +386,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
         if (scope === 'page') dataToExport = paginated;
         else if (scope === 'filtered') dataToExport = sorted;
         else dataToExport = rows;
+
         performExport(dataToExport, cols, exportFormat, "action_results");
     };
 
@@ -396,7 +397,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
             
             <div style={{ position: 'sticky', top: '-24px', background: 'var(--panel)', zIndex: 20, padding: '24px 32px 16px', borderBottom: '1px solid var(--border)', margin: '-24px -32px 24px -32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <button className="iconbtn" onClick={onBack} title="Back to History" style={{ background: "var(--panel)" }}>
+                    <button type="button" className="iconbtn" onClick={onBack} title="Back to History" style={{ background: "var(--panel)" }}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>
                     </button>
                     <div>
@@ -406,12 +407,12 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                     <div style={{ position: 'relative' }}>
-                        <button className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
+                        <button type="button" className="iconbtn" onClick={() => setDrawerOpen(true)} title="Filter Data">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
                         </button>
                         {activeFilterCount > 0 && <span className="pill blue" style={{ position: 'absolute', top: -8, right: -8, padding: '2px 6px', fontSize: 10 }}>{activeFilterCount}</span>}
                     </div>
-                    <button className="iconbtn" onClick={onRefresh} title="Refresh Data">
+                    <button type="button" className="iconbtn" onClick={onRefresh} title="Refresh Data">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                     </button>
                 </div>
@@ -426,10 +427,10 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                         const validConds = b.conds.filter(c => c.value);
                         if (!validConds.length) return null;
                         return (
-                          <div key={bIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                          <div key={`filter-b-${bIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                             {bIdx > 0 && <span style={{fontSize:12, fontWeight:600, color:'var(--primary)', margin:'0 8px'}}>{globalLogic}</span>}
                             {validConds.map((c, cIdx) => (
-                              <span key={cIdx} style={{display:'inline-flex', alignItems:'center'}}>
+                              <span key={`filter-c-${cIdx}`} style={{display:'inline-flex', alignItems:'center'}}>
                                 {cIdx > 0 && <span style={{fontSize:11, fontWeight:600, color:'var(--primary)', margin:'0 6px'}}>AND</span>}
                                 <span className="filter-tag"><strong>{propertyOptions.find(o => o.value === c.column)?.label || c.column}</strong>&nbsp;{c.operator}&nbsp;<strong>'{c.value}'</strong></span>
                               </span>
@@ -438,7 +439,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                         );
                       })}
                     </div>
-                    <button className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
+                    <button type="button" className="btn outline" onClick={() => setFilters([])}>Clear Filters</button>
                   </div>
                 )}
 
@@ -446,7 +447,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                     <div className="grid-toolbar-left"></div>
                     <div className="grid-toolbar-right" style={{ display: 'flex', gap: '12px' }}>
                         <div className="dropdown" ref={colRef}>
-                            <button className="btn outline sec small" style={{ height: '36px' }} onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
+                            <button type="button" className="btn outline sec small" style={{ height: '36px' }} onClick={() => { setShowColDrop(!showColDrop); setShowExpDrop(false); }}>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
                                 &nbsp; Columns
                             </button>
@@ -454,7 +455,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                                 <div className="dropdown-menu show" style={{ minWidth: "220px", padding: "12px", right: 0 }}>
                                     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                         {cols.map((col, i) => (
-                                            <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
+                                            <label key={col.id} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", padding: "6px 12px", borderRadius: "4px", transition: "0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onFocus={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"} onBlur={e=>e.currentTarget.style.background="transparent"}>
                                                 <input type="checkbox" className="custom-checkbox" checked={col.show} onChange={e => {
                                                     const next = [...cols]; next[i].show = e.target.checked; setCols(next);
                                                 }} />
@@ -467,7 +468,7 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                         </div>
 
                         <div className="dropdown" ref={expRef}>
-                            <button className="btn outline small" style={{ height: '36px' }} onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
+                            <button type="button" className="btn outline small" style={{ height: '36px' }} onClick={() => { setShowExpDrop(!showExpDrop); setShowColDrop(false); }}>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
                                 &nbsp; Export
                             </button>
@@ -476,14 +477,14 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
                                     <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Format</div>
                                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
                                        {['CSV', 'PDF', 'HTML', 'TXT', 'JSON', 'XML'].map(fmt => (
-                                         <button key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
+                                         <button type="button" key={fmt} className={`btn small ${exportFormat === fmt ? 'pri' : 'outline'}`} style={{ fontSize: '11px', height: '32px', padding: 0 }} onClick={(e) => { e.stopPropagation(); setExportFormat(fmt); }}>{fmt}</button>
                                        ))}
                                     </div>
                                     <div style={{ height: '1px', background: 'var(--border)', marginBottom: '16px' }}></div>
                                     <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", marginBottom: "12px", letterSpacing: '0.05em' }}>Scope</div>
-                                    <button className="item" onClick={() => handleExport('page')}>Current Page</button>
-                                    <button className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
-                                    <button className="item" onClick={() => handleExport('all')}>All Data</button>
+                                    <button type="button" className="item" onClick={() => handleExport('page')}>Current Page</button>
+                                    <button type="button" className="item" onClick={() => handleExport('filtered')}>Filtered Data</button>
+                                    <button type="button" className="item" onClick={() => handleExport('all')}>All Data</button>
                                 </div>
                             )}
                         </div>
@@ -492,43 +493,19 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
 
                 <div className="tableWrap border-top" style={{ flex: 1, overflow: 'auto', margin: '0 -32px', width: 'calc(100% + 64px)', borderLeft: 'none', borderRight: 'none', borderRadius: 0 }}>
                     <table>
-                        {/* <thead className="kpi-th-sticky">
-                            <tr>
-                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server')}</th>}
-                                {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status')}</th>}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {paginated.length === 0 ? (
-                                <tr><td colSpan="2" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No results found.</td></tr>
-                            ) : (
-                                paginated.map((r, i) => (
-                                    <tr key={i}>
-                                        {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 500 }}>{r.server}</td>}
-                                        {cols.find(c=>c.id==='status')?.show && (
-                                          <td>
-                                            <span className={getBadgeClass(r.status)}>
-                                              {classify(r.status)}
-                                            </span>
-                                          </td>
-                                        )}
-                                    </tr>
-                                ))
-                            )}
-                        </tbody> */}
                         <thead className="kpi-th-sticky">
                             <tr>
-                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')}>Server {getSortIcon('server')}</th>}
-                                {cols.find(c=>c.id==='patch')?.show && <th className="cursor-pointer" onClick={() => handleSort('patch')}>Patch Name {getSortIcon('patch')}</th>}
-                                {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')}>Status {getSortIcon('status')}</th>}
+                                {cols.find(c=>c.id==='server')?.show && <th className="cursor-pointer" onClick={() => handleSort('server')} onKeyDown={(e) => e.key === 'Enter' && handleSort('server')} tabIndex={0}>Server {getSortIcon('server')}</th>}
+                                {cols.find(c=>c.id==='patch')?.show && <th className="cursor-pointer" onClick={() => handleSort('patch')} onKeyDown={(e) => e.key === 'Enter' && handleSort('patch')} tabIndex={0}>Patch Name {getSortIcon('patch')}</th>}
+                                {cols.find(c=>c.id==='status')?.show && <th className="cursor-pointer" onClick={() => handleSort('status')} onKeyDown={(e) => e.key === 'Enter' && handleSort('status')} tabIndex={0}>Status {getSortIcon('status')}</th>}
                             </tr>
                         </thead>
                         <tbody>
-                            {paginated.length === 0 ? (
+                            {loading ? (<tr><td colSpan="3" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading results...</td></tr>) : error ? (<tr><td colSpan="3" style={{ padding: "40px", textAlign: "center", color: "var(--danger)" }}>{error}</td></tr>) : paginated.length === 0 ? (
                                 <tr><td colSpan="3" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No results found.</td></tr>
                             ) : (
                                 paginated.map((r, i) => (
-                                    <tr key={i}>
+                                    <tr key={r.server || i}>
                                         {cols.find(c=>c.id==='server')?.show && <td style={{ fontWeight: 500 }}>{r.server}</td>}
                                         {cols.find(c=>c.id==='patch')?.show && <td>{r.patch}</td>}
                                         {cols.find(c=>c.id==='status')?.show && (
@@ -552,3 +529,13 @@ function ActionResultsView({ action, loading, rows, error, onBack, onRefresh, la
         </div>
     );
 }
+
+ActionResultsView.propTypes = {
+  action: PropTypes.object.isRequired,
+  loading: PropTypes.bool,
+  rows: PropTypes.array.isRequired,
+  error: PropTypes.string,
+  onBack: PropTypes.func.isRequired,
+  onRefresh: PropTypes.func.isRequired,
+  lastUpdated: PropTypes.string.isRequired
+};

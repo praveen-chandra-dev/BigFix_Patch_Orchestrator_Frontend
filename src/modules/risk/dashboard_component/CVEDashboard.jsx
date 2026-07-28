@@ -1,8 +1,66 @@
 // src/modules/risk/dashboard_component/CVEDashboard.jsx
 import { useEffect, useState, useMemo, useRef } from "react";
+import PropTypes from "prop-types";
 import api from "../../../api/api";
 import { performExport } from "../../../utils/exportUtils";
 import Paginator from "../../../components/common/Paginator";
+
+// Extracted to drastically reduce Cognitive Complexity (S3776)
+const evaluateCveCondition = (cve, c, baselinePatchMap) => {
+  const search = String(c.value).toLowerCase().trim();
+
+  if (c.column === "cve_id") {
+    const field = (cve.cve_id || "").toLowerCase().trim();
+    if (c.operator === "contains") return field.includes(search);
+    if (c.operator === "=") return field === search;
+    if (c.operator === "!=") return field !== search;
+    return true;
+  }
+
+  if (c.column === "patch_id") {
+    return (cve.patchObjects || []).some((p) =>
+      String(p.patch_id).toLowerCase().includes(search),
+    );
+  }
+
+  if (c.column === "baseline_name") {
+    const baselinePatchSet = baselinePatchMap[search];
+    if (baselinePatchSet) {
+      return (cve.patchObjects || []).some((patch) =>
+        baselinePatchSet.has(
+          String(patch.patch_id)
+            .replace(/^BIGFIX-/i, "")
+            .trim(),
+        ),
+      );
+    }
+    return false; // S7735: Positive logic fallback
+  }
+
+  if (c.column === "device_name") {
+    if (c.operator === "=") {
+      return (cve.devices || []).some(
+        (x) => String(x).toLowerCase() === search,
+      );
+    }
+    return (cve.devices || []).some((x) =>
+      String(x).toLowerCase().includes(search),
+    );
+  }
+
+  if (c.column === "kev") {
+    return (cve.kev || "").toLowerCase() === search;
+  }
+
+  if (c.column === "severity") {
+    const field = (cve.severity || "").toLowerCase();
+    if (c.operator === "contains") return field.includes(search);
+    if (c.operator === "=") return field === search;
+    if (c.operator === "!=") return field !== search;
+  }
+
+  return true;
+};
 
 export default function CVEDashboard({
   patches = [],
@@ -13,8 +71,6 @@ export default function CVEDashboard({
   onDataLoaded,
   navigate,
 }) {
-  const [modalData, setModalData] = useState(null);
-
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
@@ -103,117 +159,44 @@ export default function CVEDashboard({
 
   useEffect(() => {
     onDataLoaded?.();
-  }, []);
-
-  const patchDeviceMap = useMemo(() => {
-    const map = {};
-    patches.forEach((p) => {
-      const patchId = p.patch_id ? p.patch_id.replace(/^BIGFIX-/i, "") : "";
-      const key = `${patchId}-${p.site_name}`;
-      map[key] = p.applicable_computers || [];
-    });
-    return map;
-  }, [patches]);
-
-  const baselinePatchMapMemo = baselinePatchMap; // use the state directly
+  }, [onDataLoaded]);
 
   const cveExposure = useMemo(() => {
-    const map = {};
-
-    cves.forEach((c) => {
-      const patchId = c.patch_id ? c.patch_id.replace(/^BIGFIX-/i, "") : "";
-      const site = c.site_name || "";
-
-      const cveKey = `${c.cve_id}-${patchId}-${site}`;
-      const patchKey = `${patchId}-${site}`;
-
-      if (!map[cveKey]) {
-        map[cveKey] = {
-          cve_id: c.cve_id,
-          patches: new Set(),
-          devices: new Set(),
-          severity: (c.cvss_severity || "UNKNOWN").toUpperCase(),
-          kev: c.is_kev ? "YES" : "NO",
-        };
-      }
-
-      //  FIXED: use cveKey (NOT cve_id)
-      map[cveKey].patches.add(patchKey);
-
-      const devices = patchDeviceMap[patchKey] || [];
-      devices.forEach((d) => {
-        map[cveKey].devices.add(d);
-      });
-    });
-
-    return Object.values(map).map((c) => ({
+    return (cves || []).map((c) => ({
       cve_id: c.cve_id,
-      severity: c.severity,
-      kev: c.kev,
-      patch_count: c.patches.size,
-      device_count: c.devices.size,
-      patches: Array.from(c.patches),
-      devices: Array.from(c.devices),
+
+      severity: c.severity || c.cvss_severity || "UNKNOWN",
+
+      kev: c.kev || "NO",
+
+      patch_count: c.patch_count || 0,
+
+      device_count: c.device_count || 0,
+
+      patchObjects: c.patchObjects || [],
+
+      devices: c.devices || [],
     }));
-  }, [cves, patchDeviceMap]);
+  }, [cves]);
 
   const applyFilters = (cve) => {
     if (!parentFilters.length) return true;
-    let globalMatch = parentLogic === "OR" ? false : true;
-    for (let b of parentFilters) {
+    let globalMatch = parentLogic !== "OR"; // S6644: Simplified boolean literal
+    for (const b of parentFilters) {
       let blockMatch = true;
       let validConds = 0;
-      for (let c of b.conds) {
+      for (const c of b.conds) {
         if (!c.value) continue;
         validConds++;
-        let condition = true;
-        const search = String(c.value).toLowerCase().trim();
-        if (c.column === "cve_id") {
-          const field = (cve.cve_id || "").toLowerCase().trim();
-          if (c.operator === "contains") condition = field.includes(search);
-          else if (c.operator === "=") condition = field === search;
-          else if (c.operator === "!=") condition = field !== search;
-        } else if (c.column === "patch_id") {
-          condition = (cve.patches || []).some((x) =>
-            x.toLowerCase().includes(search),
-          );
-        } else if (c.column === "baseline_name") {
-          const baselineName = search;
-          const baselinePatchSet = baselinePatchMap[baselineName];
-          if (!baselinePatchSet) {
-            condition = false;
-          } else {
-            // Check if any of the CVE's patches are in the baseline
-            condition = (cve.patches || []).some((patchId) =>
-              baselinePatchSet.has(patchId),
-            );
-          }
-        } else if (c.column === "device_name") {
-          if (c.operator === "=") {
-            condition = (cve.devices || []).some(
-              (x) => String(x).toLowerCase() === search,
-            );
-          } else {
-            condition = (cve.devices || []).some((x) =>
-              String(x).toLowerCase().includes(search),
-            );
-          }
-        } else if (c.column === "kev") {
-          condition = cve.kev.toLowerCase() === search;
-        } else if (c.column === "severity") {
-          const field = (cve.severity || "").toLowerCase();
-
-          if (c.operator === "contains") condition = field.includes(search);
-          else if (c.operator === "=") condition = field === search;
-          else if (c.operator === "!=") condition = field !== search;
-        }
+        const condition = evaluateCveCondition(cve, c, baselinePatchMap);
         blockMatch = blockMatch && condition;
       }
-      if (validConds > 0)
+      if (validConds > 0) {
         globalMatch =
           parentLogic === "OR"
             ? globalMatch || blockMatch
             : globalMatch && blockMatch;
+      }
     }
     return globalMatch;
   };
@@ -262,10 +245,16 @@ export default function CVEDashboard({
 
   const handleExport = (scope) => {
     setShowExpDrop(false);
+
     let dataToExport = [];
-    if (scope === "page") dataToExport = paginatedCVEs;
-    else if (scope === "filtered") dataToExport = sortedCVEs;
-    else dataToExport = cveExposure;
+
+    if (scope === "page") {
+      dataToExport = paginatedCVEs;
+    } else if (scope === "filtered") {
+      dataToExport = sortedCVEs;
+    } else {
+      dataToExport = cveExposure;
+    }
 
     performExport(
       dataToExport,
@@ -273,8 +262,14 @@ export default function CVEDashboard({
       exportFormat,
       "cve_exposure",
       (cve, c) => {
-        if (c === "patch_count") return cve.patches.join(",");
-        if (c === "device_count") return cve.devices.join(",");
+        if (c === "patch_count") {
+          return (cve.patchObjects || []).map((p) => p.patch_id).join(",");
+        }
+
+        if (c === "device_count") {
+          return (cve.devices || []).join(",");
+        }
+
         return cve[c];
       },
     );
@@ -296,6 +291,7 @@ export default function CVEDashboard({
         >
           <div className="dropdown" ref={colRef}>
             <button
+              type="button"
               className="btn outline sec small"
               onClick={() => {
                 setShowColDrop(!showColDrop);
@@ -325,8 +321,11 @@ export default function CVEDashboard({
                 style={{ minWidth: "220px", padding: "12px", right: 0 }}
               >
                 {cols.map((col, i) => (
-                  <label
+                  <div
                     key={col.id}
+                    role="menuitemcheckbox"
+                    aria-checked={col.show}
+                    tabIndex={0}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -334,28 +333,54 @@ export default function CVEDashboard({
                       cursor: "pointer",
                       padding: "6px 12px",
                       borderRadius: "4px",
+                      transition: "0.2s",
+                    }}
+                    onMouseOver={(e) =>
+                      (e.currentTarget.style.background = "#f8fafc")
+                    }
+                    onFocus={(e) =>
+                      (e.currentTarget.style.background = "#f8fafc")
+                    }
+                    onMouseOut={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                    onBlur={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const next = [...cols];
+                      next[i].show = !next[i].show;
+                      setCols(next);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const next = [...cols];
+                        next[i].show = !next[i].show;
+                        setCols(next);
+                      }
                     }}
                   >
                     <input
                       type="checkbox"
-                      className="custom-checkbox"
+                      className="custom-checkbox no-events"
                       checked={col.show}
-                      onChange={(e) => {
-                        const next = [...cols];
-                        next[i].show = e.target.checked;
-                        setCols(next);
-                      }}
+                      readOnly
+                      tabIndex={-1}
                     />
                     <span style={{ fontSize: "13px", fontWeight: 500 }}>
                       {col.label}
                     </span>
-                  </label>
+                  </div>
                 ))}
               </div>
             )}
           </div>
           <div className="dropdown" ref={expRef}>
             <button
+              type="button"
               className="btn outline small"
               onClick={() => {
                 setShowExpDrop(!showExpDrop);
@@ -402,6 +427,7 @@ export default function CVEDashboard({
                   {["CSV", "PDF", "HTML", "TXT", "JSON", "XML"].map((fmt) => (
                     <button
                       key={fmt}
+                      type="button"
                       className={`btn small ${exportFormat === fmt ? "pri" : "outline"}`}
                       style={{ fontSize: "11px", height: "32px", padding: 0 }}
                       onClick={(e) => {
@@ -432,16 +458,25 @@ export default function CVEDashboard({
                 >
                   Scope
                 </div>
-                <button className="item" onClick={() => handleExport("page")}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("page")}
+                >
                   Current Page
                 </button>
                 <button
+                  type="button"
                   className="item"
                   onClick={() => handleExport("filtered")}
                 >
                   Filtered Data
                 </button>
-                <button className="item" onClick={() => handleExport("all")}>
+                <button
+                  type="button"
+                  className="item"
+                  onClick={() => handleExport("all")}
+                >
                   All Data
                 </button>
               </div>
@@ -462,13 +497,17 @@ export default function CVEDashboard({
           borderRadius: 0,
         }}
       >
-        <table style={{ width: "100%" }}>
+        <table style={{ tableLayout: "fixed", width: "100%" }}>
           <thead className="kpi-th-sticky">
             <tr>
               {cols.find((c) => c.id === "cve_id")?.show && (
                 <th
                   className="cursor-pointer"
                   onClick={() => handleSort("cve_id")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("cve_id");
+                  }}
                 >
                   CVE{getSortIcon("cve_id")}
                 </th>
@@ -478,6 +517,10 @@ export default function CVEDashboard({
                 <th
                   className="cursor-pointer"
                   onClick={() => handleSort("severity")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("severity");
+                  }}
                 >
                   Severity{getSortIcon("severity")}
                 </th>
@@ -488,6 +531,10 @@ export default function CVEDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("kev")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("kev");
+                  }}
                 >
                   KEV{getSortIcon("kev")}
                 </th>
@@ -497,6 +544,10 @@ export default function CVEDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("patch_count")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("patch_count");
+                  }}
                 >
                   Patches{getSortIcon("patch_count")}
                 </th>
@@ -506,6 +557,10 @@ export default function CVEDashboard({
                   className="cursor-pointer"
                   style={{ textAlign: "center" }}
                   onClick={() => handleSort("device_count")}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSort("device_count");
+                  }}
                 >
                   Devices{getSortIcon("device_count")}
                 </th>
@@ -554,8 +609,16 @@ export default function CVEDashboard({
                   )}
                   {cols.find((c) => c.id === "patch_count")?.show && (
                     <td style={{ textAlign: "center" }}>
-                      <span
+                      <button
+                        type="button"
                         className="cell-link"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          cursor: "pointer",
+                        }}
                         onClick={() =>
                           navigate(
                             "patch",
@@ -564,8 +627,8 @@ export default function CVEDashboard({
                                 conds: [
                                   {
                                     column: "cve_id",
-                                    operator: "contains",
-                                    value: c.cve_id,
+                                    operator: "=",
+                                    value: String(c.cve_id).trim(),
                                   },
                                 ],
                               },
@@ -575,13 +638,21 @@ export default function CVEDashboard({
                         }
                       >
                         {c.patch_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                   {cols.find((c) => c.id === "device_count")?.show && (
                     <td style={{ textAlign: "center" }}>
-                      <span
+                      <button
+                        type="button"
                         className="cell-link"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          padding: 0,
+                          font: "inherit",
+                          cursor: "pointer",
+                        }}
                         onClick={() =>
                           navigate(
                             "computer",
@@ -601,7 +672,7 @@ export default function CVEDashboard({
                         }
                       >
                         {c.device_count}
-                      </span>
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -622,3 +693,13 @@ export default function CVEDashboard({
     </div>
   );
 }
+
+CVEDashboard.propTypes = {
+  patches: PropTypes.array,
+  cves: PropTypes.array,
+  baselines: PropTypes.array,
+  parentFilters: PropTypes.array,
+  parentLogic: PropTypes.string,
+  onDataLoaded: PropTypes.func,
+  navigate: PropTypes.func.isRequired,
+};

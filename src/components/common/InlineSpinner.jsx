@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 
 export default function InlineSpinner({
   size = 16,
@@ -34,3 +35,8 @@ export default function InlineSpinner({
     />
   );
 }
+
+InlineSpinner.propTypes = {
+  size: PropTypes.number,
+  variant: PropTypes.string
+};
