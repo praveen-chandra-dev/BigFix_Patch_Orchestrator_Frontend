@@ -559,6 +559,18 @@ export default function PilotDecisionEngine({
       inProduction && !localPilotEnabled && !localSandboxEnabled;
     const skippedPrevForPilot = !inProduction && !localSandboxEnabled;
     if (skippedPrevForProduction || skippedPrevForPilot) return;
+
+    const prevStageDoneByProp = inProduction
+      ? localPilotEnabled
+        ? pilotDone
+        : sbxDone
+      : sbxDone;
+    if (prevStageDoneByProp) {
+      setIsPrevStageComplete(true);
+      setEnableEvaluate(true);
+      return;
+    }
+
     if (prevActionsInfo.length === 0) return;
     if (isPrevStageComplete) {
       setEnableEvaluate(true);
@@ -593,6 +605,8 @@ export default function PilotDecisionEngine({
     readOnly,
     localPilotEnabled,
     localSandboxEnabled,
+    sbxDone,
+    pilotDone,
   ]);
 
   useEffect(() => {
@@ -792,7 +806,7 @@ export default function PilotDecisionEngine({
   }
 
   async function handleTriggerClick() {
-    const canProceed = enableTriggerPilot || (isEUC && isGateSatisfied);
+    const canProceed = enableTriggerPilot || (isEUC && isGateSatisfied) || (isFirstStage && isGateSatisfied);
     if (!canProceed || busy || readOnly || validDeployments.length === 0)
       return;
 
@@ -812,7 +826,7 @@ export default function PilotDecisionEngine({
   }
 
   async function executeTrigger() {
-    const canProceed = enableTriggerPilot || (isEUC && isGateSatisfied);
+    const canProceed = enableTriggerPilot || (isEUC && isGateSatisfied) || (isFirstStage && isGateSatisfied);
     if (!canProceed || busy || readOnly || validDeployments.length === 0)
       return;
 

@@ -274,13 +274,26 @@ export default function Configuration({
           </p>
         </div>
         {(sandboxLocked || pilotLocked) && (
-          <div className="badge locked">
-            {" "}
-            {sandboxLocked && pilotLocked
-              ? "Sandbox & Pilot Locked"
-              : sandboxLocked
-                ? "Sandbox Locked"
-                : "Pilot Locked"}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div className="badge locked">
+              {" "}
+              {sandboxLocked && pilotLocked
+                ? "Sandbox & Pilot Locked — reset workflow to change"
+                : sandboxLocked
+                  ? "Sandbox Locked — reset workflow to change"
+                  : "Pilot Locked — reset workflow to change"}
+            </div>
+            <button
+              type="button"
+              className="btn outline dan small"
+              onClick={() =>
+                globalThis.dispatchEvent(
+                  new CustomEvent("orchestrator:resetAll"),
+                )
+              }
+            >
+              Reset Workflow
+            </button>
           </div>
         )}
       </div>
