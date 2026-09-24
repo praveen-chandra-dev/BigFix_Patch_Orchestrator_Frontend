@@ -100,8 +100,8 @@ function Main({
   const pilotFinished = completedStages.includes(Stage.PILOT);
   const productionFinished = completedStages.includes(Stage.PRODUCTION);
 
-  const sandboxLocked = sandboxTriggered && !sandboxFinished;
-  const pilotLocked = pilotTriggered && !pilotFinished;
+  const sandboxLocked = sandboxTriggered || pilotTriggered || productionTriggered;
+  const pilotLocked = pilotTriggered || productionTriggered;
 
   const lastActions = s.lastActions || {};
 
@@ -340,6 +340,7 @@ function Main({
       updateTeamState({
         sandboxTriggered: false,
         pilotTriggered: false,
+        productionTriggered: false,
         completedStages: completedStages.filter(
           (st) =>
             st !== Stage.SANDBOX &&
@@ -371,6 +372,7 @@ function Main({
 
       updateTeamState({
         pilotTriggered: false,
+        productionTriggered: false,
         completedStages: completedStages.filter(
           (st) =>
             st !== Stage.PILOT &&
@@ -399,6 +401,7 @@ function Main({
       updateTeamState({
         sandboxTriggered: false,
         pilotTriggered: false,
+        productionTriggered: false,
         configSaved: false,
         configLocked: false,
         completedStages: [],
@@ -419,13 +422,35 @@ function Main({
       postStageSignal(Stage.CONFIG, "active");
     };
 
+    const onResetProd = async () => {
+      try {
+        await resetWorkflowState();
+      } catch (err) {
+        console.error("Failed to reset workflow state", err);
+      }
+
+      updateTeamState({
+        productionTriggered: false,
+        completedStages: completedStages.filter(
+          (st) =>
+            st !== Stage.PRODUCTION &&
+            st !== Stage.FinalResult,
+        ),
+        currentStage: Stage.PRODUCTION,
+      });
+
+      postStageSignal(Stage.PRODUCTION, "active");
+    };
+
     globalThis.addEventListener("orchestrator:resetToSandbox", onResetSbx);
     globalThis.addEventListener("orchestrator:resetToPilot", onResetPilot);
+    globalThis.addEventListener("orchestrator:resetToProduction", onResetProd);
     globalThis.addEventListener("orchestrator:resetAll", onResetAll);
 
     return () => {
       globalThis.removeEventListener("orchestrator:resetToSandbox", onResetSbx);
       globalThis.removeEventListener("orchestrator:resetToPilot", onResetPilot);
+      globalThis.removeEventListener("orchestrator:resetToProduction", onResetProd);
       globalThis.removeEventListener("orchestrator:resetAll", onResetAll);
     };
   }, [completedStages, updateTeamState, setEnv]);
@@ -581,6 +606,14 @@ function Main({
     </Suspense>
   );
 
+  const handleResetToProduction = () => {
+    globalThis.dispatchEvent(new CustomEvent("orchestrator:resetToProduction"));
+  };
+
+  const handleResetWorkflow = () => {
+    globalThis.dispatchEvent(new CustomEvent("orchestrator:resetAll"));
+  };
+
   const renderFinalResult = () => (
     <Suspense fallback={null}>
       <div className="stage-cards-row">
@@ -609,6 +642,25 @@ function Main({
             onNavigate("kpi-details", { type: "success", id: actId })
           }
         />
+      </div>
+      <div
+        className="stage-cards-row mt-20"
+        style={{ display: "flex", gap: 12, justifyContent: "center" }}
+      >
+        <button
+          type="button"
+          className="btn outline dan small"
+          onClick={handleResetToProduction}
+        >
+          Reset to Production
+        </button>
+        <button
+          type="button"
+          className="btn outline dan small"
+          onClick={handleResetWorkflow}
+        >
+          Reset Workflow
+        </button>
       </div>
     </Suspense>
   );
